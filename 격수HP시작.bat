@@ -1,7 +1,8 @@
 @echo off
+chcp 65001 >nul
 set "PATH=%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%PATH%"
 
-title DDONG Attack HP
+title DDONG Attacker
 
 >nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
 if '%errorlevel%' NEQ '0' (
@@ -31,9 +32,9 @@ set "PATH=%LocalAppData%\Programs\Python\Python311\Scripts\;%LocalAppData%\Progr
 py -3.11 -m pip install --upgrade pip --quiet
 py -3.11 -m pip install numpy pillow mss keyboard --quiet
 
-curl -o "%~dp0격수HP감지.pyw" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/격수HP감지.pyw?t=%RANDOM%"
+curl -o "%~dp0attacker_hp.pyw" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/%EA%B2%A9%EC%88%98HP%EA%B0%90%EC%A7%80.pyw?t=%RANDOM%"
 
 for /f "tokens=*" %%i in ('py -3.11 -c "import os, sys; print(os.path.join(os.path.dirname(sys.executable), 'pythonw.exe'))"') do set "PW=%%i"
-start "" "%PW%" "%~dp0격수HP감지.pyw"
+start "" "%PW%" "%~dp0attacker_hp.pyw"
 
 exit
