@@ -367,7 +367,9 @@ def test_ocr_now():
     
     try:
         with mss.MSS() as sct:
-            raw = sct.grab(test_roi)
+            roi_dict = {"left": test_roi[0], "top": test_roi[1],
+                        "width": test_roi[2], "height": test_roi[3]}
+            raw = sct.grab(roi_dict)
             current = np.array(raw, dtype=np.uint8)[:, :, :3]
             
             # 캡처한 이미지 저장 (디버그용)
@@ -461,8 +463,10 @@ def buff_loop():
     # ── baseline 초기화 ──
     sct = mss.MSS()
     baseline = None
+    roi_dict = {"left": CHAT_ROI[0], "top": CHAT_ROI[1],
+                "width": CHAT_ROI[2], "height": CHAT_ROI[3]}
     try:
-        raw = sct.grab(CHAT_ROI)
+        raw = sct.grab(roi_dict)
         baseline = np.array(raw, dtype=np.uint8)[:, :, :3]
     except:
         pass
@@ -478,7 +482,7 @@ def buff_loop():
 
             # 화면 캡처
             try:
-                raw = sct.grab(CHAT_ROI)
+                raw = sct.grab(roi_dict)
                 current = np.array(raw, dtype=np.uint8)[:, :, :3]
             except:
                 continue
