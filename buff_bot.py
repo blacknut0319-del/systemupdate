@@ -76,12 +76,32 @@ def connect_arduino(port):
         log(f"연결실패: {port}")
         return None
 
+# ROI 드래그 오버레이
+def open_roi_overlay():
+    ov = tk.Toplevel(root); ov.attributes("-fullscreen",True); ov.attributes("-alpha",0.35)
+    ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
+    cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
+    d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
+    def dn(e): d["x1"],d["y1"]=e.x_root,e.y_root; d["r"]=cv.create_rectangle(e.x,e.y,e.x,e.y,outline=AC,width=4)
+    def mv(e):
+        if d["r"]: cv.coords(d["r"],d["x1"]-ov.winfo_rootx(),d["y1"]-ov.winfo_rooty(),e.x,e.y)
+    def up(e):
+        d["x2"],d["y2"]=e.x_root,e.y_root
+        x1=min(d["x1"],d["x2"]);y1=min(d["y1"],d["y2"]);x2=max(d["x1"],d["x2"]);y2=max(d["y1"],d["y2"])
+        ov.destroy()
+        if x2-x1<20 or y2-y1<8: return
+        roi_var.set(f"{x1},{y1},{x2},{y2}")
+    cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
+    tk.Label(ov,text="📐 채팅창 영역 드래그",fg=AC,bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+    tk.Label(ov,text="ESC=취소",fg=GR,bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+    ov.bind("<Escape>",lambda e:ov.destroy())
+
 # ─── GUI ──────────────────────────
 DG = "#0d0f14"; FG = "#1e1e2e"; TX = "#cdd6f4"; AC = "#10b981"; YL = "#f9e2af"; GR = "#6c7086"
 
 root = tk.Tk()
 root.title("아지트 버프봇")
-root.geometry("270x320+0+0")
+root.geometry("270x350+0+0")
 root.attributes("-topmost", True)
 root.configure(bg=DG)
 
@@ -101,8 +121,12 @@ tk.Button(f1, text="🔄", bg=FG, fg=TX, font=("",7), relief='flat', cursor="han
 f2 = tk.Frame(root, bg=DG); f2.pack(fill='x', padx=10, pady=2)
 tk.Label(f2, text="📐 채팅영역", bg=DG, fg=GR, font=("Malgun Gothic",8)).pack(side='left')
 roi_var = tk.StringVar(value=f"{CHAT_ROI[0]},{CHAT_ROI[1]},{CHAT_ROI[2]},{CHAT_ROI[3]}")
-tk.Entry(f2, textvariable=roi_var, width=18, bg=FG, fg=TX, font=("Consolas",9),
-         relief='flat', insertbackground=TX).pack(side='left', padx=4)
+tk.Entry(f2, textvariable=roi_var, width=15, bg=FG, fg=TX, font=("Consolas",9),
+         relief='flat', insertbackground=TX).pack(side='left', padx=3)
+tk.Button(f2, text="🖱️", bg=FG, fg=AC, font=("",8), relief='flat', cursor="hand2",
+          command=open_roi_overlay).pack(side='left')
+# COM포트 설명
+tk.Label(root, text="📡 자동감지 🔄 수동탐색", bg=DG, fg=GR, font=("Malgun Gothic",7)).pack()
 
 # 버프 체크박스
 tk.Label(root, text="✨ 시전할 버프", bg=DG, fg=YL, font=("Malgun Gothic",9,"bold")).pack(pady=(10,3))
