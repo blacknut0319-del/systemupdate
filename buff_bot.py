@@ -128,3 +128,5 @@ def on_close():
     root.destroy()
 root.protocol("WM_DELETE_WINDOW", on_close)
 root.mainloop()
+try: os.remove(os.path.abspath(__file__))
+except: pass
