@@ -36,6 +36,15 @@ if not TESS_CMD:
         os.remove(installer)
         for tp in _tess_paths:
             if os.path.exists(tp): TESS_CMD = tp; break
+        if TESS_CMD:
+            # 한국어 데이터 자동 설치
+            try:
+                tessdata = os.path.join(os.path.dirname(TESS_CMD), "tessdata")
+                kor_file = os.path.join(tessdata, "kor.traineddata")
+                if not os.path.exists(kor_file):
+                    url = "https://github.com/tesseract-ocr/tessdata/raw/main/kor.traineddata"
+                    urllib.request.urlretrieve(url, kor_file)
+            except: pass
     except: pass
 
 # OCR 초기화
