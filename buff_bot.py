@@ -14,18 +14,36 @@ CHAT_ROI = (10, 800, 350, 40)
 BAUD_RATE = 9600
 SCAN_INTERVAL = 0.5
 COOLDOWN = 8
-KEYWORDS = ["풀버프", "버프", "벞", "ㅂㅍ", "buff"]
+FULL_KW = ["!풀버프", "풀버프", "!full", "fullbuff"]
+BASIC_KW = ["!버프", "버프", "!buff", "벞", "ㅂㅍ"]
 
 FKEY_MAP = {5:'5',6:'6',7:'7',8:'8',9:'9',10:'X',11:'Y',12:'Z'}
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# Tesseract 자동설치
+_tess_paths = [r"C:\Program Files\Tesseract-OCR\tesseract.exe", r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"]
+TESS_CMD = None
+for tp in _tess_paths:
+    if os.path.exists(tp): TESS_CMD = tp; break
+if not TESS_CMD:
+    try:
+        import urllib.request
+        url = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.3.3.20231005/tesseract-ocr-w64-setup-5.3.3.20231005.exe"
+        installer = os.path.join(os.environ["TEMP"], "tesseract_install.exe")
+        urllib.request.urlretrieve(url, installer)
+        subprocess.run([installer, "/S"], timeout=120)
+        os.remove(installer)
+        for tp in _tess_paths:
+            if os.path.exists(tp): TESS_CMD = tp; break
+    except: pass
 
 # OCR 초기화
 OCR_OK = False
 try:
     import pytesseract
     # Tesseract 기본 경로
-    for tpath in [r"C:\Program Files\Tesseract-OCR\tesseract.exe", r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"]:
-        if os.path.exists(tpath): pytesseract.pytesseract.tesseract_cmd = tpath; break
+    if TESS_CMD: pytesseract.pytesseract.tesseract_cmd = TESS_CMD
     _test = pytesseract.image_to_string(Image.new("RGB",(10,10)))
     OCR_OK = True
 except: pass
@@ -139,9 +157,12 @@ def buff_loop():
                 diff = np.abs(baseline.astype(int)-current.astype(int))
                 detected = np.sum(diff>30)/(diff.shape[0]*diff.shape[1]) > 0.02
             if detected:
-                log("📩 채팅 감지 → 버프!")
-                root.after(0, lambda: lbl_status.config(text="🔮 버프중", fg="#fbbf24"))
-                for n in range(5,13):
+                is_full = any(kw in text for kw in FULL_KW) if OCR_OK else True
+                n_range = range(5,13) if is_full else range(5,9)  # 풀버프: F5~F12, 버프: F5~F8
+                typ = "풀" if is_full else "기본"
+                log(f"📩 {typ}버프 감지!")
+                root.after(0, lambda t=typ: lbl_status.config(text=f"🔮 {t}버프중", fg="#fbbf24"))
+                for n in n_range:
                     if not running: break
                     if chk_vars[n].get():
                         ser.write(FKEY_MAP[n].encode()); time.sleep(0.2)
