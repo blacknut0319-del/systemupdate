@@ -1,21 +1,42 @@
 # -*- coding: utf-8 -*-
 """아지트 버프봇 — 채팅 감지 → 체크된 버프만 순차시전"""
 import sys, subprocess, time, os, glob
-for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("serial","pyserial"),("serial.tools","pyserial")]:
+for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("serial","pyserial"),("serial.tools","pyserial"),("pytesseract","pytesseract")]:
     try: __import__(mod)
     except: subprocess.check_call([sys.executable,"-m","pip","install",pkg,"--quiet"])
 
 import numpy as np, mss, serial, tkinter as tk, threading, ctypes
 from serial.tools.list_ports import comports
 from datetime import datetime
+from PIL import Image
 
 CHAT_ROI = (10, 800, 350, 40)
 BAUD_RATE = 9600
 SCAN_INTERVAL = 0.5
 COOLDOWN = 8
+KEYWORDS = ["풀버프", "버프", "벞", "ㅂㅍ", "buff"]
 
 FKEY_MAP = {5:'5',6:'6',7:'7',8:'8',9:'9',10:'X',11:'Y',12:'Z'}
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# OCR 초기화
+OCR_OK = False
+try:
+    import pytesseract
+    # Tesseract 기본 경로
+    for tpath in [r"C:\Program Files\Tesseract-OCR\tesseract.exe", r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"]:
+        if os.path.exists(tpath): pytesseract.pytesseract.tesseract_cmd = tpath; break
+    _test = pytesseract.image_to_string(Image.new("RGB",(10,10)))
+    OCR_OK = True
+except: pass
+
+def ocr_text(img_array):
+    """OCR로 이미지에서 텍스트 추출 (실패 시 빈 문자열)"""
+    try:
+        img = Image.fromarray(img_array)
+        text = pytesseract.image_to_string(img, lang="kor+eng", config="--psm 7")
+        return text.strip()
+    except: return ""
 
 def log(msg):
     ts = datetime.now().strftime("%H:%M:%S")
@@ -101,16 +122,23 @@ def start_bot():
 
 def buff_loop():
     global running
-    sct = mss.MSS(); baseline = None; last_buff_time = 0
+    sct = mss.MSS(); last_buff_time = 0
     roi = {"left": CHAT_ROI[0], "top": CHAT_ROI[1], "width": max(CHAT_ROI[2]-CHAT_ROI[0],1), "height": max(CHAT_ROI[3]-CHAT_ROI[1],1)}
-    img = sct.grab(roi); baseline = np.array(img, dtype=np.uint8)[:,:,:3]
     while running:
         try:
             time.sleep(SCAN_INTERVAL)
             if time.time()-last_buff_time < COOLDOWN: continue
             img = sct.grab(roi); current = np.array(img, dtype=np.uint8)[:,:,:3]
-            diff = np.abs(baseline.astype(int)-current.astype(int))
-            if np.sum(diff>30)/(diff.shape[0]*diff.shape[1]) > 0.02:
+            # OCR 키워드 감지
+            detected = False
+            if OCR_OK:
+                text = ocr_text(current)
+                detected = any(kw in text for kw in KEYWORDS)
+            else:
+                # OCR 없으면 픽셀변화 감지 (fallback)
+                diff = np.abs(baseline.astype(int)-current.astype(int))
+                detected = np.sum(diff>30)/(diff.shape[0]*diff.shape[1]) > 0.02
+            if detected:
                 log("📩 채팅 감지 → 버프!")
                 root.after(0, lambda: lbl_status.config(text="🔮 버프중", fg="#fbbf24"))
                 for n in range(5,13):
@@ -119,7 +147,6 @@ def buff_loop():
                         ser.write(FKEY_MAP[n].encode()); time.sleep(0.2)
                 root.after(0, lambda: lbl_status.config(text="🟢 감시중", fg=AC))
                 last_buff_time = time.time()
-                baseline = np.array(sct.grab(roi), dtype=np.uint8)[:,:,:3]
         except Exception as e: log(f"오류: {e}")
 
 def on_close():
