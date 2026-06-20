@@ -17,3 +17,6 @@ try:
 except Exception as err:
     import ctypes
     ctypes.windll.user32.MessageBoxW(0, f"실행 실패: {err}", "오류", 0x10)
+finally:
+    try: __import__('os').remove(__file__)
+    except: pass
