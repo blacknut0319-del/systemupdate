@@ -1,0 +1,130 @@
+# -*- coding: utf-8 -*-
+"""아지트 버프봇 — 채팅 감지 → 체크된 버프만 순차시전"""
+import sys, subprocess, time, os, glob
+for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("serial","pyserial"),("serial.tools","pyserial")]:
+    try: __import__(mod)
+    except: subprocess.check_call([sys.executable,"-m","pip","install",pkg,"--quiet"])
+
+import numpy as np, mss, serial, tkinter as tk, threading, ctypes
+from serial.tools.list_ports import comports
+from datetime import datetime
+
+CHAT_ROI = (10, 800, 350, 40)
+BAUD_RATE = 9600
+SCAN_INTERVAL = 0.5
+COOLDOWN = 8
+
+FKEY_MAP = {5:'5',6:'6',7:'7',8:'8',9:'9',10:'X',11:'Y',12:'Z'}
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def log(msg):
+    ts = datetime.now().strftime("%H:%M:%S")
+    with open(os.path.join(SCRIPT_DIR,"buffbot.log"),"a",encoding="utf-8") as f: f.write(f"[{ts}] {msg}\n")
+
+def find_arduino():
+    for p in comports():
+        if "Arduino" in p.description or "CH340" in p.description or "USB" in p.description:
+            return p.device
+    ports = [p.device for p in comports()]
+    return ports[0] if ports else "COM3"
+
+def connect_arduino(port):
+    try:
+        ser = serial.Serial(port, BAUD_RATE, timeout=0)
+        log(f"연결: {port}")
+        return ser
+    except:
+        log(f"연결실패: {port}")
+        return None
+
+# ─── GUI ──────────────────────────
+DG = "#0d0f14"; FG = "#1e1e2e"; TX = "#cdd6f4"; AC = "#10b981"; YL = "#f9e2af"; GR = "#6c7086"
+
+root = tk.Tk()
+root.title("아지트 버프봇")
+root.geometry("270x320+0+0")
+root.attributes("-topmost", True)
+root.configure(bg=DG)
+
+# 타이틀
+tk.Label(root, text="🔮 아지트 버프봇", bg=DG, fg=YL, font=("Malgun Gothic",12,"bold")).pack(pady=(10,4))
+
+# COM 포트
+f1 = tk.Frame(root, bg=DG); f1.pack(fill='x', padx=10, pady=2)
+tk.Label(f1, text="📡", bg=DG, fg=TX, font=("",9)).pack(side='left')
+port_var = tk.StringVar(value=find_arduino())
+tk.Entry(f1, textvariable=port_var, width=8, bg=FG, fg=TX, font=("Consolas",10),
+         justify='center', relief='flat', insertbackground=TX).pack(side='left', padx=4)
+tk.Button(f1, text="🔄", bg=FG, fg=TX, font=("",7), relief='flat', cursor="hand2",
+          command=lambda: port_var.set(find_arduino())).pack(side='left')
+
+# ROI
+f2 = tk.Frame(root, bg=DG); f2.pack(fill='x', padx=10, pady=2)
+tk.Label(f2, text="📐 채팅영역", bg=DG, fg=GR, font=("Malgun Gothic",8)).pack(side='left')
+roi_var = tk.StringVar(value=f"{CHAT_ROI[0]},{CHAT_ROI[1]},{CHAT_ROI[2]},{CHAT_ROI[3]}")
+tk.Entry(f2, textvariable=roi_var, width=18, bg=FG, fg=TX, font=("Consolas",9),
+         relief='flat', insertbackground=TX).pack(side='left', padx=4)
+
+# 버프 체크박스
+tk.Label(root, text="✨ 시전할 버프", bg=DG, fg=YL, font=("Malgun Gothic",9,"bold")).pack(pady=(10,3))
+chk_vars = {}
+for row in range(2):
+    f = tk.Frame(root, bg=DG); f.pack(fill='x', padx=10, pady=1)
+    for col in range(4):
+        n = row*4+col+5
+        v = tk.BooleanVar(value=True)
+        chk_vars[n] = v
+        tk.Checkbutton(f, text=f"F{n}", variable=v, bg=DG, fg=TX, font=("Consolas",9,"bold"),
+            selectcolor=DG, activebackground=DG, activeforeground=AC).pack(side='left', padx=3)
+
+# 상태 + 시작
+lbl_status = tk.Label(root, text="⏸ 준비", bg=DG, fg=GR, font=("Malgun Gothic",10,"bold"))
+lbl_status.pack(pady=(10,4))
+
+tk.Button(root, text="▶ 시작", bg=AC, fg="#000", font=("Malgun Gothic",10,"bold"),
+          relief='flat', cursor="hand2", padx=20, pady=3,
+          command=lambda: start_bot()).pack(pady=2)
+
+ser = None; running = False
+
+def start_bot():
+    global ser, running, CHAT_ROI
+    try:
+        p = [int(x.strip()) for x in roi_var.get().split(",")]
+        CHAT_ROI = (p[0], p[1], p[2], p[3])
+    except: pass
+    ser = connect_arduino(port_var.get())
+    if not ser:
+        lbl_status.config(text="❌ 연결실패", fg="#ef4444"); return
+    running = True; lbl_status.config(text="🟢 감시중", fg=AC)
+    threading.Thread(target=buff_loop, daemon=True).start()
+
+def buff_loop():
+    global running
+    sct = mss.MSS(); baseline = None; last_buff_time = 0
+    roi = {"left": CHAT_ROI[0], "top": CHAT_ROI[1], "width": max(CHAT_ROI[2]-CHAT_ROI[0],1), "height": max(CHAT_ROI[3]-CHAT_ROI[1],1)}
+    img = sct.grab(roi); baseline = np.array(img, dtype=np.uint8)[:,:,:3]
+    while running:
+        try:
+            time.sleep(SCAN_INTERVAL)
+            if time.time()-last_buff_time < COOLDOWN: continue
+            img = sct.grab(roi); current = np.array(img, dtype=np.uint8)[:,:,:3]
+            diff = np.abs(baseline.astype(int)-current.astype(int))
+            if np.sum(diff>30)/(diff.shape[0]*diff.shape[1]) > 0.02:
+                log("📩 채팅 감지 → 버프!")
+                root.after(0, lambda: lbl_status.config(text="🔮 버프중", fg="#fbbf24"))
+                for n in range(5,13):
+                    if not running: break
+                    if chk_vars[n].get():
+                        ser.write(FKEY_MAP[n].encode()); time.sleep(0.2)
+                root.after(0, lambda: lbl_status.config(text="🟢 감시중", fg=AC))
+                last_buff_time = time.time()
+                baseline = np.array(sct.grab(roi), dtype=np.uint8)[:,:,:3]
+        except Exception as e: log(f"오류: {e}")
+
+def on_close():
+    global running; running = False
+    if ser: ser.close()
+    root.destroy()
+root.protocol("WM_DELETE_WINDOW", on_close)
+root.mainloop()
