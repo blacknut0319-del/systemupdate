@@ -14,8 +14,8 @@ CHAT_ROI = (10, 800, 350, 40)
 BAUD_RATE = 9600
 SCAN_INTERVAL = 0.5
 COOLDOWN = 8
-FULL_KW = ["!풀버프", "풀버프", "!full", "fullbuff"]
-BASIC_KW = ["!버프", "버프", "!buff", "벞", "ㅂㅍ"]
+FULL_KW = ["!풀버프", "풀버프"]
+BASIC_KW = ["!버프", "버프"]
 
 FKEY_MAP = {5:'5',6:'6',7:'7',8:'8',9:'9',10:'X',11:'Y',12:'Z'}
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -141,6 +141,8 @@ for row in range(2):
             selectcolor=DG, activebackground=DG, activeforeground=AC).pack(side='left', padx=3)
 
 # 상태 + 시작
+lbl_detect = tk.Label(root, text="", bg=DG, fg=YL, font=("Malgun Gothic",9), height=1)
+lbl_detect.pack(pady=(6,0))
 lbl_status = tk.Label(root, text="⏸ 준비", bg=DG, fg=GR, font=("Malgun Gothic",10,"bold"))
 lbl_status.pack(pady=(10,4))
 
@@ -182,11 +184,12 @@ def buff_loop():
                 detected = np.sum(diff>30)/(diff.shape[0]*diff.shape[1]) > 0.02
             if detected:
                 is_full = any(kw in text for kw in FULL_KW) if OCR_OK else True
-                n_range = range(5,13) if is_full else range(5,9)  # 풀버프: F5~F12, 버프: F5~F8
-                typ = "풀" if is_full else "기본"
-                log(f"📩 {typ}버프 감지!")
-                root.after(0, lambda t=typ: lbl_status.config(text=f"🔮 {t}버프중", fg="#fbbf24"))
-                for n in n_range:
+                typ = "!풀버프" if is_full else "!버프"
+                log(f"📩 {typ} 감지!")
+                root.after(0, lambda t=typ: lbl_status.config(text=f"🔮 {t} 감지!", fg="#fbbf24"))
+                root.after(0, lambda t=typ: lbl_detect.config(text=f"✅ {t}"))
+                # 둘 다 체크된 F5~F12 사용
+                for n in range(5,13):
                     if not running: break
                     if chk_vars[n].get():
                         ser.write(FKEY_MAP[n].encode()); time.sleep(0.2)
