@@ -101,7 +101,7 @@ DG = "#0d0f14"; FG = "#1e1e2e"; TX = "#cdd6f4"; AC = "#10b981"; YL = "#f9e2af"; 
 
 root = tk.Tk()
 root.title("아지트 버프봇")
-root.geometry("270x350+0+0")
+root.geometry("270x450+0+0")
 root.attributes("-topmost", True)
 root.configure(bg=DG)
 
@@ -129,6 +129,30 @@ tk.Button(f2, text="🖱️", bg=FG, fg=AC, font=("",8), relief='flat', cursor="
 tk.Label(root, text="📡 자동감지 🔄 수동탐색", bg=DG, fg=GR, font=("Malgun Gothic",7)).pack()
 
 # 버프 체크박스
+# 버프 체크박스
+tk.Label(root, text="✨ !풀버프 시전 목록", bg=DG, fg="#f9e2af", font=("Malgun Gothic",9,"bold")).pack(pady=(10,3))
+chk_full = {}
+for row in range(2):
+    f = tk.Frame(root, bg=DG); f.pack(fill='x', padx=10, pady=1)
+    for col in range(4):
+        n = row*4+col+5
+        v = tk.BooleanVar(value=True)
+        chk_full[n] = v
+        tk.Checkbutton(f, text=f"F{n}", variable=v, bg=DG, fg="#f9e2af", font=("Consolas",9,"bold"),
+            selectcolor=DG, activebackground=DG, activeforeground=AC).pack(side='left', padx=3)
+
+tk.Label(root, text="✨ !버프 시전 목록", bg=DG, fg="#a6e3a1", font=("Malgun Gothic",9,"bold")).pack(pady=(8,3))
+chk_basic = {}
+for row in range(2):
+    f = tk.Frame(root, bg=DG); f.pack(fill='x', padx=10, pady=1)
+    for col in range(4):
+        n = row*4+col+5
+        v = tk.BooleanVar(value=(n <= 8))
+        chk_basic[n] = v
+        tk.Checkbutton(f, text=f"F{n}", variable=v, bg=DG, fg="#a6e3a1", font=("Consolas",9,"bold"),
+            selectcolor=DG, activebackground=DG, activeforeground=AC).pack(side='left', padx=3)
+
+
 tk.Label(root, text="✨ 시전할 버프", bg=DG, fg=YL, font=("Malgun Gothic",9,"bold")).pack(pady=(10,3))
 chk_vars = {}
 for row in range(2):
@@ -184,14 +208,14 @@ def buff_loop():
                 detected = np.sum(diff>30)/(diff.shape[0]*diff.shape[1]) > 0.02
             if detected:
                 is_full = any(kw in text for kw in FULL_KW) if OCR_OK else True
-                typ = "!풀버프" if is_full else "!버프"
+                chk = chk_full if is_full else chk_basic
                 log(f"📩 {typ} 감지!")
                 root.after(0, lambda t=typ: lbl_status.config(text=f"🔮 {t} 감지!", fg="#fbbf24"))
                 root.after(0, lambda t=typ: lbl_detect.config(text=f"✅ {t}"))
                 # 둘 다 체크된 F5~F12 사용
                 for n in range(5,13):
                     if not running: break
-                    if chk_vars[n].get():
+                    if chk[n].get():
                         ser.write(FKEY_MAP[n].encode()); time.sleep(0.2)
                 root.after(0, lambda: lbl_status.config(text="🟢 감시중", fg=AC))
                 last_buff_time = time.time()
