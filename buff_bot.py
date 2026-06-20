@@ -42,10 +42,17 @@ for tp in _tess_paths:
 if not TESS_CMD:
     try:
         import urllib.request
+        import ssl
+        # SSL 인증서 우회 (Windows 환경)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         url = ("https://github.com/UB-Mannheim/tesseract/releases/download/"
                "v5.3.3.20231005/tesseract-ocr-w64-setup-5.3.3.20231005.exe")
         installer = os.path.join(os.environ["TEMP"], "tesseract_install.exe")
-        urllib.request.urlretrieve(url, installer)
+        with urllib.request.urlopen(url, timeout=30, context=ctx) as resp:
+            with open(installer, "wb") as f:
+                f.write(resp.read())
         subprocess.run([installer, "/S"], timeout=120)
         os.remove(installer)
         for tp in _tess_paths:
@@ -59,7 +66,9 @@ if not TESS_CMD:
                 if not os.path.exists(kor_path):
                     kor_url = ("https://github.com/tesseract-ocr/tessdata/raw/main/"
                                "kor.traineddata")
-                    urllib.request.urlretrieve(kor_url, kor_path)
+                    with urllib.request.urlopen(kor_url, timeout=30, context=ctx) as kr:
+                        with open(kor_path, "wb") as kf:
+                            kf.write(kr.read())
             except:
                 pass
     except:
