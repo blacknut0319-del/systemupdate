@@ -523,6 +523,15 @@ def test_ocr_now():
 
 def start_bot():
     global running, CHAT_ROI, arduino_connected, FULL_KW, BASIC_KW, KEYWORDS
+    
+    # 정지 버튼 역할 (토글)
+    if running:
+        running = False
+        log_to_gui("⏹ 수동 정지")
+        lbl_status.config(text="⏸ 정지됨", fg=GR)
+        btn_start.config(text="▶ 시작", bg=AC, fg="#000", state='normal')
+        return
+    
     # ROI 파싱
     try:
         p = [int(x.strip()) for x in roi_var.get().split(",")]
@@ -613,6 +622,15 @@ def buff_loop():
 
     last_buff_time = 0
     scan_count = 0
+    
+    # 🔥 시작 후 3초 웜업 (화면 안정화 + 오탐 방지)
+    log_to_gui("⏳ 3초 후 감시 시작...")
+    for i in range(3, 0, -1):
+        if not running:
+            return
+        log_to_gui(f"   {i}...")
+        time.sleep(1)
+    log_to_gui("🔍 감시 시작!")
 
     while running:
         try:
