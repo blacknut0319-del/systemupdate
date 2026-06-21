@@ -642,20 +642,27 @@ def buff_loop():
                         root.after(0, lambda: lbl_ocr_result.config(text="📝 (인식 없음)", fg=GR))
                 
                 if text:
-                    # 키워드 매칭
+                    # 키워드 매칭 (정확히 일치하는 것 우선)
+                    # "버프"만 있으면 !버프, "풀버프"가 있으면 !풀버프
+                    is_full = False
+                    is_basic = False
                     for kw in FULL_KW:
                         if kw in text:
-                            detected = True
-                            typ = "!풀버프"
-                            log_to_gui(f"✅ OCR 감지: '{text}' → {kw} 매칭!")
+                            is_full = True
                             break
-                    if not detected:
-                        for kw in BASIC_KW:
-                            if kw in text:
-                                detected = True
-                                typ = "!버프"
-                                log_to_gui(f"✅ OCR 감지: '{text}' → {kw} 매칭!")
-                                break
+                    for kw in BASIC_KW:
+                        if kw in text:
+                            is_basic = True
+                            break
+                    
+                    if is_full:
+                        detected = True
+                        typ = "!풀버프"
+                        log_to_gui(f"✅ OCR: '{text[:40]}' → !풀버프")
+                    elif is_basic:
+                        detected = True
+                        typ = "!버프"
+                        log_to_gui(f"✅ OCR: '{text[:40]}' → !버프")
 
             # ── OCR 불가면 픽셀 변화 감지 ──
             if not detected and baseline is not None:
