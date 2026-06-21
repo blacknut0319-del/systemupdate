@@ -16,6 +16,7 @@ import numpy as np
 import mss
 import tkinter as tk
 import threading
+import random
 from datetime import datetime
 from PIL import Image
 
@@ -639,13 +640,17 @@ def buff_loop():
                             if not running:
                                 break
                             if chk[n].get():
-                                # 버프키 누르기 (5,6,7,8,9,X,Y,Z)
+                                # 버프키 누르기
                                 s.write(FKEY_MAP[n].encode())
                                 time.sleep(0.2)
                                 # 마우스 클릭 (현재 마우스 위치의 대상 선택)
                                 s.write(b'K')
-                                time.sleep(0.2)
-                        s.close()
+                                log_to_gui(f"🔘 F{n} 시전 + 클릭")
+                                time.sleep(0.3)
+                                # 3~5초 랜덤 대기 (다음 키 전에 버프 시전 시간 확보)
+                                delay = random.uniform(3.0, 5.0)
+                                log_to_gui(f"⏳ {delay:.1f}초 대기...")
+                                time.sleep(delay)
                         log(f"📤 {typ} 키+클릭 완료")
                         log_to_gui(f"📤 {typ} 키+클릭 완료")
                     except Exception as e:
