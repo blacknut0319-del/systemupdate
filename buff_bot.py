@@ -621,7 +621,7 @@ def buff_loop():
                 lbl_detect.config(text=f"✅ {typ}")
                 lbl_status.config(text=f"🔮 {typ} 감지!", fg="#fbbf24")
 
-                # ── 아두이노 있으면 키 전송 ──
+                # ── 키 전송 + 마우스 클릭 ──
                 if arduino_connected:
                     try:
                         import serial
@@ -632,27 +632,60 @@ def buff_loop():
                                 break
                         else:
                             s = None
-                        if s:
-                            is_full = (typ == "!풀버프")
-                            chk = chk_full if is_full else chk_basic
-                            for n in range(5, 13):
-                                if not running:
-                                    break
-                                if chk[n].get():
+                        # 마우스 클릭용
+                        try:
+                            import pyautogui
+                            pyautogui.FAILSAFE = False
+                            has_mouse = True
+                        except:
+                            has_mouse = False
+                        
+                        is_full = (typ == "!풀버프")
+                        chk = chk_full if is_full else chk_basic
+                        for n in range(5, 13):
+                            if not running:
+                                break
+                            if chk[n].get():
+                                # 키 누르기
+                                if s:
                                     s.write(FKEY_MAP[n].encode())
-                                    time.sleep(0.2)
+                                    time.sleep(0.15)
+                                # 마우스 클릭 (현재 마우스 위치)
+                                if has_mouse:
+                                    pyautogui.click()
+                                    time.sleep(0.15)
+                        if s:
                             s.close()
-                            log(f"📤 {typ} 키전송 완료")
-                            log_to_gui(f"📤 {typ} 키전송 완료")
+                        log(f"📤 {typ} 키+클릭 완료")
+                        log_to_gui(f"📤 {typ} 키+클릭 완료")
                     except Exception as e:
                         log(f"⚠️ 키전송 실패: {e}")
                         log_to_gui(f"⚠️ 키전송 실패: {e}")
                         arduino_connected = False
                 else:
-                    # 아두이노 없으면 알림만
-                    log(f"📋 아두이노 없음 - 감지만: {typ}")
-                    log_to_gui(f"📋 (아두이노 없음) 감지만: {typ}")
-                    lbl_detect.config(text=f"✅ {typ} (키전송X)")
+                    # 아두이노 없어도 마우스 클릭만 시도
+                    try:
+                        import pyautogui
+                        pyautogui.FAILSAFE = False
+                        is_full = (typ == "!풀버프")
+                        chk = chk_full if is_full else chk_basic
+                        for n in range(5, 13):
+                            if not running:
+                                break
+                            if chk[n].get():
+                                # 소프트웨어 키보드로 키 입력
+                                import keyboard
+                                keyboard.press_and_release(FKEY_MAP[n])
+                                time.sleep(0.15)
+                                # 마우스 클릭
+                                pyautogui.click()
+                                time.sleep(0.15)
+                        log(f"📤 {typ} 마우스클릭 완료")
+                        log_to_gui(f"📤 {typ} 마우스클릭 완료")
+                    except Exception as e:
+                        log(f"📋 (아두이노 없음) 감지만: {typ} - {e}")
+                        log_to_gui(f"📋 (아두이노 없음) 감지만: {typ}")
+                        lbl_detect.config(text=f"✅ {typ} (키전송X)")
 
                 last_buff_time = time.time()
                 time.sleep(0.5)
