@@ -29,8 +29,8 @@ from PIL import Image
 
 # ─── 설정 ────────────────────────────────
 CHAT_ROI = (10, 800, 350, 40)       # left,top,width,height
-SCAN_INTERVAL = 0.5
-COOLDOWN = 8
+SCAN_INTERVAL = 0.3
+COOLDOWN = 6
 FULL_KW = ["풀버프"]
 BASIC_KW = ["버프"]
 KEYWORDS = FULL_KW + BASIC_KW        # ← 빠졌던 거!
@@ -150,14 +150,13 @@ OCR_DIAG = diagnose_tesseract()
 
 
 def ocr_text(img_array):
-    """OCR로 이미지에서 텍스트 추출 (개선: 이미지 전처리 + 디버그 로깅)"""
+    """OCR로 이미지에서 텍스트 추출"""
     try:
         img = Image.fromarray(img_array)
-        # 전처리: 그레이스케일 + 대비 증가 (리니지 어두운 채팅창 대응)
-        img = img.convert("L")
-        import PIL.ImageOps
-        img = PIL.ImageOps.autocontrast(img, cutoff=10)
-        text = pytesseract.image_to_string(img, lang="kor", config="--psm 11 --oem 3")
+        # 그레이스케일 + 2배 확대 (작은 글씨 인상)
+        img = img.convert("L").resize((img.width * 2, img.height * 2), Image.LANCZOS)
+        # LSTM 전용 엔진(oem 1)이 한글 인식에 더 정확함
+        text = pytesseract.image_to_string(img, lang="kor", config="--psm 11 --oem 1")
         return text.strip()
     except Exception as e:
         log(f"⚠️ OCR 오류: {e}")
