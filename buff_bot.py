@@ -63,16 +63,19 @@ if not TESS_CMD:
             try:
                 tessdata = os.path.join(os.path.dirname(TESS_CMD), "tessdata")
                 kor_path = os.path.join(tessdata, "kor.traineddata")
-                if not os.path.exists(kor_path):
-                    kor_url = ("https://github.com/tesseract-ocr/tessdata/raw/main/"
-                               "kor.traineddata")
-                    with urllib.request.urlopen(kor_url, timeout=30, context=ctx) as kr:
-                        with open(kor_path, "wb") as kf:
-                            kf.write(kr.read())
-            except:
-                pass
-    except:
-        pass
+                # 한글팩 강제 재다운로드 (기존 파일 덮어쓰기)
+                kor_url = ("https://github.com/tesseract-ocr/tessdata_fast/raw/main/"
+                           "kor.traineddata")
+                print(f"[Tesseract] 한글팩 다운로드 중... ({kor_path})")
+                with urllib.request.urlopen(kor_url, timeout=60, context=ctx) as kr:
+                    with open(kor_path, "wb") as kf:
+                        kf.write(kr.read())
+                size_kb = os.path.getsize(kor_path) / 1024
+                print(f"[Tesseract] ✅ 한글팩 설치 완료! ({size_kb:.0f} KB)")
+            except Exception as e:
+                print(f"[Tesseract] ⚠️ 한글팩 설치 실패: {e}")
+    except Exception as e:
+        print(f"[Tesseract] 설치 실패: {e}")
 
 # ─── OCR 초기화 및 진단 ──────────────────
 OCR_OK = False
