@@ -201,6 +201,22 @@ def open_roi_overlay(btn_roi_entry, roi_var):
         ov.destroy()
         if x2 - x1 < 20 or y2 - y1 < 8:
             return
+        # DPI 스케일 보정 (mss는 물리픽셀, tkinter는 논리픽셀)
+        try:
+            import ctypes
+            from ctypes import wintypes
+            hdc = ctypes.windll.user32.GetDC(0)
+            LOGPIXELSX = 88
+            dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, LOGPIXELSX)
+            ctypes.windll.user32.ReleaseDC(0, hdc)
+            scale = dpi / 96.0
+            if scale != 1.0:
+                x1 = int(x1 * scale)
+                y1 = int(y1 * scale)
+                x2 = int(x2 * scale)
+                y2 = int(y2 * scale)
+        except:
+            pass
         roi_var.set(f"{x1},{y1},{x2-x1},{y2-y1}")
 
     cv.bind("<ButtonPress-1>", dn)
