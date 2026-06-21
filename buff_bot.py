@@ -142,13 +142,11 @@ def ocr_text(img_array):
     """OCR로 이미지에서 텍스트 추출 (개선: 이미지 전처리 + 디버그 로깅)"""
     try:
         img = Image.fromarray(img_array)
-        # 전처리: 그레이스케일 → 대비 증가 → 선명하게
+        # 전처리: 그레이스케일 + 대비 증가 (리니지 어두운 채팅창 대응)
         img = img.convert("L")
         import PIL.ImageOps
-        img = PIL.ImageOps.autocontrast(img, cutoff=5)
-        img = img.point(lambda x: 0 if x < 40 else 255 if x > 200 else x)
-        img = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
-        text = pytesseract.image_to_string(img, lang="kor+eng", config="--psm 6 --oem 3")
+        img = PIL.ImageOps.autocontrast(img, cutoff=10)
+        text = pytesseract.image_to_string(img, lang="kor", config="--psm 6 --oem 3")
         return text.strip()
     except Exception as e:
         log(f"⚠️ OCR 오류: {e}")
