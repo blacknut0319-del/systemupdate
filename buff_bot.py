@@ -473,6 +473,17 @@ def test_ocr_now():
                 for r in results:
                     log_to_gui(f"  {r}")
                 log_to_gui(f"  이미지: {current.shape}, 디버그: {debug_path}")
+                
+                # OCR 결과를 텍스트 파일로 저장
+                ocr_result_path = os.path.join(SCRIPT_DIR, "ocr_result.txt")
+                with open(ocr_result_path, "w", encoding="utf-8") as f:
+                    f.write(f"OCR 테스트 결과 ({datetime.now().strftime('%H:%M:%S')})\n")
+                    f.write(f"{'='*40}\n")
+                    for r in results:
+                        f.write(r + "\n")
+                    f.write(f"{'='*40}\n")
+                    f.write(f"\n원본 이미지 크기: {current.shape}\n")
+                log_to_gui(f"📄 OCR 결과 저장됨: {ocr_result_path}")
             else:
                 lbl_ocr_result.config(text="❌ OCR 사용 불가 (OCR_OK=False)", fg=RD)
                 log_to_gui("❌ OCR 초기화 실패 - Tesseract 확인 필요")
