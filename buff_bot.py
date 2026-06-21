@@ -10,7 +10,13 @@ for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),
     try:
         __import__(mod)
     except:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "--quiet"])
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "--quiet"])
+        except:
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "--quiet", "--user"])
+            except:
+                pass
 
 import numpy as np
 import mss
