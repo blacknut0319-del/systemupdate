@@ -511,19 +511,47 @@ def start_bot():
     BASIC_KW = [k.strip() for k in kw_basic_var.get().split(",") if k.strip()]
     KEYWORDS = FULL_KW + BASIC_KW
     
-    # 아두이노 연결 시도 (실패해도 계속)
+    # 아두이노 연결 시도 (모든 포트 스캔)
     arduino_connected = False
     try:
         import serial
         from serial.tools.list_ports import comports
         port = None
-        for p in comports():
-            if "Arduino" in p.description or "CH340" in p.description or "USB" in p.description:
+        all_ports = list(comports())
+        log_to_gui(f"🔍 포트 검색: {len(all_ports)}개 발견")
+        
+        # 1순위: 설명에 Arduino/CH340 있는 포트
+        for p in all_ports:
+            desc = (p.description + " " + p.device).lower()
+            if any(kw in desc for kw in ["arduino", "ch340", "ch340g", "cp210", "usb serial"]):
                 port = p.device
+                log_to_gui(f"   → {port}: {p.description}")
                 break
+        
+        # 2순위: 실제 연결 테스트 (아두이노 핑)
         if not port:
-            ports = [p.device for p in comports()]
-            port = ports[0] if ports else "COM3"
+            for p in all_ports:
+                try:
+                    test = serial.Serial(p.device, 9600, timeout=0.5)
+                    test.write(b'U')  # 모든키 해제 명령
+                    time.sleep(0.1)
+                    test.close()
+                    port = p.device
+                    log_to_gui(f"   ✅ {port}: 응답 확인")
+                    break
+                except:
+                    continue
+        
+        # 3순위: 마지막 수단 - COM 포트중 첫 번째
+        if not port:
+            ports = [p.device for p in all_ports]
+            if ports:
+                port = ports[0]
+                log_to_gui(f"   → {port}: 첫 번째 포트 사용")
+            else:
+                port = "COM3"
+                log_to_gui("   → COM3: 기본값 사용")
+        
         _ser = serial.Serial(port, 9600, timeout=0)
         arduino_connected = True
         log(f"✅ 아두이노 연결: {port}")
