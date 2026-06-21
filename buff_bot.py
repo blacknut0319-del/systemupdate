@@ -23,6 +23,7 @@ import mss
 import tkinter as tk
 import threading
 import random
+import pytesseract
 from datetime import datetime
 from PIL import Image
 
