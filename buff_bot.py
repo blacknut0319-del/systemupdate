@@ -23,8 +23,8 @@ from PIL import Image
 CHAT_ROI = (10, 800, 350, 40)       # left,top,width,height
 SCAN_INTERVAL = 0.5
 COOLDOWN = 8
-FULL_KW = ["!풀버프", "풀버프"]
-BASIC_KW = ["!버프", "버프"]
+FULL_KW = ["풀버프"]
+BASIC_KW = ["버프"]
 KEYWORDS = FULL_KW + BASIC_KW        # ← 빠졌던 거!
 FKEY_MAP = {5:'5',6:'6',7:'7',8:'8',9:'9',10:'X',11:'Y',12:'Z'}
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
