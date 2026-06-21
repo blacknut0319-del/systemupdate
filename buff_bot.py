@@ -48,7 +48,7 @@ if not TESS_CMD:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         url = ("https://github.com/UB-Mannheim/tesseract/releases/download/"
-               "v5.3.3.20231005/tesseract-ocr-w64-setup-5.3.3.20231005.exe")
+               "v5.4.0.20240606/tesseract-ocr-w64-setup-5.4.0.20240606.exe")
         installer = os.path.join(os.environ["TEMP"], "tesseract_install.exe")
         with urllib.request.urlopen(url, timeout=30, context=ctx) as resp:
             with open(installer, "wb") as f:
