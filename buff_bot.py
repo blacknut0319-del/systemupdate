@@ -149,7 +149,7 @@ def ocr_text(img_array):
         img = img.convert("L")
         import PIL.ImageOps
         img = PIL.ImageOps.autocontrast(img, cutoff=10)
-        text = pytesseract.image_to_string(img, lang="kor", config="--psm 6 --oem 3")
+        text = pytesseract.image_to_string(img, lang="kor", config="--psm 11 --oem 3")
         return text.strip()
     except Exception as e:
         log(f"⚠️ OCR 오류: {e}")
