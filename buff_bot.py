@@ -663,19 +663,26 @@ def buff_loop():
                         root.after(0, lambda: lbl_ocr_result.config(text="📝 (인식 없음)", fg=GR))
                 
                 if text:
-                    # 키워드 매칭 (줄바꿈 기준 단어 단위)
+                    # 키워드 매칭 (줄바꿈 기준 단어 단위 + 단어 일치)
                     words = text.replace('\n', ' ').split()
                     is_full = False
                     is_basic = False
                     
                     for word in words:
+                        word = word.strip()
+                        if word in FULL_KW:  # 완전일치
+                            is_full = True
+                            break
+                        if word in BASIC_KW:  # 완전일치
+                            is_basic = True
+                            break
+                        # 부분일치도 허용 (ex: "뚱맨: 버프" → "버프" 포함)
                         for kw in FULL_KW:
-                            if kw in word:
+                            if kw in word and len(word) <= len(kw) + 5:
                                 is_full = True
                                 break
-                    for word in words:
                         for kw in BASIC_KW:
-                            if kw in word and not is_full:
+                            if kw in word and len(word) <= len(kw) + 5 and not is_full:
                                 is_basic = True
                                 break
                     
