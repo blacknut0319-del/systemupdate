@@ -379,7 +379,7 @@ arduino_connected = False
 
 # ─── OCR 테스트 함수 (개선: 테스트 버튼) ───
 def test_ocr_now():
-    """현재 ROI 영역을 캡처해서 OCR 수행, 결과를 GUI에 표시"""
+    """현재 ROI 영역을 캡처해서 여러 PSM 모드로 OCR 테스트"""
     try:
         p = [int(x.strip()) for x in roi_var.get().split(",")]
         if len(p) == 4:
@@ -406,13 +406,16 @@ def test_ocr_now():
             
             if OCR_OK:
                 import pytesseract
-                text = ocr_text(current)
+                import PIL.ImageOps
                 
-                # 결과 표시
+                # 기본 OCR (현재 설정)
+                text = ocr_text(current)
+                results = []
+                
                 if text:
+                    results.append(f"✅ 현재설정: '{text}'")
                     display_text = text[:60] + "..." if len(text) > 60 else text
                     lbl_ocr_result.config(text=f"📝 '{display_text}'", fg=AC)
-                    log_to_gui(f"✅ OCR 인식됨: '{text}'")
                     
                     # 키워드 체크
                     for kw in FULL_KW:
@@ -429,10 +432,47 @@ def test_ocr_now():
                         else:
                             lbl_detect.config(text="⚠️ 키워드 없음", fg=RD)
                 else:
-                    lbl_ocr_result.config(text="❌ 텍스트 인식 안 됨", fg=RD)
-                    log_to_gui("⚠️ OCR 결과 없음 (빈 문자열)")
-                    log_to_gui(f"   디버그 이미지 저장됨: {debug_path}")
-                    log_to_gui(f"   이미지 크기: {current.shape}")
+                    # 여러 PSM 모드로 테스트 (현재설정 실패 시)
+                    # 전처리된 이미지 준비
+                    gray = Image.fromarray(current).convert("L")
+                    enhanced = PIL.ImageOps.autocontrast(gray, cutoff=10)
+                    
+                    psm_modes = [(3, "자동페이지"), (11, "스파스텍스트"), (13, "원시라인"), (4, "단일컬럼"), (12, "스파스+OSD")]
+                    for psm, pname in psm_modes:
+                        try:
+                            t = pytesseract.image_to_string(enhanced, lang="kor", config=f"--psm {psm} --oem 3")
+                            t = t.strip()
+                            if t:
+                                results.append(f"✅ psm{psm}({pname}): '{t}'")
+                                if not text:
+                                    text = t
+                        except:
+                            results.append(f"⚠️ psm{psm}({pname}): 오류")
+                    
+                    # 그래도 없으면 eng로 시도
+                    if not text:
+                        for psm, pname in [(3, "자동"), (6, "블록"), (7, "한줄")]:
+                            try:
+                                t = pytesseract.image_to_string(enhanced, lang="eng", config=f"--psm {psm} --oem 3")
+                                t = t.strip()
+                                if t:
+                                    results.append(f"✅ eng+psm{psm}({pname}): '{t}'")
+                                    if not text:
+                                        text = t
+                            except:
+                                pass
+                    
+                    if text:
+                        display_text = text[:60] + "..." if len(text) > 60 else text
+                        lbl_ocr_result.config(text=f"📝 '{display_text}'", fg=AC)
+                    else:
+                        lbl_ocr_result.config(text="❌ 모든 PSM 실패", fg=RD)
+                        results.append("❌ 모든 PSM 모드에서 인식 실패")
+                
+                # 결과 로그 출력
+                for r in results:
+                    log_to_gui(f"  {r}")
+                log_to_gui(f"  이미지: {current.shape}, 디버그: {debug_path}")
             else:
                 lbl_ocr_result.config(text="❌ OCR 사용 불가 (OCR_OK=False)", fg=RD)
                 log_to_gui("❌ OCR 초기화 실패 - Tesseract 확인 필요")
