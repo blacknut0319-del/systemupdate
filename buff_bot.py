@@ -293,6 +293,20 @@ tk.Button(fr_roi, text="👁️", bg=FG, fg="#3b82f6", font=("", 8),
           command=lambda: show_roi_overlay(tuple(int(x.strip()) for x in roi_var.get().split(",")) if len(roi_var.get().split(","))==4 else CHAT_ROI)
           ).pack(side='left', padx=1)
 
+# ── 키워드 설정 (새로 추가) ──
+fr_kw = tk.Frame(root, bg=DG)
+fr_kw.pack(fill='x', padx=10, pady=2)
+tk.Label(fr_kw, text="🔑 !풀버프 키워드", bg=DG, fg=YL,
+         font=("Malgun Gothic", 8)).pack(side='left')
+kw_full_var = tk.StringVar(value=",".join(FULL_KW))
+tk.Entry(fr_kw, textvariable=kw_full_var, width=12, bg=FG, fg=YL,
+         font=("Consolas", 9), relief='flat', insertbackground=TX).pack(side='left', padx=2)
+tk.Label(fr_kw, text="!버프 키워드", bg=DG, fg="#a6e3a1",
+         font=("Malgun Gothic", 8)).pack(side='left', padx=(6,0))
+kw_basic_var = tk.StringVar(value=",".join(BASIC_KW))
+tk.Entry(fr_kw, textvariable=kw_basic_var, width=12, bg=FG, fg="#a6e3a1",
+         font=("Consolas", 9), relief='flat', insertbackground=TX).pack(side='left', padx=2)
+
 # ── OCR 실시간 인식 결과 표시 (개선) ──
 tk.Label(root, text="📝 OCR 인식 결과", bg=DG, fg=GR,
          font=("Malgun Gothic", 8)).pack(pady=(4, 1))
@@ -430,7 +444,7 @@ def test_ocr_now():
 
 
 def start_bot():
-    global running, CHAT_ROI, arduino_connected
+    global running, CHAT_ROI, arduino_connected, FULL_KW, BASIC_KW, KEYWORDS
     # ROI 파싱
     try:
         p = [int(x.strip()) for x in roi_var.get().split(",")]
@@ -438,6 +452,11 @@ def start_bot():
             CHAT_ROI = tuple(p)
     except:
         pass
+    
+    # 키워드 파싱
+    FULL_KW = [k.strip() for k in kw_full_var.get().split(",") if k.strip()]
+    BASIC_KW = [k.strip() for k in kw_basic_var.get().split(",") if k.strip()]
+    KEYWORDS = FULL_KW + BASIC_KW
     
     # 아두이노 연결 시도 (실패해도 계속)
     arduino_connected = False
