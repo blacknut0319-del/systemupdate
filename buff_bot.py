@@ -153,9 +153,12 @@ def ocr_text(img_array):
     """OCR로 이미지에서 텍스트 추출"""
     try:
         img = Image.fromarray(img_array)
-        # 그레이스케일 + 2배 확대 (작은 글씨 인상)
-        img = img.convert("L").resize((img.width * 2, img.height * 2), Image.LANCZOS)
-        # LSTM 전용 엔진(oem 1)이 한글 인식에 더 정확함
+        # 그레이스케일 + 이진화 (흰글자/검정배경 분리)
+        img = img.convert("L")
+        # 대비 강화 + 2배 확대
+        import PIL.ImageOps
+        img = PIL.ImageOps.autocontrast(img, cutoff=3)
+        img = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
         text = pytesseract.image_to_string(img, lang="kor", config="--psm 11 --oem 1")
         return text.strip()
     except Exception as e:
@@ -642,27 +645,30 @@ def buff_loop():
                         root.after(0, lambda: lbl_ocr_result.config(text="📝 (인식 없음)", fg=GR))
                 
                 if text:
-                    # 키워드 매칭 (정확히 일치하는 것 우선)
-                    # "버프"만 있으면 !버프, "풀버프"가 있으면 !풀버프
+                    # 키워드 매칭 (줄바꿈 기준 단어 단위)
+                    words = text.replace('\n', ' ').split()
                     is_full = False
                     is_basic = False
-                    for kw in FULL_KW:
-                        if kw in text:
-                            is_full = True
-                            break
-                    for kw in BASIC_KW:
-                        if kw in text:
-                            is_basic = True
-                            break
+                    
+                    for word in words:
+                        for kw in FULL_KW:
+                            if kw in word:
+                                is_full = True
+                                break
+                    for word in words:
+                        for kw in BASIC_KW:
+                            if kw in word and not is_full:
+                                is_basic = True
+                                break
                     
                     if is_full:
                         detected = True
                         typ = "!풀버프"
-                        log_to_gui(f"✅ OCR: '{text[:40]}' → !풀버프")
+                        log_to_gui(f"✅ OCR 매칭: !풀버프")
                     elif is_basic:
                         detected = True
                         typ = "!버프"
-                        log_to_gui(f"✅ OCR: '{text[:40]}' → !버프")
+                        log_to_gui(f"✅ OCR 매칭: !버프")
 
             # ── OCR 불가면 픽셀 변화 감지 ──
             if not detected and baseline is not None:
