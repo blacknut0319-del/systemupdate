@@ -15,8 +15,6 @@ import mss
 import keyboard
 import ctypes
 
-import win32gui
-
 PATCH_UPDATED_AT = "2026-06-18 13:32"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
