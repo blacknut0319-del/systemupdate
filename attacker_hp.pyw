@@ -14,6 +14,10 @@ from PIL import Image, ImageTk
 import mss
 import keyboard
 import ctypes
+try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except:
+    try: ctypes.windll.user32.SetProcessDPIAware()
+    except: pass
 import win32gui
 
 PATCH_UPDATED_AT = "2026-06-18 13:32"
@@ -256,10 +260,15 @@ def open_overlay():
 
     def on_up(e):
         drag["x2"],drag["y2"] = e.x_root, e.y_root
-        x1 = min(drag["x1"],drag["x2"])
-        y1 = min(drag["y1"],drag["y2"])
-        x2 = max(drag["x1"],drag["x2"])
-        y2 = max(drag["y1"],drag["y2"])
+        # DPI 스케일 보정
+        try:
+            scale = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100.0
+        except:
+            scale = 1.0
+        x1 = int(min(drag["x1"],drag["x2"]) * scale)
+        y1 = int(min(drag["y1"],drag["y2"]) * scale)
+        x2 = int(max(drag["x1"],drag["x2"]) * scale)
+        y2 = int(max(drag["y1"],drag["y2"]) * scale)
         w = x2-x1; h = y2-y1
         ov.destroy()
         if w < 10 or h < 2:
@@ -282,9 +291,16 @@ def open_overlay():
 
 def update_preview(arr):
     try:
+        # 빨간색 영역만 크롭 (누끼)
+        R=arr[:,:,0].astype(int);G=arr[:,:,1].astype(int);B=arr[:,:,2].astype(int)
+        red=(R>80)&(R>G)&(R>B)
+        ys,xs=np.where(red)
+        if len(xs)>=3:
+            y1,y2=max(ys.min()-2,0),min(ys.max()+3,arr.shape[0])
+            x1,x2=max(xs.min()-2,0),min(xs.max()+3,arr.shape[1])
+            arr=arr[y1:y2,x1:x2]
         h, w = arr.shape[:2]
-        pw = min(w*2, 200)
-        ph = max(h*2, 6)
+        pw = min(w*2, 200); ph = max(h*2, 10)
         img = Image.fromarray(arr).resize((pw, ph), Image.NEAREST)
         photo = ImageTk.PhotoImage(img)
         roi_preview.config(image=photo)
