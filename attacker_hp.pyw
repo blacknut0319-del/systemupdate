@@ -14,10 +14,7 @@ from PIL import Image, ImageTk
 import mss
 import keyboard
 import ctypes
-try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
-except:
-    try: ctypes.windll.user32.SetProcessDPIAware()
-    except: pass
+
 import win32gui
 
 PATCH_UPDATED_AT = "2026-06-18 13:32"
@@ -260,15 +257,10 @@ def open_overlay():
 
     def on_up(e):
         drag["x2"],drag["y2"] = e.x_root, e.y_root
-        # DPI 스케일 보정
-        try:
-            scale = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100.0
-        except:
-            scale = 1.0
-        x1 = int(min(drag["x1"],drag["x2"]) * scale)
-        y1 = int(min(drag["y1"],drag["y2"]) * scale)
-        x2 = int(max(drag["x1"],drag["x2"]) * scale)
-        y2 = int(max(drag["y1"],drag["y2"]) * scale)
+        x1 = min(drag["x1"],drag["x2"])
+        y1 = min(drag["y1"],drag["y2"])
+        x2 = max(drag["x1"],drag["x2"])
+        y2 = max(drag["y1"],drag["y2"])
         w = x2-x1; h = y2-y1
         ov.destroy()
         if w < 10 or h < 2:
