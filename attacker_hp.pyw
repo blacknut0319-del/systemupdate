@@ -14,7 +14,6 @@ from PIL import Image, ImageTk
 import mss
 import keyboard
 import ctypes
-import win32gui
 
 PATCH_UPDATED_AT = "2026-06-18 13:32"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -235,11 +234,10 @@ for n in range(1,9):
 def open_overlay():
     ov = tk.Toplevel(root)
     ov.attributes("-fullscreen", True)
-    ov.attributes("-alpha", 0.55)
+    ov.attributes("-alpha", 0.35)
     ov.configure(bg="black")
     ov.attributes("-topmost", True)
     ov.focus_force()
-    ov.grab_set()
 
     cv = tk.Canvas(ov, bg="black", highlightthickness=0)
     cv.pack(fill="both", expand=True)
@@ -299,11 +297,6 @@ def sender():
     global hp_pct
     while running:
         try:
-            # 리니지 창이 맨 위에 있는지 확인
-            hwnd = win32gui.GetForegroundWindow()
-            title = win32gui.GetWindowText(hwnd)
-            if not title or not any(t in title.lower() for t in ['lineage','리니지','lin']):
-                time.sleep(1); continue
             x,y,w,h = HP_ROI
             img = sct.grab({"left":x,"top":y,"width":max(w,1),"height":max(h,1)})
             arr = np.array(img, dtype=np.uint8)[:,:,:3][:,:,::-1]
@@ -311,13 +304,11 @@ def sender():
             raw = int(np.sum(red))
             green = (arr[:,:,1]>80)&(arr[:,:,1]>arr[:,:,0]*1.2)&(arr[:,:,1]>arr[:,:,2]*1.2)
             poisoned = int(np.sum(green)) > (w*h*0.08)
-            gray = (abs(arr[:,:,0]-arr[:,:,1])<25)&(abs(arr[:,:,1]-arr[:,:,2])<25)&(abs(arr[:,:,0]-arr[:,:,2])<25)&(arr[:,:,0]>30)
-            petrified = int(np.sum(gray)) > (w*h*0.12)
             hp_pct = round(raw/HP_100_REF*100,1) if (HP_100_REF and HP_100_REF>0) else round(raw/max(w*h,1)*100,1)
-            sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (ip_var.get(), TARGET_PORT))
+            sock.sendto(struct.pack('fB', hp_pct, 1 if poisoned else 0), (ip_var.get(), TARGET_PORT))
             root.after(0, update_bar)
-            root.after(0, lambda p=poisoned, s=petrified: lbl_poison.config(
-                text="중독!" if p else ("석화!" if s else ""), fg="#ef4444" if p else ("#8b5cf6" if s else "#10b981")))
+            root.after(0, lambda p=poisoned: lbl_poison.config(
+                text="중독!" if p else "", fg="#ef4444" if p else "#10b981"))
             root.after(0, lambda a=arr: update_preview(a))
             time.sleep(0.3)
         except Exception as e:
