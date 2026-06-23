@@ -14,6 +14,7 @@ from PIL import Image, ImageTk
 import mss
 import keyboard
 import ctypes
+import win32gui
 
 PATCH_UPDATED_AT = "2026-06-18 13:32"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -297,6 +298,11 @@ def sender():
     global hp_pct
     while running:
         try:
+            # 리니지 창이 맨 위에 있는지 확인
+            hwnd = win32gui.GetForegroundWindow()
+            title = win32gui.GetWindowText(hwnd)
+            if not title or not any(t in title.lower() for t in ['lineage','리니지','lin']):
+                time.sleep(1); continue
             x,y,w,h = HP_ROI
             img = sct.grab({"left":x,"top":y,"width":max(w,1),"height":max(h,1)})
             arr = np.array(img, dtype=np.uint8)[:,:,:3][:,:,::-1]
