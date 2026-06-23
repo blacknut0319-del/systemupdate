@@ -235,10 +235,11 @@ for n in range(1,9):
 def open_overlay():
     ov = tk.Toplevel(root)
     ov.attributes("-fullscreen", True)
-    ov.attributes("-alpha", 0.35)
+    ov.attributes("-alpha", 0.55)
     ov.configure(bg="black")
     ov.attributes("-topmost", True)
     ov.focus_force()
+    ov.grab_set()
 
     cv = tk.Canvas(ov, bg="black", highlightthickness=0)
     cv.pack(fill="both", expand=True)
