@@ -238,7 +238,6 @@ def open_overlay():
     ov = tk.Toplevel(root)
     # 듀얼모니터 전체화면
     ov.overrideredirect(True)
-    ov.overrideredirect(True)
     sx = ctypes.windll.user32.GetSystemMetrics(76)
     sy = ctypes.windll.user32.GetSystemMetrics(77)
     sw = ctypes.windll.user32.GetSystemMetrics(78)
