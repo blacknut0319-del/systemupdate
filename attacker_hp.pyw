@@ -14,7 +14,6 @@ from PIL import Image, ImageTk
 import mss
 import keyboard
 import ctypes
-from ctypes import wintypes
 import win32gui
 
 PATCH_UPDATED_AT = "2026-06-18 13:32"
@@ -237,20 +236,9 @@ for n in range(1,9):
 # ============================================================
 def open_overlay():
     ov = tk.Toplevel(root)
-    # 현재 마우스가 있는 모니터에 오버레이
-    class RECT(ctypes.Structure):
-        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
-    pt = ctypes.wintypes.POINT()
-    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-    mon = ctypes.windll.user32.MonitorFromPoint(pt, 2)  # MONITOR_DEFAULTTONEAREST
-    mi = ctypes.wintypes.MONITORINFO()
-    mi.cbSize = ctypes.sizeof(mi)
-    ctypes.windll.user32.GetMonitorInfoW(mon, ctypes.byref(mi))
-    mx = mi.rcMonitor.left; my = mi.rcMonitor.top
-    mw = mi.rcMonitor.right - mi.rcMonitor.left
-    mh = mi.rcMonitor.bottom - mi.rcMonitor.top
-    ov.geometry(f"{mw}x{mh}+{mx}+{my}")
-    ov.overrideredirect(True); ov.attributes("-topmost", True)
+    # 전체화면 오버레이
+    ov.attributes("-fullscreen", True)
+    ov.attributes("-topmost", True)
     ov.attributes("-alpha", 0.35)
     ov.configure(bg="black")
     ov.attributes("-topmost", True)
