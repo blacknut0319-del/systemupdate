@@ -236,13 +236,14 @@ for n in range(1,9):
 # ============================================================
 def open_overlay():
     ov = tk.Toplevel(root)
-    # 듀얼모니터 전체화면 (Win32 API)
-    ov.overrideredirect(True)
-    ov.attributes("-topmost", True)
-    ov.state("zoomed")
-    ov.attributes("-fullscreen", True)
-    sw = ov.winfo_screenwidth(); sh = ov.winfo_screenheight()
-    ov.geometry(f"{sw}x{sh}+0+0")
+    # 듀얼모니터 올스크린
+    ov.overrideredirect(True); ov.attributes("-topmost", True)
+    # 모든 모니터 영역 얻기
+    x = ctypes.windll.user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+    y = ctypes.windll.user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+    w = ctypes.windll.user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+    h = ctypes.windll.user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+    ov.geometry(f"{w}x{h}+{x}+{y}")
     ov.attributes("-alpha", 0.35)
     ov.configure(bg="black")
     ov.attributes("-topmost", True)
