@@ -319,6 +319,7 @@ def sender():
             hp_pct = round(raw/HP_100_REF*100,1) if (HP_100_REF and HP_100_REF>0) else round(raw/max(w*h,1)*100,1)
             sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (ip_var.get(), TARGET_PORT))
             root.after(0, update_bar)
+            root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))
             root.after(0, lambda p=poisoned, s=petrified: lbl_poison.config(
                 text="중독!" if p else ("석화!" if s else ""), fg="#ef4444" if p else ("#8b5cf6" if s else "#10b981")))
             root.after(10, lambda a=arr.copy(): update_preview(a))
