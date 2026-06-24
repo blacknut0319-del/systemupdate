@@ -259,7 +259,7 @@ def open_overlay():
 
     def on_down(e):
         drag["x1"],drag["y1"] = e.x_root, e.y_root
-        drag["rect"] = cv.create_rectangle(e.x,e.y,e.x,e.y,
+        drag["rect"] = cv.create_rectangle(e.x_root-sx,e.y_root-sy,e.x_root-sx,e.y_root-sy,
                         outline="#10b981", width=4)
 
     def on_move(e):
@@ -287,9 +287,8 @@ def open_overlay():
     cv.bind("<B1-Motion>", on_move)
     cv.bind("<ButtonRelease-1>", on_up)
 
-    tk.Label(ov, text="HP바 왼쪽->오른쪽 드래그", fg="#10b981", bg="black",
-             font=("Malgun Gothic",13,"bold")).place(relx=0.5, rely=0.02, anchor="n")
-    tk.Label(ov, text="ESC=취소", fg="#6c7086", bg="black", font=("",9)).place(relx=0.5, rely=0.06, anchor="n")
+    tk.Label(ov, text="HP바 드래그 (ESC=취소)", fg="#10b981", bg="black",
+             font=("Malgun Gothic",13,"bold")).place(x=sw//2, y=20, anchor="n")
     ov.bind("<Escape>", lambda e: ov.destroy())
 
 def update_preview(arr):
