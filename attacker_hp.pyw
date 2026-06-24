@@ -237,20 +237,16 @@ for n in range(1,9):
 def open_overlay():
     ov = tk.Toplevel(root)
     # 듀얼모니터 전체화면
-    ov.attributes("-fullscreen", True)
-    ov.attributes("-topmost", True)
-    ov.configure(bg="black")
-    ov.attributes("-alpha", 0.35)
-    ov.focus_force()
-    # 모든 모니터 커버: Win32 가상화면 크기로 강제
+    ov.overrideredirect(True)
+    ov.overrideredirect(True)
     sx = ctypes.windll.user32.GetSystemMetrics(76)
     sy = ctypes.windll.user32.GetSystemMetrics(77)
     sw = ctypes.windll.user32.GetSystemMetrics(78)
     sh = ctypes.windll.user32.GetSystemMetrics(79)
     ov.geometry(f"{sw}x{sh}+{sx}+{sy}")
-    ov.update()
+    ov.attributes("-topmost", True)
     ov.attributes("-alpha", 0.35)
-    # Already set in overlay init
+    ov.configure(bg="black")
 
     cv = tk.Canvas(ov, bg="black", highlightthickness=0)
     cv.pack(fill="both", expand=True)
@@ -264,7 +260,7 @@ def open_overlay():
 
     def on_move(e):
         if drag["rect"]:
-            cv.coords(drag["rect"], e.x_root-ov.winfo_rootx(), e.y_root-ov.winfo_rooty(), e.x, e.y)
+            cv.coords(drag["rect"], drag["x1"]-sx, drag["y1"]-sy, e.x_root-sx, e.y_root-sy)
 
     def on_up(e):
         drag["x2"],drag["y2"] = e.x_root, e.y_root
