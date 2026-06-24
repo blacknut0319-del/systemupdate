@@ -236,9 +236,13 @@ for n in range(1,9):
 # ============================================================
 def open_overlay():
     ov = tk.Toplevel(root)
-    # 듀얼모니터 전체화면
+    # 듀얼모니터 전체화면 (Win32 API)
+    ov.overrideredirect(True)
+    ov.attributes("-topmost", True)
+    ov.state("zoomed")
     ov.attributes("-fullscreen", True)
-    ov.geometry(f"{ov.winfo_screenwidth()}x{ov.winfo_screenheight()}+0+0")
+    sw = ov.winfo_screenwidth(); sh = ov.winfo_screenheight()
+    ov.geometry(f"{sw}x{sh}+0+0")
     ov.attributes("-alpha", 0.35)
     ov.configure(bg="black")
     ov.attributes("-topmost", True)
@@ -256,7 +260,7 @@ def open_overlay():
 
     def on_move(e):
         if drag["rect"]:
-            cv.coords(drag["rect"], drag["x1"]-ov.winfo_rootx(), drag["y1"]-ov.winfo_rooty(), e.x, e.y)
+            cv.coords(drag["rect"], e.x_root-ov.winfo_rootx(), e.y_root-ov.winfo_rooty(), e.x, e.y)
 
     def on_up(e):
         drag["x2"],drag["y2"] = e.x_root, e.y_root
