@@ -236,7 +236,10 @@ for n in range(1,9):
 # ============================================================
 def open_overlay():
     ov = tk.Toplevel(root)
-    ov.attributes("-fullscreen", True)
+    # 듀얼모니터 대응
+    sw = ov.winfo_screenwidth(); sh = ov.winfo_screenheight()
+    ov.geometry(f"{sw}x{sh}+0+0")
+    ov.overrideredirect(True)
     ov.attributes("-alpha", 0.35)
     ov.configure(bg="black")
     ov.attributes("-topmost", True)
