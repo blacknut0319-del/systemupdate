@@ -322,11 +322,11 @@ def sender():
             root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))
             root.after(0, lambda p=poisoned, s=petrified: lbl_poison.config(
                 text="중독!" if p else ("석화!" if s else ""), fg="#ef4444" if p else ("#8b5cf6" if s else "#10b981")))
-            root.after(10, lambda a=arr.copy(): update_preview(a))
+            root.after(0, update_preview, arr.copy())
             time.sleep(0.3)
         except Exception as e:
-            print("Sender error: %s" % e)
-            time.sleep(1)
+            import traceback; traceback.print_exc()
+            time.sleep(0.5)
 
 threading.Thread(target=sender, daemon=True).start()
 
