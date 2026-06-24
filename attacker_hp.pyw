@@ -152,7 +152,9 @@ def save_cfg():
     if HP_100_REF is not None:
         cfg["hp_100_ref"] = HP_100_REF
     if os.path.exists(CONFIG_FILE): ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 128)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f: json.dump(cfg, f, indent=2)
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f: json.dump(cfg, f, indent=2)
+    os.replace(tmp, CONFIG_FILE)
     ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 2)
     lbl_status.config(text="저장됨", fg="#10b981")
 
@@ -304,6 +306,7 @@ def sender():
             if not title or not any(t in title.lower() for t in ['lineage','리니지','lin']):
                 time.sleep(1); continue
             x,y,w,h = HP_ROI
+            if w < 5 or h < 1: time.sleep(0.1); continue
             img = sct.grab({"left":x,"top":y,"width":max(w,1),"height":max(h,1)})
             arr = np.array(img, dtype=np.uint8)[:,:,:3][:,:,::-1]
             red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
