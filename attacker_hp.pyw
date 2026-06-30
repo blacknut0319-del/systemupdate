@@ -105,11 +105,6 @@ header.pack(fill="x")
 header.pack_propagate(False)
 tk.Label(header, text=PATCH_UPDATED_AT, bg="#141420", fg="#ffffff", font=("Consolas", 7)).place(x=8, rely=0.5, anchor="w")
 tk.Label(header, text="격수 HP 전송기", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 10, "bold")).place(relx=0.5, rely=0.5, anchor="center")
-# 최소화
-min_btn = tk.Label(header, text="─", bg="#141420", fg="#a6adc8", font=("", 12))
-min_btn.place(relx=1.0, x=-44, rely=0.5, anchor="e")
-def hide(): root.iconify()
-min_btn.bind("<Button-1>", lambda e: hide())
 # 닫기
 close_btn = tk.Label(header, text="✕", bg="#141420", fg="#f38ba8", font=("", 11))
 close_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
