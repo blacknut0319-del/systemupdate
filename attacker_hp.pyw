@@ -95,17 +95,19 @@ for i in range(1, 9):
 # ============================================================
 root = tk.Tk()
 root.overrideredirect(True)
-root.geometry("290x100+0+0")
+root.geometry("310x100+0+0")
 root.attributes("-topmost", True)
-root.configure(bg="#0d0f14")  # header UI v9 - final - CDN refresh
+root.configure(bg="#0d0f14")  # header UI v10 - final - CDN refresh
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
 header.pack(fill="x")
 header.pack_propagate(False)
 # Date in title
-title_lbl = tk.Label(header, text=f"격수 HP 전송기  {PATCH_UPDATED_AT}", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 8, "bold"))
+title_lbl = tk.Label(header, text=f"격수HP  {PATCH_UPDATED_AT}", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 8, "bold"))
 title_lbl.place(relx=0.5, rely=0.5, anchor="center")
+title_lbl.bind("<Button-1>", start_move)
+title_lbl.bind("<B1-Motion>", do_move)
 # 닫기
 close_btn = tk.Label(header, text="✕", bg="#141420", fg="#f38ba8", font=("", 11))
 close_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
