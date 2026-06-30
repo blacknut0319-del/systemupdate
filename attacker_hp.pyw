@@ -97,7 +97,7 @@ root = tk.Tk()
 root.overrideredirect(True)
 root.geometry("250x100+0+0")
 root.attributes("-topmost", True)
-root.configure(bg="#0d0f14")  # header UI v4 - CDN refresh
+root.configure(bg="#0d0f14")  # header UI v5 - CDN refresh
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
@@ -109,10 +109,15 @@ tk.Label(header, text="격수 HP 전송기", bg="#141420", fg="#cba6f7", font=("
 close_btn = tk.Label(header, text="✕", bg="#141420", fg="#f38ba8", font=("", 11))
 close_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
 def close_app():
-    global running
+    global running, sock
     running = False
+    try: sock.close()
+    except: pass
     root.destroy()
-close_btn.bind("<Button-1>", lambda e: close_app())
+def on_close_click(e):
+    close_app()
+    return "break"
+close_btn.bind("<Button-1>", on_close_click)
 
 # 드래그 이동
 def start_move(e): root.start_x, root.start_y = e.x, e.y
