@@ -94,10 +94,28 @@ for i in range(1, 9):
 # 메인 GUI
 # ============================================================
 root = tk.Tk()
-root.title("격수 HP 전송기")
+root.overrideredirect(True)
 root.geometry("225x100+0+0")
 root.attributes("-topmost", True)
 root.configure(bg="#0d0f14")
+
+# ── 헤더바 ──
+header = tk.Frame(root, bg="#141420", height=22)
+header.pack(fill="x")
+header.pack_propagate(False)
+tk.Label(header, text="❖ 격수 HP 전송기 ❖", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 9, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+tk.Label(header, text=PATCH_UPDATED_AT, bg="#141420", fg="#6c7086", font=("Consolas", 7)).place(x=4, rely=0.5, anchor="w")
+close_btn = tk.Label(header, text="✕", bg="#141420", fg="#f38ba8", font=("", 11))
+close_btn.place(relx=1.0, x=-4, rely=0.5, anchor="e")
+close_btn.bind("<Button-1>", lambda e: root.destroy())
+
+# 드래그 이동
+def start_move(e): root.start_x, root.start_y = e.x, e.y
+def do_move(e): root.geometry(f"+{e.x_root - root.start_x}+{e.y_root - root.start_y}")
+header.bind("<Button-1>", start_move)
+header.bind("<B1-Motion>", do_move)
+header.bind("<Button-3>", start_move)
+header.bind("<B3-Motion>", do_move)
 
 def auto_resize_height():
     if root and root.winfo_exists():
