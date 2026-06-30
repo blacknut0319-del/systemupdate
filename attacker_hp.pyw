@@ -108,7 +108,11 @@ tk.Label(header, text="격수 HP 전송기", bg="#141420", fg="#cba6f7", font=("
 # 닫기
 close_btn = tk.Label(header, text="✕", bg="#141420", fg="#f38ba8", font=("", 11))
 close_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
-close_btn.bind("<Button-1>", lambda e: root.destroy())
+def close_app():
+    global running
+    running = False
+    root.destroy()
+close_btn.bind("<Button-1>", lambda e: close_app())
 
 # 드래그 이동
 def start_move(e): root.start_x, root.start_y = e.x, e.y
