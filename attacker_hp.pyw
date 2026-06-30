@@ -97,14 +97,14 @@ root = tk.Tk()
 root.overrideredirect(True)
 root.geometry("250x100+0+0")
 root.attributes("-topmost", True)
-root.configure(bg="#0d0f14")  # header UI v3 - CDN refresh
+root.configure(bg="#0d0f14")  # header UI v4 - CDN refresh
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
 header.pack(fill="x")
 header.pack_propagate(False)
 tk.Label(header, text=PATCH_UPDATED_AT, bg="#141420", fg="#ffffff", font=("Consolas", 7)).place(x=8, rely=0.5, anchor="w")
-tk.Label(header, text="격수 HP 전송기", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 10, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+tk.Label(header, text="격수 HP 전송기", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 9, "bold")).place(relx=0.5, rely=0.5, anchor="center")
 # 닫기
 close_btn = tk.Label(header, text="✕", bg="#141420", fg="#f38ba8", font=("", 11))
 close_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
