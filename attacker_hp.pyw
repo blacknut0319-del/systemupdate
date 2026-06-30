@@ -97,7 +97,7 @@ root = tk.Tk()
 root.overrideredirect(True)
 root.geometry("250x100+0+0")
 root.attributes("-topmost", True)
-root.configure(bg="#0d0f14")  # header UI v5 - CDN refresh
+root.configure(bg="#0d0f14")  # header UI v6 - CDN refresh
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
@@ -116,17 +116,13 @@ def close_app():
     root.destroy()
 def on_close_click(e):
     close_app()
-    return "break"
+
 close_btn.bind("<Button-1>", on_close_click)
 
 # 드래그 이동
 def start_move(e): root.start_x, root.start_y = e.x, e.y
 def do_move(e): root.geometry(f"+{e.x_root - root.start_x}+{e.y_root - root.start_y}")
-header.bind("<Button-1>", start_move)
-header.bind("<B1-Motion>", do_move)
-for child in [header] + list(header.winfo_children()):
-    child.bind("<Button-1>", start_move)
-    child.bind("<B1-Motion>", do_move)
+# Only header frame draggable (not children)
 header.bind("<B1-Motion>", do_move)
 header.bind("<Button-3>", start_move)
 header.bind("<B3-Motion>", do_move)
