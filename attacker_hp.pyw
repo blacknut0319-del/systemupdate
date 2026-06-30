@@ -97,7 +97,7 @@ root = tk.Tk()
 root.overrideredirect(True)
 root.geometry("250x100+0+0")
 root.attributes("-topmost", True)
-root.configure(bg="#0d0f14")
+root.configure(bg="#0d0f14")  # header UI v2
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
