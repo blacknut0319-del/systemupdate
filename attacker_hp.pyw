@@ -97,7 +97,7 @@ root = tk.Tk()
 root.overrideredirect(True)
 root.geometry("290x100+0+0")
 root.attributes("-topmost", True)
-root.configure(bg="#0d0f14")  # header UI v12 - final - CDN refresh
+root.configure(bg="#0d0f14")  # header UI v13 - final - CDN refresh
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
@@ -117,8 +117,7 @@ def close_app():
     root.destroy()
 # 드래그 이동 (헤더 배경만)
 def start_move(e):
-    if e.widget in (header, title_lbl):
-        root.start_x, root.start_y = e.x_root, e.y_root
+    root.start_x, root.start_y = e.x_root, e.y_root
 def do_move(e):
     if hasattr(root, 'start_x'):
         root.geometry(f"+{e.x_root - root.start_x}+{e.y_root - root.start_y}")
