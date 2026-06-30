@@ -16,7 +16,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-06-18 13:32"
+PATCH_UPDATED_AT = "2026-07-01 04:40"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
@@ -114,6 +114,10 @@ close_btn.bind("<Button-1>", lambda e: root.destroy())
 def start_move(e): root.start_x, root.start_y = e.x, e.y
 def do_move(e): root.geometry(f"+{e.x_root - root.start_x}+{e.y_root - root.start_y}")
 header.bind("<Button-1>", start_move)
+header.bind("<B1-Motion>", do_move)
+for child in [header] + list(header.winfo_children()):
+    child.bind("<Button-1>", start_move)
+    child.bind("<B1-Motion>", do_move)
 header.bind("<B1-Motion>", do_move)
 header.bind("<Button-3>", start_move)
 header.bind("<B3-Motion>", do_move)
