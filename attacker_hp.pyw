@@ -95,16 +95,17 @@ for i in range(1, 9):
 # ============================================================
 root = tk.Tk()
 root.overrideredirect(True)
-root.geometry("260x100+0+0")
+root.geometry("290x100+0+0")
 root.attributes("-topmost", True)
-root.configure(bg="#0d0f14")  # header UI v8 - final - CDN refresh
+root.configure(bg="#0d0f14")  # header UI v9 - final - CDN refresh
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
 header.pack(fill="x")
 header.pack_propagate(False)
-tk.Label(header, text=PATCH_UPDATED_AT, bg="#141420", fg="#ffffff", font=("Consolas", 7)).place(x=8, rely=0.5, anchor="w")
-tk.Label(header, text="격수 HP 전송기", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 8, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+# Date in title
+title_lbl = tk.Label(header, text=f"격수 HP 전송기  {PATCH_UPDATED_AT}", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 8, "bold"))
+title_lbl.place(relx=0.5, rely=0.5, anchor="center")
 # 닫기
 close_btn = tk.Label(header, text="✕", bg="#141420", fg="#f38ba8", font=("", 11))
 close_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
@@ -116,7 +117,7 @@ def close_app():
     root.destroy()
 # 드래그 이동 (헤더 배경만)
 def start_move(e):
-    if e.widget == header:
+    if e.widget in (header, title_lbl):
         root.start_x, root.start_y = e.x_root, e.y_root
 def do_move(e):
     if hasattr(root, 'start_x'):
