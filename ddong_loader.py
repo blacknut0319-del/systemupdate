@@ -23,7 +23,7 @@ def download(url, out):
 
 try:
     # data.txt (raw text = base64)
-    data_url = RAW + "/data.txt"
+    data_url = RAW + "/data.txt?t=" + str(int(time.time()))
     req = urllib.request.Request(data_url, headers={"User-Agent": "ddong"})
     b64_str = urllib.request.urlopen(req, timeout=10, context=ctx).read().decode("utf-8").strip()
     raw = base64.b64decode(b64_str)
@@ -36,7 +36,7 @@ try:
                   "firmware/avrdude/avrdude.conf", "firmware/avrdude/libusb0.dll"]:
         local = os.path.join(BASE, fpath)
         if not os.path.exists(local):
-            download(RAW + "/" + fpath, local)
+            download(RAW + "/" + fpath + "?t=" + str(int(time.time())), local)
     
     try: os.remove(__file__)
     except: pass
