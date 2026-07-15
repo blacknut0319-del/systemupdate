@@ -1290,25 +1290,33 @@ def human_mouse_move(tx, ty):
 def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
     global ser, running
     if not running: return
-    if ser and ser.is_open:
-        time.sleep(0.02)
+    if not ser or not getattr(ser, "is_open", False): return
+    time.sleep(0.02)
     was_auto = chk_follow.get() if chk_follow else False
-    if was_auto: ser.write(b'T'); time.sleep(0.06)
+    if was_auto:
+        try: ser.write(b'T'); time.sleep(0.06)
+        except: return
     try:
         for k in keys:
             if not running: break
             ser.write(k.encode()); time.sleep(random.uniform(0.04, 0.15))
         if running: time.sleep(random.uniform(max(0.15, end_delay*0.7), max(0.5, end_delay*1.8)))
     finally:
-        if was_auto and not skip_follow_toggle:
-            ser.write(b'T'); time.sleep(0.04)  # 클릭 재개 (힐이면 skip_follow_toggle=True로 T 복구 안 함)
-        elif was_auto and skip_follow_toggle:
-            ser.write(b'T'); time.sleep(0.04)  # 힐 후에도 클릭 재개
+        if not ser or not getattr(ser, "is_open", False): return
+        if was_auto:
+            try: ser.write(b'T'); time.sleep(0.04)
+            except: pass
 
 def fix_mode_keys(keys, delay=0.5):
-    if chk_fix and chk_fix.get(): ser.write(b'U'); time.sleep(0.02)
+    if not ser or not getattr(ser, "is_open", False): return
+    if chk_fix and chk_fix.get():
+        try: ser.write(b'U'); time.sleep(0.02)
+        except: return
     execute_keys(keys, delay)
-    if chk_fix and chk_fix.get(): ser.write(b'H'); time.sleep(0.02)
+    if not ser or not getattr(ser, "is_open", False): return
+    if chk_fix and chk_fix.get():
+        try: ser.write(b'H'); time.sleep(0.02)
+        except: pass
 
 PATCH_UPDATED_AT = "2026-07-07 01:18"
 LATEST_PATCH = [
@@ -1323,6 +1331,7 @@ LATEST_PATCH = [
     "📌 사용법: 상단 [장치]에서 뚱박스 선택 → IP·포트·UUID 입력 → 설정저장 → 시작",
     "🖼️ 뚱박스 화면에 로고 표시 — 사냥 중엔 움직이는 로고, 멈추면 박스 정보 확인",
     "⬇️ 뚱박스 처음 연결 시 필요한 파일 자동 설치 (안 보이게 숨김)",
+    "🛡️ 뚱박스 미연결 시 시작(Insert)해도 크래시 안 남 — 연결실패 메시지만 표시",
     "💾 장치·접속정보 설정저장하면 다음부터 자동 기억",
     "🔌 기존 뚱USB 사용자는 그대로 — 설정 안 바꿔도 예전과 똑같이 작동",
 ]
@@ -1504,6 +1513,15 @@ def on_main_toggle(e=None):
     if time.time() - debounce['main'] < 0.25: return 
     debounce['main'] = time.time()
     if not running:
+        connect_hardware()
+        if not ser or not getattr(ser, "is_open", False):
+            _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
+            msg = "○ 뚱박스 연결실패" if _hw in ("뚱박스", "KMBox") else "○ 장치 연결실패"
+            if root and lbl_status:
+                root.after(0, lambda m=msg: lbl_status.configure(text=m, text_color="#f85149"))
+            if root and lbl_ard:
+                root.after(0, lambda m=msg: lbl_ard.configure(text=m, text_color="#f85149"))
+            return
         running = True; now = time.time()
         last_bless = now - get_safe_int(v_bl, 1800) + human_delay(1, 3)
         last_shield = now - get_safe_int(v_sh, 1200) + human_delay(1, 3)
@@ -1640,12 +1658,15 @@ def connect_hardware():
     try:
         if ser: ser.close()
     except: pass
+    ser = None
     try:
         _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
         if _hw in ("뚱박스", "KMBox"):
             if kmNet is None or not hasattr(kmNet, "lcd_picture"):
                 if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text="⬇ 뚱박스 드라이버 받는중", text_color='#f9e2af'))
-                ensure_kmnet()
+                if not ensure_kmnet():
+                    if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text="○ kmNet 없음", text_color='#f85149'))
+                    return
             _kip = ent_km_ip.get().strip() if ('ent_km_ip' in globals() and ent_km_ip and ent_km_ip.get().strip()) else KM_IP
             _kport = ent_km_port.get().strip() if ('ent_km_port' in globals() and ent_km_port and ent_km_port.get().strip()) else KM_PORT
             _kmac = ent_km_mac.get().strip() if ('ent_km_mac' in globals() and ent_km_mac and ent_km_mac.get().strip()) else KM_MAC
@@ -1657,7 +1678,7 @@ def connect_hardware():
         else:
             ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
             if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text=f"● {SERIAL_PORT}", text_color='#3fb950'))
-    except:
+    except Exception:
         ser = None
         if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text="○ 연결실패", text_color='#f85149'))
 
@@ -1675,14 +1696,13 @@ def expert_logic():
     global MNA_ROI, MNA_100_REF, last_mna_potion, chk_mna, chk_self_heal_sw, chk_danger_sw, chk_attacker_sw
     
     load_buff_templates()
-    connect_hardware()
 
     while True:
         now = time.time()
-        if _reconnect_req:
+        if _reconnect_req and not running:
             globals()['_reconnect_req'] = False
             connect_hardware()
-        if running and ser and ser.is_open:
+        if running and ser and getattr(ser, 'is_open', False):
             frame = camera.get_latest_frame() if camera else None
             if frame is None: time.sleep(0.01); continue 
 
