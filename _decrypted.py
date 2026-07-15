@@ -839,6 +839,9 @@ def _open_admin_panel_impl():
                 entries[f"P{pi+1}_ROI_LBL"].configure(text=f"({x1},{y1}) {x2-x1}x{y2-y1}")
             save_hidden_config(loaded_pwd if (loaded_pwd) else "")
             ov.destroy()
+            pv = entries.get(f"P{pi+1}_PREVIEW")
+            if pv:
+                admin.after(300, lambda p=pi, w=pv: refresh_preview(w, None, PARTY_ROIS[p], PARTY_HP_100_REF[p]))
         cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
         tk.Label(ov,text=f"🟢 P{pi+1} HP바 드래그",fg="#10b981",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
         tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
@@ -904,6 +907,8 @@ def _open_admin_panel_impl():
         thr_lbl = ctk.CTkLabel(roi_row, text=f"{var.get()}%", text_color="#f38ba8", font=("Malgun Gothic", 9, "bold"), width=24)
         thr_lbl.pack(side="left")
         var.trace_add("write", lambda *a, i=pi, v=var, l=thr_lbl: _set_thr(i, v, l))
+        if r[0] != 0:
+            admin.after(150, lambda p=pi, w=pv: refresh_preview(w, None, PARTY_ROIS[p], PARTY_HP_100_REF[p]))
         return cell
 
     for i in range(8): 
@@ -915,6 +920,10 @@ def _open_admin_panel_impl():
         if not admin.winfo_exists(): return
         if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF)
         if MNA_ROI[0] != 0: refresh_preview(mna_roi_preview, mna_roi_lbl, MNA_ROI, MNA_100_REF, True)
+        for pi in range(8):
+            if PARTY_ROIS[pi][0] != 0:
+                pv = entries.get(f"P{pi+1}_PREVIEW")
+                if pv: refresh_preview(pv, None, PARTY_ROIS[pi], PARTY_HP_100_REF[pi])
         admin.after(1000, auto_refresh)
     auto_refresh()
 
