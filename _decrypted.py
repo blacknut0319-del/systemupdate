@@ -716,7 +716,11 @@ def _open_admin_panel_impl():
             if is_blue:
                 px = (Bq>50)&(Bq>Rq*1.1)&(Bq>Gq*1.1); label = "MP"
             else:
-                px = (Rq>80)&(Rq>Gq*1.2)&(Rq>Bq*1.2); label = "HP"
+                red_px = (Rq>80)&(Rq>Gq*1.2)&(Rq>Bq*1.2)
+                grn_px = (Gq>15)&(Gq>Rq*1.03)&(Gq>Bq*1.03)
+                rc, gc = int(np.sum(red_px)), int(np.sum(grn_px))
+                px = grn_px if gc > rc else red_px
+                label = "HP(독)" if gc > rc and gc > 0 else "HP"
             raw = int(np.sum(px)); wh = max(x2-x1,1)*max(y2-y1,1)
             pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
             roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | {label}:{pct:.0f}% | 100%:{ref100 or '?'}px")
@@ -1160,18 +1164,30 @@ def chk_color(f, coord, target_rgb, tol=25):
     if r == -1 or (r == 0 and g == 0 and b == 0): return False
     return abs(r - target_rgb[0]) <= tol and abs(g - target_rgb[1]) <= tol and abs(b - target_rgb[2]) <= tol
 
-def roi_hp_pct(frame, roi, ref100=None):
-    x1,y1,x2,y2 = roi
-    if x1==0 and x2==0: return 100.0
+def bar_fill_pct(frame, roi, ref100=None):
+    """HP바 채움% — 빨강(평소) / 초록(독) 자동 판별."""
+    x1, y1, x2, y2 = roi
+    if x1 == 0 and x2 == 0:
+        return 100.0
     try:
-        r = frame[y1:y2,x1:x2]
-        if r.size==0: return 100.0
-        R,G,B = r[:,:,0].astype(int),r[:,:,1].astype(int),r[:,:,2].astype(int)
-        red = (R>80)&(R>G*1.2)&(R>B*1.2)
-        raw = int(np.sum(red))
-        if ref100 and ref100>0: return min(100.0, round(raw/ref100*100,1))
-        return min(100.0, round(raw/max(r.shape[0]*r.shape[1],1)*100,1))
-    except: return 100.0
+        r = frame[y1:y2, x1:x2]
+        if r.size == 0:
+            return 100.0
+        R, G, B = r[:, :, 0].astype(int), r[:, :, 1].astype(int), r[:, :, 2].astype(int)
+        red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
+        green = (G > 15) & (G > R * 1.03) & (G > B * 1.03)
+        red_cnt = int(np.sum(red))
+        green_cnt = int(np.sum(green))
+        total = max(r.shape[0] * r.shape[1], 1)
+        raw = green_cnt if (green_cnt > red_cnt and green_cnt > total * 0.02) else red_cnt
+        if ref100 and ref100 > 0:
+            return min(100.0, round(raw / ref100 * 100, 1))
+        return min(100.0, round(raw / total * 100, 1))
+    except Exception:
+        return 100.0
+
+def roi_hp_pct(frame, roi, ref100=None):
+    return bar_fill_pct(frame, roi, ref100)
 
 def roi_mna_pct(frame, roi, ref100=None):
     x1,y1,x2,y2 = roi
@@ -1221,19 +1237,7 @@ def is_green_bar(frame, roi):
     except: return False
 
 def scan_party_hp(frame, pi):
-    x1, y1, x2, y2 = PARTY_ROIS[pi]
-    if x1 == 0 and x2 == 0: return 100.0
-    try:
-        roi = frame[y1:y2, x1:x2]
-        if roi.size == 0: return 100.0
-        R, G, B = roi[:,:,0].astype(int), roi[:,:,1].astype(int), roi[:,:,2].astype(int)
-        ref = PARTY_HP_100_REF[pi]
-        red_mask = (R > 80) & (R > G*1.2) & (R > B*1.2)
-        raw = int(np.sum(red_mask))
-        if ref and ref > 0: return min(100.0, round(raw / ref * 100, 1))
-        total = roi.shape[0] * roi.shape[1]
-        return min(100.0, round(raw / max(total, 1) * 100, 1))
-    except: return 100.0
+    return bar_fill_pct(frame, PARTY_ROIS[pi], PARTY_HP_100_REF[pi])
 
 def load_buff_templates():
     global buff_templates, buff_template_hu
@@ -1320,6 +1324,8 @@ def fix_mode_keys(keys, delay=0.5):
 
 PATCH_UPDATED_AT = "2026-07-07 01:18"
 LATEST_PATCH = [
+    "🟢 독(초록 HP바)에서도 힐·위험베르 정상 — HP% 빨강/초록 자동 판별",
+    "🩹 독 걸려도 HP% 기준으로 자힐·파티힐 동작 (해독과 분리)",
     "🔄 파티힐 원본 방식으로 복구 — 키 다섯개를 끊지 않고 한번에 눌러서 힐 지연 없앰",
     "🔄 키입력 내부 대기시간 원래대로 복구",
     "🔄 전체 감지 간격 0.25초로 원복",
@@ -1727,14 +1733,12 @@ def expert_logic():
                 fix_mode_keys(['2', '9', '1'], 0.5); log_event('🟢 독해독'); continue
             if chk_target_poison and chk_target_poison.get() and attacker_poisoned:
                 fix_mode_keys(['2', 'X', '1'], 0.45); attacker_poisoned = False; log_event('🟢 격수 독해독'); continue
-            # 위험베르
+            # 위험베르 (HP% — 독=초록바도 bar_fill_pct로 판정)
             danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
-            poisoned = is_green_bar(frame, SELF_HP_ROI)
-            petrified = is_gray_bar(frame, SELF_HP_ROI)
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
             if danger_roi[0] != 0:
-                danger_pct = roi_hp_pct(frame, danger_roi, danger_ref)
-                if chk_danger_sw.get() and not poisoned and danger_pct < danger_hp_threshold:
+                danger_pct = bar_fill_pct(frame, danger_roi, danger_ref)
+                if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
                     ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
             # 버프
@@ -1757,7 +1761,7 @@ def expert_logic():
                 healed = False
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF)
-                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3) and not poisoned:
+                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
                         if prob == 0: execute_keys(['E'], 1.0, skip_follow_toggle=True)
@@ -1766,7 +1770,7 @@ def expert_logic():
                             if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
                             else: execute_keys(['E'], 1.0, skip_follow_toggle=True)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
-                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3) and not poisoned:
+                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
                     if prob == 0: execute_keys(['E'], 1.0, skip_follow_toggle=True)
@@ -1781,7 +1785,7 @@ def expert_logic():
                     for i in range(8):
                         if selected_party_flags[i] and PARTY_ROIS[i][0] != 0:
                             hp_pct = scan_party_hp(frame, i)
-                            if hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[i] and not poisoned:
+                            if hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[i]:
                                 if hp_pct < best_hp:
                                     best_hp = hp_pct; best_i = i
                     if best_i >= 0:
@@ -1797,7 +1801,7 @@ def expert_logic():
                 healed = False
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF)
-                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3) and not poisoned:
+                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
                         if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
@@ -1806,7 +1810,7 @@ def expert_logic():
                             if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
                             else: execute_keys(['E'], 0.8, skip_follow_toggle=True)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
-                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3) and not poisoned:
+                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
                     if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
@@ -1843,7 +1847,7 @@ def expert_logic():
                 action_taken = False
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF)
-                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2) and not poisoned:
+                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
                         if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
@@ -1852,7 +1856,7 @@ def expert_logic():
                             if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
                             else: execute_keys(['E'], 0.8, skip_follow_toggle=True)
                         last_self_heal = now; action_taken = True
-                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 20) and (now - last_self_heal >= 0.2) and not poisoned:
+                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 20) and (now - last_self_heal >= 0.2):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
                     if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
@@ -1863,7 +1867,7 @@ def expert_logic():
                     last_self_heal = now; action_taken = True
                 
                 if not action_taken and (now - last_noparty_heal >= 0.2):
-                    if chk_attacker_sw.get() and (time.time() - last_udp_time < 5) and attacker_hp_udp < attacker_hp_threshold and not poisoned:
+                    if chk_attacker_sw.get() and (time.time() - last_udp_time < 5) and attacker_hp_udp < attacker_hp_threshold:
                         if chk_strong_heal and chk_strong_heal.get() and attacker_hp_udp < strong_heal_pct:
                             ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{attacker_hp_udp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
                         elif random.randint(1, 100) <= 85:
