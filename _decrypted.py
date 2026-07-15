@@ -1442,7 +1442,7 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-15 14:35"
+PATCH_UPDATED_AT = "2026-07-15 14:38"
 LATEST_PATCH = [
     "✨ 버프 그리드 — F1/F2/F3 단축창 × F5~F12 체크 (뚱헌터 방식), F10/F11/2-F5 등 삭제",
     "▶ 접이식 UI — 옵션/버프/힐 섹션 펼침·접기 (폼 커짐 방지)",
@@ -2174,7 +2174,7 @@ prob_combo.pack(side='right', pady=2, padx=4)
 prob_combo.set("30%")
 
 # ─── 접이식: 옵션 ───
-coll_opt = Collapsible(root, "옵션", start_open=True)
+coll_opt = Collapsible(root, "옵션", start_open=False)
 coll_opt.pack(pady=1, padx=2, fill="x")
 frame_opt = coll_opt.body
 frame_opt.grid_columnconfigure(0, weight=1)
@@ -2189,7 +2189,7 @@ RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=l
 RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=2, column=1, padx=3, pady=2, sticky="w")
 
 # ─── 접이식: 버프 그리드 ───
-coll_buff = Collapsible(root, "버프", start_open=True)
+coll_buff = Collapsible(root, "버프", start_open=False)
 coll_buff.pack(pady=1, padx=2, fill="x")
 buff_body = coll_buff.body
 RoundedToggle(buff_body, "버프 자동", "#a371f7", var=chk_buff_on, cmd=lambda: log_event(f"✨ 버프 {'ON' if chk_buff_on.get() else 'OFF'}")).pack(anchor="w", padx=4, pady=(4, 2))
@@ -2247,7 +2247,7 @@ buff_hotbar_combo.configure(command=_show_buff_page)
 _show_buff_page("F1")
 
 # ─── 접이식: 힐·물약 ───
-coll_heal = Collapsible(root, "힐·물약", start_open=True)
+coll_heal = Collapsible(root, "힐·물약", start_open=False)
 coll_heal.pack(pady=1, padx=2, fill="x")
 heal_body = coll_heal.body
 
