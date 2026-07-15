@@ -1442,8 +1442,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-15 14:38"
+PATCH_UPDATED_AT = "2026-07-15 14:45"
 LATEST_PATCH = [
+    "⚡ 파티 모드 상위힐 수정 — HP가 기준% 이하일 때 F7(상위힐) 나가도록 (기존엔 F9만)",
     "✨ 버프 그리드 — F1/F2/F3 단축창 × F5~F12 체크 (뚱헌터 방식), F10/F11/2-F5 등 삭제",
     "▶ 접이식 UI — 옵션/버프/힐 섹션 펼침·접기 (폼 커짐 방지)",
     "💚 파티 해독 — 파티창 초록바 클릭 후 큐어포이즌 (F2→F10→F1)",
@@ -2008,10 +2009,14 @@ def expert_logic():
                         was_auto = chk_follow.get() if chk_follow else False
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
                         human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
-                        execute_keys(['K', 'K', 'A', 'K', 'K'], 0.15, skip_follow_toggle=True)
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
+                        heal_key = '7' if use_strong else 'A'
+                        execute_keys(['K', 'K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
                         human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
                         last_party_heal = now; healed = True
+                        if use_strong:
+                            log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
 
             # 노파티
             elif m == "노파티":
