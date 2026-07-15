@@ -145,6 +145,89 @@ class RoundedToggle(ctk.CTkFrame):
         if self.cmd: self.cmd()
     def get(self): return self.var.get()
     def set(self, v): self.var.set(v); self.box.configure(fg_color=self.on_color if v else self.off_color)
+
+
+class Collapsible(ctk.CTkFrame):
+    """▶/▼ 접이식 섹션 (뚱헌터 Collapsible과 동일 개념)."""
+    def __init__(self, parent, title, start_open=False, **kwargs):
+        super().__init__(parent, fg_color="transparent", **kwargs)
+        self._title = title
+        self._open = start_open
+        self.btn = ctk.CTkButton(
+            self, text=self._btn_text(), height=22, fg_color="#313244", hover_color="#45475a",
+            anchor="w", font=("Malgun Gothic", 9, "bold"), text_color="#cdd6f4",
+            command=self._flip,
+        )
+        self.btn.pack(fill="x", padx=2, pady=1)
+        self.body = ctk.CTkFrame(self, fg_color="#313244", corner_radius=6)
+        if start_open:
+            self.body.pack(fill="x", padx=2, pady=(0, 2))
+
+    def _btn_text(self):
+        return f"{'▼' if self._open else '▶'} {self._title}"
+
+    def _flip(self):
+        self._open = not self._open
+        self.btn.configure(text=self._btn_text())
+        if self._open:
+            self.body.pack(fill="x", padx=2, pady=(0, 2))
+        else:
+            self.body.pack_forget()
+        top = self.winfo_toplevel()
+        if top and top.winfo_exists():
+            top.after(50, lambda: top.update_idletasks())
+
+
+BUFF_SLOT_LABELS = ["F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
+BUFF_SLOT_KEYS = {"F5": "5", "F6": "6", "F7": "7", "F8": "8", "F9": "9", "F10": "X", "F11": "Y", "F12": "Z"}
+BUFF_HOTBARS = ["F1", "F2", "F3"]
+_buff_cfg = {}
+last_buff_times = {}
+last_buff_global = 0
+saved_buff_on = "0"
+saved_buff_grid = {}
+chk_buff_on = None
+buff_hotbar_var = None
+
+
+def buff_grid_key(hb, slot):
+    return f"{hb}_{slot}"
+
+
+def buff_time_key(hb, slot):
+    return f"_buff_{hb}_{slot}"
+
+
+def cast_buff(hb_label, slot_label):
+    hb = hb_label.replace("F", "")
+    sk = BUFF_SLOT_KEYS[slot_label]
+    if hb == "1":
+        execute_keys([sk], 0.5)
+    else:
+        execute_keys([hb, sk, "1"], 0.5)
+
+
+def migrate_legacy_buffs():
+    """예전 V_BL/V_SH/V_BLU/V_F10/V_F11 설정을 그리드로 이전."""
+    global saved_buff_grid
+    if saved_buff_grid:
+        return
+    legacy = [
+        ("F2", "F5", saved_v_bl),
+        ("F2", "F6", saved_v_sh),
+        ("F2", "F11", saved_v_blu),
+        ("F1", "F10", saved_v_f10),
+        ("F1", "F11", saved_v_f11),
+    ]
+    for hb, slot, iv in legacy:
+        try:
+            sec = int(iv)
+        except Exception:
+            sec = 300
+        if sec > 0:
+            saved_buff_grid[buff_grid_key(hb, slot)] = f"0:{sec}"
+
+
 PARTY_COORDS = [
     [348, 611], [268, 646], [264, 612],  
     [340, 612], [347, 645], [276, 678], [347, 678], [347, 711]
@@ -346,18 +429,10 @@ class KmBox:
 
 
 running = False
-last_buff_f10 = 0 
-last_buff_f11 = 0 
-BASE_BUFF_INTERVAL = 1200 
-interval_f10 = BASE_BUFF_INTERVAL 
-interval_f11 = BASE_BUFF_INTERVAL 
-buff_seq = []
-last_buff_seq = 0
+BASE_BUFF_INTERVAL = 300
 BUFF_SEQ_GAP = 5.0
-last_bless = 0
-last_shield = 0
-last_blue = 0
 last_loot = 0
+last_buff_seq = 0
 last_loot_sent_time = 0
 loot_interval = 5.0
 debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0}
@@ -385,11 +460,6 @@ chk_fix = None
 chk_follow = None
 chk_space_save = None
 mode_var = None
-chk_buff_f10 = None
-chk_buff_f11 = None
-chk_bless = None
-chk_shield = None
-chk_blue = None
 chk_poison = None
 chk_target_poison = None
 chk_party_poison = None
@@ -439,6 +509,7 @@ def load_hidden_config():
     global MAIN_ATTACKER_COORD, SELF_HP_COORD, SELF_HP_RGB, NOPARTY_HP_COORD, NOPARTY_RGB, PARTY_COORDS
     global SELF_POISON_COORD, SELF_POISON_RGB, TARGET_POISON_COORD, TARGET_POISON_RGB, DANGER_HP_COORD, DANGER_HP_RGB
     global saved_v_bl, saved_v_sh, saved_v_blu, saved_v_f10, saved_v_f11
+    global saved_buff_on, saved_buff_grid
     global BUFF_BAR_X1, BUFF_BAR_Y1, BUFF_BAR_X2, BUFF_BAR_Y2
     global saved_expire_start, saved_expire_days
     global saved_party_flags, saved_party_mode_flags
@@ -448,10 +519,12 @@ def load_hidden_config():
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
     
     text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11", "EXPIRE_START", "EXPIRE_DAYS",
-                       "PARTY_FLAGS", "PARTY_MODE_FLAGS"}
+                       "PARTY_FLAGS", "PARTY_MODE_FLAGS", "BUFF_ON"}
     saved_pwd = None
     saved_expire_start = ""
     saved_expire_days = "0"
+    saved_buff_on = "0"
+    saved_buff_grid = {}
     
     if os.path.exists(AUTH_FILE):
         ctypes.windll.kernel32.SetFileAttributesW(AUTH_FILE, 2)
@@ -464,7 +537,8 @@ def load_hidden_config():
                 "V_F10": "saved_v_f10", "V_F11": "saved_v_f11",
                 "EXPIRE_START": chr(115)+chr(97)+chr(118)+chr(101)+chr(100)+chr(95)+chr(101)+chr(120)+chr(112)+chr(105)+chr(114)+chr(101)+chr(95)+chr(115)+chr(116)+chr(97)+chr(114)+chr(116),
                 "EXPIRE_DAYS": chr(115)+chr(97)+chr(118)+chr(101)+chr(100)+chr(95)+chr(101)+chr(120)+chr(112)+chr(105)+chr(114)+chr(101)+chr(95)+chr(100)+chr(97)+chr(121)+chr(115),
-                "PARTY_FLAGS": "saved_party_flags", "PARTY_MODE_FLAGS": "saved_party_mode_flags"
+                "PARTY_FLAGS": "saved_party_flags", "PARTY_MODE_FLAGS": "saved_party_mode_flags",
+                "BUFF_ON": "saved_buff_on",
             }
             coord_map = {
                 "MAIN_ATTACKER_X": (MAIN_ATTACKER_COORD, 0), "MAIN_ATTACKER_Y": (MAIN_ATTACKER_COORD, 1),
@@ -497,6 +571,12 @@ def load_hidden_config():
                 if key == "KM_MAC": globals()['KM_MAC'] = val_str; continue
                 if key in text_value_keys:
                     if key in text_key_map: globals()[text_key_map[key]] = val_str
+                    continue
+                if key.startswith("BUFF_") and key.count("_") >= 2:
+                    # BUFF_F2_F5=1:1800
+                    parts = key.split("_", 2)
+                    if len(parts) == 3 and parts[1] in BUFF_HOTBARS and parts[2] in BUFF_SLOT_LABELS:
+                        saved_buff_grid[f"{parts[1]}_{parts[2]}"] = val_str
                     continue
                 if key == "SELF_HP_ROI_X1": self_roi_vals[0] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
                 if key == "SELF_HP_ROI_Y1": self_roi_vals[1] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
@@ -548,15 +628,25 @@ def load_hidden_config():
         if mna_roi_vals[0] != 0 or mna_roi_vals[2] != 0: MNA_ROI = tuple(mna_roi_vals)
         for pi in range(8):
             if party_roi_vals[pi][0] != 0 or party_roi_vals[pi][2] != 0: PARTY_ROIS[pi] = tuple(party_roi_vals[pi])
+        globals()["saved_buff_on"] = saved_buff_on
+        globals()["saved_buff_grid"] = saved_buff_grid
+    migrate_legacy_buffs()
     return saved_pwd
 
 def save_hidden_config(pwd_to_save):
     try:
-        cur_v_bl = v_bl.get() if ('v_bl' in globals() and v_bl) else saved_v_bl
-        cur_v_sh = v_sh.get() if ('v_sh' in globals() and v_sh) else saved_v_sh
-        cur_v_blu = v_blu.get() if ('v_blu' in globals() and v_blu) else saved_v_blu
-        cur_v_f10 = v_f10.get() if ('v_f10' in globals() and v_f10) else saved_v_f10
-        cur_v_f11 = v_f11.get() if ('v_f11' in globals() and v_f11) else saved_v_f11
+        def _buff_iv(hb, slot, default):
+            if hb in _buff_cfg:
+                for sl, _cb, iv in _buff_cfg[hb]:
+                    if sl == slot:
+                        return iv.get() if iv.get() else default
+            return default
+
+        cur_v_bl = _buff_iv("F2", "F5", saved_v_bl)
+        cur_v_sh = _buff_iv("F2", "F6", saved_v_sh)
+        cur_v_blu = _buff_iv("F2", "F11", saved_v_blu)
+        cur_v_f10 = _buff_iv("F1", "F10", saved_v_f10)
+        cur_v_f11 = _buff_iv("F1", "F11", saved_v_f11)
         cur_km_ip = ent_km_ip.get().strip() if ('ent_km_ip' in globals() and ent_km_ip and ent_km_ip.get().strip()) else KM_IP
         cur_km_port = ent_km_port.get().strip() if ('ent_km_port' in globals() and ent_km_port and ent_km_port.get().strip()) else KM_PORT
         cur_km_mac = ent_km_mac.get().strip() if ('ent_km_mac' in globals() and ent_km_mac and ent_km_mac.get().strip()) else KM_MAC
@@ -585,6 +675,23 @@ def save_hidden_config(pwd_to_save):
                 f.write(f"{key}={value}\n")
             for key, value in [("V_BL", cur_v_bl), ("V_SH", cur_v_sh), ("V_BLU", cur_v_blu), ("V_F10", cur_v_f10), ("V_F11", cur_v_f11)]:
                 f.write(f"{key}={value}\n")
+            cur_buff_on = "1" if (chk_buff_on and chk_buff_on.get()) else saved_buff_on
+            f.write(f"BUFF_ON={cur_buff_on}\n")
+            for hb in BUFF_HOTBARS:
+                for slot in BUFF_SLOT_LABELS:
+                    gk = buff_grid_key(hb, slot)
+                    on_s, sec_s = "0", str(BASE_BUFF_INTERVAL)
+                    if hb in _buff_cfg:
+                        for sl, cb, iv in _buff_cfg[hb]:
+                            if sl == slot:
+                                on_s = "1" if cb.get() else "0"
+                                sec_s = iv.get() if iv.get() else str(BASE_BUFF_INTERVAL)
+                                break
+                    elif gk in saved_buff_grid:
+                        parts = saved_buff_grid[gk].split(":", 1)
+                        if len(parts) == 2:
+                            on_s, sec_s = parts[0], parts[1]
+                    f.write(f"BUFF_{hb}_{slot}={on_s}:{sec_s}\n")
             f.write(f"HW_MODE={cur_hw}\nKM_IP={cur_km_ip}\nKM_PORT={cur_km_port}\nKM_MAC={cur_km_mac}\n")
             if saved_expire_start: f.write(f"EXPIRE_START={saved_expire_start}\n")
             f.write(f"EXPIRE_DAYS={saved_expire_days}\n")
@@ -980,6 +1087,7 @@ def open_guide_panel():
     add_d("[ F4 ]", "주변 줍기 켜기 / 끄기 (토글)")
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
     add_t("🛡️ 스위치 및 설정")
+    add_d("버프", "▶ 버프 펼침 → F1/F2/F3 단축창 선택 후 F5~F12 체크·초 설정")
     add_d("독 해독", "본인 독 걸리면 엔줄 자동 섭취 (두번째단축키 F9)")
     add_d("격수 해독", "격수 독 걸리면 큐어포이즌 자동 시전 (두번째단축키 F10)")
     add_d("파티 해독", "파티원 HP바 초록(독)이면 파티창 클릭 후 큐어포이즌 (F2→F10→F1, 격수해독과 동일)")
@@ -1334,9 +1442,11 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-15 14:15"
+PATCH_UPDATED_AT = "2026-07-15 14:30"
 LATEST_PATCH = [
-    "💚 파티 해독 — 파티창 HP바 초록(독)이면 클릭 후 큐어포이즌 (격수해독과 동일 F2→F10→F1)",
+    "✨ 버프 그리드 — F1/F2/F3 단축창 × F5~F12 체크 (뚱헌터 방식), F10/F11/2-F5 등 삭제",
+    "▶ 접이식 UI — 옵션/버프/힐 섹션 펼침·접기 (폼 커짐 방지)",
+    "💚 파티 해독 — 파티창 초록바 클릭 후 큐어포이즌 (F2→F10→F1)",
     "📅 상단 [업데이트] 날짜·시간으로 패치 반영 여부 확인 (이 줄 보이면 최신)",
     "👁 제어판 쫄법 피통/엠통 미리보기 글자 — 흰색·크게 (가독성)",
     "🖼️ 파티 ROI 미리보기 — 제어판 다시 열어도 유지·1초 자동 갱신",
@@ -1430,10 +1540,10 @@ def get_safe_int(var, default=1200):
     except: return default
 
 def update_ui_timer():
-    global running, root, lbl_buff, lbl_status, chk_bless, chk_shield, chk_blue, chk_buff_f10, chk_buff_f11
-    global last_bless, last_shield, last_blue, last_buff_f10, last_buff_f11, interval_f10, interval_f11
-    global shutdown_time, lbl_auth, saved_expire_start, saved_expire_days
+    global running, root, lbl_buff, lbl_status
     global last_buff_seq, BUFF_SEQ_GAP, last_auth_check, loaded_pwd, last_log, lbl_log
+    global shutdown_time, lbl_auth, saved_expire_start, saved_expire_days
+    global chk_buff_on, _buff_cfg, last_buff_times, last_buff_global
     while True:
         if root and lbl_auth:
             auth_text = ""
@@ -1472,11 +1582,16 @@ def update_ui_timer():
         if running:
             now = time.time(); txt_parts = []
             gap_remain = max(0, int(BUFF_SEQ_GAP - (now - last_buff_seq)))
-            if chk_bless and chk_bless.get(): txt_parts.append(f"▶ 2-F5: {max(max(0, int(get_safe_int(v_bl, 1800) - (now - last_bless))), gap_remain)}초")
-            if chk_shield and chk_shield.get(): txt_parts.append(f"▶ 2-F6: {max(max(0, int(get_safe_int(v_sh, 1200) - (now - last_shield))), gap_remain)}초")
-            if chk_blue and chk_blue.get(): txt_parts.append(f"▶ 2-F11: {max(max(0, int(get_safe_int(v_blu, 1200) - (now - last_blue))), gap_remain)}초")
-            if chk_buff_f10 and chk_buff_f10.get(): txt_parts.append(f"▶ F10 : {max(max(0, int(interval_f10 - (now - last_buff_f10))), gap_remain)}초")
-            if chk_buff_f11 and chk_buff_f11.get(): txt_parts.append(f"▶ F11 : {max(max(0, int(interval_f11 - (now - last_buff_f11))), gap_remain)}초")
+            if chk_buff_on and chk_buff_on.get():
+                for hb in BUFF_HOTBARS:
+                    for slot, cb, iv in _buff_cfg.get(hb, []):
+                        if not cb.get():
+                            continue
+                        tk = buff_time_key(hb, slot)
+                        iv_sec = get_safe_int(iv, BASE_BUFF_INTERVAL)
+                        remain = max(max(0, int(iv_sec - (now - last_buff_times.get(tk, 0)))), gap_remain)
+                        hb_tag = hb if hb != "F1" else "F1"
+                        txt_parts.append(f"▶ {hb_tag}-{slot}: {remain}초")
             if shutdown_time is not None:
                 rem = int(shutdown_time - now)
                 if rem > 0: rh = rem // 3600; rm = (rem % 3600) // 60; rs = rem % 60; txt_parts.append(f"⏰ 예약 : {rh:02d}시 {rm:02d}분 {rs:02d}초")
@@ -1528,9 +1643,8 @@ def on_f4_toggle(e=None):
     if root and chk_loot: root.after(0, lambda: chk_loot.set(not chk_loot.get()))
 
 def on_main_toggle(e=None):
-    global running, last_buff_f10, last_buff_f11, debounce, buff_seq, last_buff_seq
-    global last_bless, last_shield, last_blue, last_loot, loot_interval
-    global interval_f10, interval_f11, root, lbl_status
+    global running, last_buff_seq, debounce, root, lbl_status
+    global last_loot, loot_interval, last_buff_times, last_buff_global
     global last_self_heal, last_party_heal, last_noparty_heal
     if time.time() - debounce['main'] < 0.25: return 
     debounce['main'] = time.time()
@@ -1545,15 +1659,15 @@ def on_main_toggle(e=None):
                 root.after(0, lambda m=msg: lbl_ard.configure(text=m, text_color="#f85149"))
             return
         running = True; now = time.time()
-        last_bless = now - get_safe_int(v_bl, 1800) + human_delay(1, 3)
-        last_shield = now - get_safe_int(v_sh, 1200) + human_delay(1, 3)
-        last_blue = now - get_safe_int(v_blu, 1200) + human_delay(1, 3)
-        last_loot = now; loot_interval = random.uniform(4.0, 7.0) 
-        interval_f10 = get_safe_int(v_f10, 1200) + human_delay(-120, 120) 
-        interval_f11 = get_safe_int(v_f11, 1200) + human_delay(-120, 120)
-        last_buff_f10 = now - interval_f10 + human_delay(5, 15) 
-        last_buff_f11 = now - interval_f11 + human_delay(10, 25) 
+        last_loot = now; loot_interval = random.uniform(4.0, 7.0)
         last_buff_seq = now
+        last_buff_global = now
+        for hb in BUFF_HOTBARS:
+            for slot, cb, iv in _buff_cfg.get(hb, []):
+                if cb.get():
+                    tk = buff_time_key(hb, slot)
+                    iv_sec = get_safe_int(iv, BASE_BUFF_INTERVAL)
+                    last_buff_times[tk] = now - iv_sec + human_delay(3, 12)
         last_self_heal = now
         last_party_heal = now
         last_noparty_heal = now
@@ -1705,10 +1819,10 @@ def connect_hardware():
         if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text="○ 연결실패", text_color='#f85149'))
 
 def expert_logic():
-    global ser, running, last_buff_f10, last_buff_f11, interval_f10, interval_f11, buff_seq, last_buff_seq
-    global last_bless, last_shield, last_blue, last_loot, last_loot_sent_time, loot_interval
+    global ser, running, last_buff_seq, BUFF_SEQ_GAP
+    global last_loot, last_loot_sent_time, loot_interval
     global camera, root, lbl_ard, mode_var, chk_follow, current_f9_prob
-    global chk_loot, chk_poison, chk_target_poison, chk_party_poison, chk_bless, chk_shield, chk_blue, chk_buff_f10, chk_buff_f11
+    global chk_loot, chk_poison, chk_target_poison, chk_party_poison, chk_buff_on
     global SELF_HP_COORD, SELF_HP_RGB, NOPARTY_HP_COORD, NOPARTY_RGB, PARTY_COORDS, MAIN_ATTACKER_COORD
     global DANGER_HP_COORD, DANGER_HP_RGB, SELF_POISON_COORD, SELF_POISON_RGB, TARGET_POISON_COORD, TARGET_POISON_RGB
     global last_self_heal, last_party_heal, last_party_cure, last_noparty_heal
@@ -1717,6 +1831,7 @@ def expert_logic():
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold, mna_threshold, strong_heal_pct, chk_strong_heal
     global attacker_hp_udp, attacker_poisoned, attacker_petrified
     global MNA_ROI, MNA_100_REF, last_mna_potion, chk_mna, chk_self_heal_sw, chk_danger_sw, chk_attacker_sw
+    global last_buff_times, last_buff_global, _buff_cfg
     
     load_buff_templates()
 
@@ -1784,13 +1899,28 @@ def expert_logic():
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
                     ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
-            # 버프
-            if chk_bless and chk_bless.get() and (now - last_bless >= get_safe_int(v_bl, 1800)) and (now - last_buff_seq >= BUFF_SEQ_GAP):
-                execute_keys(['2', '5', '1'], 0.5); last_bless = now; last_buff_seq = now; log_event('✨ 축복'); continue
-            if chk_shield and chk_shield.get() and (now - last_shield >= get_safe_int(v_sh, 1200)) and (now - last_buff_seq >= BUFF_SEQ_GAP):
-                execute_keys(['2', '6', '1'], 0.5); last_shield = now; last_buff_seq = now; log_event('🛡️ 실드'); continue
-            if chk_blue and chk_blue.get() and (now - last_blue >= get_safe_int(v_blu, 1200)) and (now - last_buff_seq >= BUFF_SEQ_GAP):
-                execute_keys(['2', 'Y', '1'], 0.5); last_blue = now; last_buff_seq = now; log_event('💙 블루'); continue
+            # 버프 (F1/F2/F3 × F5~F12 그리드)
+            if chk_buff_on and chk_buff_on.get() and (now - last_buff_global >= 1.0) and (now - last_buff_seq >= BUFF_SEQ_GAP):
+                buff_cast = False
+                for hb in BUFF_HOTBARS:
+                    for slot, cb, iv in _buff_cfg.get(hb, []):
+                        if not cb.get():
+                            continue
+                        tk = buff_time_key(hb, slot)
+                        iv_sec = get_safe_int(iv, BASE_BUFF_INTERVAL)
+                        if now - last_buff_times.get(tk, 0) >= iv_sec:
+                            cast_buff(hb, slot)
+                            last_buff_times[tk] = now
+                            last_buff_seq = now
+                            last_buff_global = now
+                            tag = f"{hb}-{slot}" if hb != "F1" else slot
+                            log_event(f"✨ 버프 {tag}")
+                            buff_cast = True
+                            break
+                    if buff_cast:
+                        break
+                if buff_cast:
+                    continue
 
             # MP% 체크 (자힐 제한)
             _mp_low = False
@@ -1917,11 +2047,6 @@ def expert_logic():
                             time.sleep(human_delay(0.2, 0.3))
                         last_noparty_heal = now  
 
-            # F10/F11
-            if chk_buff_f10 and chk_buff_f10.get() and (now - last_buff_f10 >= interval_f10) and (now - last_buff_seq >= BUFF_SEQ_GAP):
-                ser.write(b'X'); last_buff_f10 = now; last_buff_seq = now; interval_f10 = get_safe_int(v_f10, 1200) + human_delay(-120, 120)
-            if chk_buff_f11 and chk_buff_f11.get() and (now - last_buff_f11 >= interval_f11) and (now - last_buff_seq >= BUFF_SEQ_GAP):
-                ser.write(b'Y'); last_buff_f11 = now; last_buff_seq = now; interval_f11 = get_safe_int(v_f11, 1200) + human_delay(-120, 120)
                 
         if not running: time.sleep(0.2)
         else:
@@ -1934,7 +2059,7 @@ def expert_logic():
 # 🚨 메인 구동
 # =======================================================
 root = ctk.CTk()
-root.geometry("195x520+0+0")
+root.geometry("195x380+0+0")
 root.attributes("-topmost", True)
 def auto_resize_height():
     if root and root.winfo_exists():
@@ -1985,22 +2110,12 @@ chk_fix = ctk.BooleanVar(value=False)
 chk_follow = ctk.BooleanVar(value=False)
 chk_space_save = ctk.BooleanVar(value=False) 
 mode_var = ctk.StringVar(value="파티")
-chk_buff_f10 = ctk.BooleanVar(value=False)
-chk_buff_f11 = ctk.BooleanVar(value=False)
-chk_bless = ctk.BooleanVar(value=False)
-chk_shield = ctk.BooleanVar(value=False)
-chk_blue = ctk.BooleanVar(value=False)
+chk_buff_on = ctk.BooleanVar(value=saved_buff_on in ("1", "true", "True"))
 chk_poison = ctk.BooleanVar(value=False)
 chk_target_poison = ctk.BooleanVar(value=False)
 chk_party_poison = ctk.BooleanVar(value=False)
 chk_loot = ctk.BooleanVar(value=False) 
 f9_prob_var = ctk.DoubleVar(value=0.3) 
-
-v_bl = tk.StringVar(value=saved_v_bl)
-v_sh = tk.StringVar(value=saved_v_sh)
-v_blu = tk.StringVar(value=saved_v_blu)
-v_f10 = tk.StringVar(value=saved_v_f10)
-v_f11 = tk.StringVar(value=saved_v_f11)
 
 prob_combo = None
 def set_f9_prob(val):
@@ -2058,41 +2173,85 @@ prob_combo = ctk.CTkComboBox(frame_mode, values=["0%", "30%", "50%", "70%", "100
 prob_combo.pack(side='right', pady=2, padx=4)
 prob_combo.set("30%")
 
-frame_opt = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
-frame_opt.pack(pady=1, padx=2, fill='x')
-sw_w, sw_h = 28, 14; ft = ('Malgun Gothic', 10, 'bold')
-red_p, red_b, red_h = "#cba6f7", "#cba6f7", "#b4a0e0"
+# ─── 접이식: 옵션 ───
+coll_opt = Collapsible(root, "옵션", start_open=True)
+coll_opt.pack(pady=1, padx=2, fill="x")
+frame_opt = coll_opt.body
+frame_opt.grid_columnconfigure(0, weight=1)
+frame_opt.grid_columnconfigure(1, weight=1)
+sw_w, sw_h = 28, 14; ft = ('Malgun Gothic', 8, 'bold')
 
 RoundedToggle(frame_opt, "고정(PgUp)", "#a371f7", var=chk_fix).grid(row=0, column=0, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "클릭(Home)", "#a371f7", var=chk_follow).grid(row=0, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: log_event(f"☠️ 독해독 {'ON' if chk_poison.get() else 'OFF'}")).grid(row=1, column=0, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=1, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=lambda: log_event(f"💚 파티해독 {'ON' if chk_party_poison.get() else 'OFF'}")).grid(row=2, column=0, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=2, column=1, padx=3, pady=2, sticky="w")
 
-f_10 = ctk.CTkFrame(frame_opt, fg_color="transparent"); f_10.grid(row=1, column=0, padx=1, pady=1, sticky="w")
-RoundedToggle(f_10, "F10", "#a371f7", var=chk_buff_f10).pack(side="left", padx=3)
-ctk.CTkEntry(f_10, textvariable=v_f10, width=40, height=20, font=ft, text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=0)
+# ─── 접이식: 버프 그리드 ───
+coll_buff = Collapsible(root, "버프", start_open=False)
+coll_buff.pack(pady=1, padx=2, fill="x")
+buff_body = coll_buff.body
+RoundedToggle(buff_body, "버프 자동", "#a371f7", var=chk_buff_on, cmd=lambda: log_event(f"✨ 버프 {'ON' if chk_buff_on.get() else 'OFF'}")).pack(anchor="w", padx=4, pady=(4, 2))
 
-f_11 = ctk.CTkFrame(frame_opt, fg_color="transparent"); f_11.grid(row=1, column=1, padx=1, pady=1, sticky="w")
-RoundedToggle(f_11, "F11", "#a371f7", var=chk_buff_f11).pack(side="left", padx=3)
-ctk.CTkEntry(f_11, textvariable=v_f11, width=40, height=20, font=ft, text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=0)
+buff_hotbar_var = tk.StringVar(value="F1")
+buff_bar_row = ctk.CTkFrame(buff_body, fg_color="transparent")
+buff_bar_row.pack(fill="x", padx=4, pady=2)
+ctk.CTkLabel(buff_bar_row, text="단축창", text_color="#a6adc8", font=("Malgun Gothic", 8, "bold")).pack(side="left", padx=(0, 4))
+buff_hotbar_combo = ctk.CTkComboBox(buff_bar_row, values=BUFF_HOTBARS, variable=buff_hotbar_var, width=52, height=22,
+                                    font=("Malgun Gothic", 9), dropdown_font=("Malgun Gothic", 9),
+                                    fg_color="#1e1e2e", button_color="#800020")
+buff_hotbar_combo.pack(side="left")
 
-f_bl = ctk.CTkFrame(frame_opt, fg_color="transparent"); f_bl.grid(row=2, column=0, padx=1, pady=1, sticky="w")
-RoundedToggle(f_bl, "2-F5", "#a371f7", var=chk_bless).pack(side="left", padx=3)
-ctk.CTkEntry(f_bl, textvariable=v_bl, width=40, height=20, font=ft, text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=0)
+buff_page_host = ctk.CTkFrame(buff_body, fg_color="transparent")
+buff_page_host.pack(fill="x", padx=2, pady=(0, 4))
+_buff_pages = {}
 
-f_sh = ctk.CTkFrame(frame_opt, fg_color="transparent"); f_sh.grid(row=2, column=1, padx=1, pady=1, sticky="w")
-RoundedToggle(f_sh, "2-F6", "#a371f7", var=chk_shield).pack(side="left", padx=3)
-ctk.CTkEntry(f_sh, textvariable=v_sh, width=40, height=20, font=ft, text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=0)
+def _parse_buff_saved(hb, slot):
+    raw = saved_buff_grid.get(buff_grid_key(hb, slot), f"0:{BASE_BUFF_INTERVAL}")
+    parts = raw.split(":", 1)
+    on = parts[0] in ("1", "true", "True") if parts else False
+    sec = parts[1] if len(parts) > 1 else str(BASE_BUFF_INTERVAL)
+    return on, sec
 
-f_blu = ctk.CTkFrame(frame_opt, fg_color="transparent"); f_blu.grid(row=3, column=0, padx=1, pady=1, sticky="w")
-RoundedToggle(f_blu, "2-F11", "#a371f7", var=chk_blue).pack(side="left", padx=3)
-ctk.CTkEntry(f_blu, textvariable=v_blu, width=40, height=20, font=ft, text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=0)
+for hb in BUFF_HOTBARS:
+    page = ctk.CTkFrame(buff_page_host, fg_color="transparent")
+    _buff_pages[hb] = page
+    rows = []
+    for ri, slots in enumerate([BUFF_SLOT_LABELS[:4], BUFF_SLOT_LABELS[4:]]):
+        for ci, slot in enumerate(slots):
+            cell = ctk.CTkFrame(page, fg_color="transparent")
+            cell.grid(row=ri, column=ci, padx=1, pady=1, sticky="n")
+            on_def, sec_def = _parse_buff_saved(hb, slot)
+            cb = ctk.BooleanVar(value=on_def)
+            iv = tk.StringVar(value=sec_def)
+            ctk.CTkCheckBox(cell, text=slot, variable=cb, width=42, checkbox_width=14, checkbox_height=14,
+                            font=("Malgun Gothic", 8, "bold"), text_color="#cdd6f4",
+                            fg_color="#800020", hover_color="#9e1a3a").pack()
+            ent = ctk.CTkEntry(cell, textvariable=iv, width=34, height=18, font=("Malgun Gothic", 8),
+                               text_color="#ffffff", fg_color="#1e1e2e", justify="center")
+            ent.pack(pady=(0, 1))
+            ctk.CTkLabel(cell, text="초", text_color="#6c7086", font=("Malgun Gothic", 7)).pack()
+            rows.append((slot, cb, iv))
+    _buff_cfg[hb] = rows
 
-RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: log_event(f"☠️ 독해독 {'ON' if chk_poison.get() else 'OFF'}")).grid(row=3, column=1, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=4, column=0, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=lambda: log_event(f"💚 파티해독 {'ON' if chk_party_poison.get() else 'OFF'}")).grid(row=4, column=1, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=5, column=0, padx=3, pady=2, sticky="w")
+def _show_buff_page(choice=None):
+    hb = choice or buff_hotbar_var.get()
+    for name, page in _buff_pages.items():
+        if name == hb:
+            page.pack(fill="x")
+        else:
+            page.pack_forget()
 
+buff_hotbar_combo.configure(command=_show_buff_page)
+_show_buff_page("F1")
 
-frame_selfhp = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
+# ─── 접이식: 힐·물약 ───
+coll_heal = Collapsible(root, "힐·물약", start_open=True)
+coll_heal.pack(pady=1, padx=2, fill="x")
+heal_body = coll_heal.body
+
+frame_selfhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_selfhp.pack(pady=1, padx=2, fill='x')
 chk_self_heal_sw = ctk.BooleanVar(value=True)
 RoundedToggle(frame_selfhp, "🔴 자힐", "#58a6ff", var=chk_self_heal_sw, cmd=lambda: log_event(f"🔴 자힐 {'ON' if chk_self_heal_sw.get() else 'OFF'}")).pack(side='left', padx=5)
@@ -2107,7 +2266,7 @@ def update_self_hp_thr(*a):
     save_hidden_config(loaded_pwd)
 self_hp_var.trace_add("write", update_self_hp_thr)
 
-frame_dangerhp = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
+frame_dangerhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_dangerhp.pack(pady=1, padx=2, fill='x')
 chk_danger_sw = ctk.BooleanVar(value=True)
 RoundedToggle(frame_dangerhp, "🛡️ 위기", "#58a6ff", var=chk_danger_sw, cmd=lambda: log_event(f"🛡️ 위기 {'ON' if chk_danger_sw.get() else 'OFF'}")).pack(side='left', padx=4)
@@ -2122,7 +2281,7 @@ def update_danger_hp_thr(*a):
     save_hidden_config(loaded_pwd)
 danger_hp_var.trace_add("write", update_danger_hp_thr)
 
-frame_strong = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
+frame_strong = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_strong.pack(pady=1, padx=2, fill="x")
 chk_strong_heal = ctk.BooleanVar(value=True)
 RoundedToggle(frame_strong, "⚡ 상위힐", "#58a6ff", var=chk_strong_heal).pack(side="left", padx=4)
@@ -2137,7 +2296,7 @@ def update_strong_thr(v, lbl=s_lbl):
 
 sv.trace_add("write", lambda *a: update_strong_thr(sv, s_lbl))
 
-frame_atkhp = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
+frame_atkhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_atkhp.pack(pady=1, padx=2, fill='x')
 chk_attacker_sw = ctk.BooleanVar(value=True)
 RoundedToggle(frame_atkhp, "⚔️ 격수", "#58a6ff", var=chk_attacker_sw, cmd=lambda: log_event(f"⚔️ 격수 {'ON' if chk_attacker_sw.get() else 'OFF'}")).pack(side='left', padx=4)
@@ -2154,7 +2313,7 @@ atkhp_var.trace_add("write", update_atkhp_thr)
 
 # 마나 물약 (맨 밑)
 chk_mna = ctk.BooleanVar(value=False)
-frame_mna = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
+frame_mna = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_mna.pack(pady=1, padx=2, fill='x')
 RoundedToggle(frame_mna, "💙 엠약", "#58a6ff", var=chk_mna, cmd=lambda: log_event(f"💙 엠약 {'ON' if chk_mna.get() else 'OFF'}")).pack(side='left', padx=4)
 mna_var = ctk.IntVar(value=mna_threshold)
