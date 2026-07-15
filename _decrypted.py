@@ -183,6 +183,7 @@ BUFF_SLOT_KEYS = {"F5": "5", "F6": "6", "F7": "7", "F8": "8", "F9": "9", "F10": 
 BUFF_HOTBARS = ["F1", "F2", "F3"]
 _buff_cfg = {}
 last_buff_times = {}
+buff_next_due = {}
 last_buff_global = 0
 saved_buff_on = "0"
 saved_buff_grid = {}
@@ -205,6 +206,21 @@ def cast_buff(hb_label, slot_label):
         execute_keys([sk], 0.5)
     else:
         execute_keys([hb, sk, "1"], 0.5)
+
+
+def buff_interval_jitter(base_sec):
+    """설정 초 ± 랜덤 (기계적 1200초 고정 방지)."""
+    base = max(5, int(base_sec))
+    spread = max(12, min(240, int(base * 0.14)))
+    return max(8, int(base + human_delay(-spread, spread)))
+
+
+def schedule_buff(tk, base_iv, soon=False):
+    global buff_next_due
+    if soon:
+        buff_next_due[tk] = time.time() + human_delay(3, 18)
+    else:
+        buff_next_due[tk] = time.time() + buff_interval_jitter(base_iv)
 
 
 def migrate_legacy_buffs():
@@ -1442,8 +1458,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-15 14:50"
+PATCH_UPDATED_AT = "2026-07-15 15:00"
 LATEST_PATCH = [
+    "⏱️ 버프 간격 랜덤화 — 1200초 고정 아님, 설정값 ±14% 흔들림 (사람처럼)",
     "🎯 노파티 격수 — 독(초록바) UDP HP% 정상 인식 + 독 걸려도 힐 우선",
     "✨ 버프 그리드 — F1/F2/F3 단축창 × F5~F12 체크 (뚱헌터 방식), F10/F11/2-F5 등 삭제",
     "▶ 접이식 UI — 옵션/버프/힐 섹션 펼침·접기 (폼 커짐 방지)",
@@ -1544,7 +1561,7 @@ def update_ui_timer():
     global running, root, lbl_buff, lbl_status
     global last_buff_seq, BUFF_SEQ_GAP, last_auth_check, loaded_pwd, last_log, lbl_log
     global shutdown_time, lbl_auth, saved_expire_start, saved_expire_days
-    global chk_buff_on, _buff_cfg, last_buff_times, last_buff_global
+    global chk_buff_on, _buff_cfg, buff_next_due, last_buff_global
     while True:
         if root and lbl_auth:
             auth_text = ""
@@ -1589,8 +1606,8 @@ def update_ui_timer():
                         if not cb.get():
                             continue
                         tk = buff_time_key(hb, slot)
-                        iv_sec = get_safe_int(iv, BASE_BUFF_INTERVAL)
-                        remain = max(max(0, int(iv_sec - (now - last_buff_times.get(tk, 0)))), gap_remain)
+                        due = buff_next_due.get(tk, now)
+                        remain = max(max(0, int(due - now)), gap_remain)
                         hb_tag = hb if hb != "F1" else "F1"
                         txt_parts.append(f"▶ {hb_tag}-{slot}: {remain}초")
             if shutdown_time is not None:
@@ -1645,7 +1662,7 @@ def on_f4_toggle(e=None):
 
 def on_main_toggle(e=None):
     global running, last_buff_seq, debounce, root, lbl_status
-    global last_loot, loot_interval, last_buff_times, last_buff_global
+    global last_loot, loot_interval, buff_next_due, last_buff_global
     global last_self_heal, last_party_heal, last_noparty_heal
     if time.time() - debounce['main'] < 0.25: return 
     debounce['main'] = time.time()
@@ -1666,9 +1683,7 @@ def on_main_toggle(e=None):
         for hb in BUFF_HOTBARS:
             for slot, cb, iv in _buff_cfg.get(hb, []):
                 if cb.get():
-                    tk = buff_time_key(hb, slot)
-                    iv_sec = get_safe_int(iv, BASE_BUFF_INTERVAL)
-                    last_buff_times[tk] = now - iv_sec + human_delay(3, 12)
+                    schedule_buff(buff_time_key(hb, slot), get_safe_int(iv, BASE_BUFF_INTERVAL), soon=True)
         last_self_heal = now
         last_party_heal = now
         last_noparty_heal = now
@@ -1832,7 +1847,7 @@ def expert_logic():
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold, mna_threshold, strong_heal_pct, chk_strong_heal
     global attacker_hp_udp, attacker_poisoned, attacker_petrified
     global MNA_ROI, MNA_100_REF, last_mna_potion, chk_mna, chk_self_heal_sw, chk_danger_sw, chk_attacker_sw
-    global last_buff_times, last_buff_global, _buff_cfg
+    global buff_next_due, last_buff_global, _buff_cfg
     
     load_buff_templates()
 
@@ -1913,9 +1928,9 @@ def expert_logic():
                             continue
                         tk = buff_time_key(hb, slot)
                         iv_sec = get_safe_int(iv, BASE_BUFF_INTERVAL)
-                        if now - last_buff_times.get(tk, 0) >= iv_sec:
+                        if now >= buff_next_due.get(tk, 0):
                             cast_buff(hb, slot)
-                            last_buff_times[tk] = now
+                            schedule_buff(tk, iv_sec, soon=False)
                             last_buff_seq = now
                             last_buff_global = now
                             tag = f"{hb}-{slot}" if hb != "F1" else slot
