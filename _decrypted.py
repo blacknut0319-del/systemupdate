@@ -723,7 +723,7 @@ def _open_admin_panel_impl():
                 label = "HP(독)" if gc > rc and gc > 0 else "HP"
             raw = int(np.sum(px)); wh = max(x2-x1,1)*max(y2-y1,1)
             pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
-            roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | {label}:{pct:.0f}% | 100%:{ref100 or '?'}px")
+            roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | {label}:{pct:.0f}% | 100%:{ref100 or '?'}px", text_color="#f0f0f0")
 
     def open_self_hp_overlay():
         ov = tk.Toplevel(admin); ov.overrideredirect(True)
@@ -852,14 +852,14 @@ def _open_admin_panel_impl():
     ctk.CTkButton(row_self_btns, text="🖱️ 쫄법 피통 셋팅", height=22, fg_color="#1f538d", hover_color="#14375e", font=("Malgun Gothic", 9, "bold"), command=open_self_hp_overlay).pack(side="left", padx=1)
     ctk.CTkButton(row_self_btns, text="💯 100% 기준", height=22, fg_color="#fbbf24", hover_color="#d97706", text_color="#000", font=("Malgun Gothic", 9, "bold"), command=set_self_100ref).pack(side="left", padx=1)
     self_roi_preview = tk.Label(scrollable_frame, bg="black"); self_roi_preview.pack(pady=1)
-    self_roi_lbl = ctk.CTkLabel(scrollable_frame, text="", text_color="#6c7086", font=("Consolas",7)); self_roi_lbl.pack()
+    self_roi_lbl = ctk.CTkLabel(scrollable_frame, text="", text_color="#f0f0f0", font=("Consolas", 9)); self_roi_lbl.pack(pady=(0, 2))
     ctk.CTkLabel(scrollable_frame, text="-"*70, text_color="#45475a", height=10).pack(pady=1)
     # --- 마나 엠통 섹션 ---
     row_mna_btns = ctk.CTkFrame(scrollable_frame, fg_color="transparent"); row_mna_btns.pack(fill="x", pady=1)
     ctk.CTkButton(row_mna_btns, text="💙 마나 엠통 셋팅", height=22, fg_color="#1e40af", hover_color="#2563eb", font=("Malgun Gothic", 9, "bold"), command=open_mna_roi_overlay).pack(side="left", padx=1)
     ctk.CTkButton(row_mna_btns, text="💯 100% 기준", height=22, fg_color="#fbbf24", hover_color="#d97706", text_color="#000", font=("Malgun Gothic", 9, "bold"), command=set_mna_100ref).pack(side="left", padx=1)
     mna_roi_preview = tk.Label(scrollable_frame, bg="black"); mna_roi_preview.pack(pady=1)
-    mna_roi_lbl = ctk.CTkLabel(scrollable_frame, text="", text_color="#6c7086", font=("Consolas",7)); mna_roi_lbl.pack()
+    mna_roi_lbl = ctk.CTkLabel(scrollable_frame, text="", text_color="#f0f0f0", font=("Consolas", 9)); mna_roi_lbl.pack(pady=(0, 2))
     ctk.CTkLabel(scrollable_frame, text="-"*70, text_color="#45475a", height=10).pack(pady=1)
     
     ctk.CTkLabel(scrollable_frame, text="👥 파티원 좌표 / ROI / 힐% (ROI 드래그로 설정)", text_color="#bac2de", font=("Malgun Gothic", 10, "bold"), height=15).pack(anchor="w", pady=(0, 2))
