@@ -364,6 +364,7 @@ debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0}
 current_f9_prob = 0.3
 last_self_heal = 0
 last_party_heal = 0
+last_party_cure = 0
 last_noparty_heal = 0
 
 selected_party_flags = [0, 1, 0, 0, 0, 0, 0, 0]
@@ -391,6 +392,7 @@ chk_shield = None
 chk_blue = None
 chk_poison = None
 chk_target_poison = None
+chk_party_poison = None
 chk_loot = None
 lbl_status = None
 lbl_buff = None
@@ -980,6 +982,7 @@ def open_guide_panel():
     add_t("🛡️ 스위치 및 설정")
     add_d("독 해독", "본인 독 걸리면 엔줄 자동 섭취 (두번째단축키 F9)")
     add_d("격수 해독", "격수 독 걸리면 큐어포이즌 자동 시전 (두번째단축키 F10)")
+    add_d("파티 해독", "파티원 HP바 초록(독)이면 파티창 클릭 후 큐어포이즌 (F2→F10→F1, 격수해독과 동일)")
     add_d("파란물약", "두번째단축키 F8 · 엠통% 이하 시 10분마다 자동 복용")
     add_d("확률(%)", "0%: 물약만 / 100%: 힐만 / 그 외: 섞어서 확률 시전")
     add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐")
@@ -1331,8 +1334,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-15 14:10"
+PATCH_UPDATED_AT = "2026-07-15 14:15"
 LATEST_PATCH = [
+    "💚 파티 해독 — 파티창 HP바 초록(독)이면 클릭 후 큐어포이즌 (격수해독과 동일 F2→F10→F1)",
     "📅 상단 [업데이트] 날짜·시간으로 패치 반영 여부 확인 (이 줄 보이면 최신)",
     "👁 제어판 쫄법 피통/엠통 미리보기 글자 — 흰색·크게 (가독성)",
     "🖼️ 파티 ROI 미리보기 — 제어판 다시 열어도 유지·1초 자동 갱신",
@@ -1704,10 +1708,11 @@ def expert_logic():
     global ser, running, last_buff_f10, last_buff_f11, interval_f10, interval_f11, buff_seq, last_buff_seq
     global last_bless, last_shield, last_blue, last_loot, last_loot_sent_time, loot_interval
     global camera, root, lbl_ard, mode_var, chk_follow, current_f9_prob
-    global chk_loot, chk_poison, chk_target_poison, chk_bless, chk_shield, chk_blue, chk_buff_f10, chk_buff_f11
+    global chk_loot, chk_poison, chk_target_poison, chk_party_poison, chk_bless, chk_shield, chk_blue, chk_buff_f10, chk_buff_f11
     global SELF_HP_COORD, SELF_HP_RGB, NOPARTY_HP_COORD, NOPARTY_RGB, PARTY_COORDS, MAIN_ATTACKER_COORD
     global DANGER_HP_COORD, DANGER_HP_RGB, SELF_POISON_COORD, SELF_POISON_RGB, TARGET_POISON_COORD, TARGET_POISON_RGB
-    global last_self_heal, last_party_heal, last_noparty_heal
+    global last_self_heal, last_party_heal, last_party_cure, last_noparty_heal
+    global party_mode_flags, selected_party_flags
     global SELF_HP_ROI, SELF_HP_100_REF, DANGER_HP_ROI, DANGER_HP_100_REF
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold, mna_threshold, strong_heal_pct, chk_strong_heal
     global attacker_hp_udp, attacker_poisoned, attacker_petrified
@@ -1736,15 +1741,41 @@ def expert_logic():
                     log_event(f"💙 마나물약 (MP:{mna_pct:.0f}%)")
                     continue
 
+            m = mode_var.get() if mode_var else "파티"
+
             # ── 해독 ──────────────────────────────────────
             # 쫄법 독:   F2→F9(엔줄고정)→F1
             # 격수 독:   F2→F10(큐어포이즌)→F1 (UDP)
+            # 파티 독:   파티창 클릭 → F2→F10(큐어포이즌)→F1 (격수해독과 동일)
             # 쫄법 석화: F2→F12(리무브커스)→F1 (ROI)
             # 격수 석화: F2→F12(리무브커스)→F1 (UDP)
             if chk_poison and chk_poison.get() and is_green_bar(frame, SELF_HP_ROI):
                 fix_mode_keys(['2', '9', '1'], 0.5); log_event('🟢 독해독'); continue
             if chk_target_poison and chk_target_poison.get() and attacker_poisoned:
                 fix_mode_keys(['2', 'X', '1'], 0.45); attacker_poisoned = False; log_event('🟢 격수 독해독'); continue
+            if chk_party_poison and chk_party_poison.get() and (now - last_party_cure >= 0.5):
+                party_flags = party_mode_flags if m == "파티" else selected_party_flags
+                cure_pi = -1; cure_tx = 0; cure_ty = 0
+                for pi in range(1, 8):
+                    if not party_flags[pi]: continue
+                    if PARTY_ROIS[pi][0] <= 0: continue
+                    if is_green_bar(frame, PARTY_ROIS[pi]):
+                        x1, y1, x2, y2 = PARTY_ROIS[pi]
+                        cure_pi = pi; cure_tx, cure_ty = (x1 + x2) // 2, (y1 + y2) // 2
+                        break
+                if cure_pi >= 0:
+                    if m == "파티":
+                        pt_orig = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt_orig))
+                        orig_x, orig_y = pt_orig.x, pt_orig.y
+                        was_auto = chk_follow.get() if chk_follow else False
+                        if was_auto: ser.write(b'T'); time.sleep(0.03)
+                        human_mouse_move(cure_tx + random.randint(-3, 3), cure_ty + random.randint(-2, 2)); time.sleep(0.02)
+                        fix_mode_keys(['2', 'X', '1'], 0.45)
+                        human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
+                        if was_auto: ser.write(b'T'); time.sleep(0.03)
+                    else:
+                        fix_mode_keys(['2', 'X', '1'], 0.45)
+                    last_party_cure = now; log_event(f'🟢 파티해독 P{cure_pi + 1}'); continue
             # 위험베르 (HP% — 독=초록바도 bar_fill_pct로 판정)
             danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
@@ -1765,8 +1796,6 @@ def expert_logic():
             _mp_low = False
             if chk_mna and chk_mna.get() and MNA_ROI[0] != 0:
                 _mp_low = roi_mna_pct(frame, MNA_ROI, MNA_100_REF) < mna_threshold
-
-            m = mode_var.get() if mode_var else "파티"
 
             # 솔로(파티)
             if m == "솔로(파티)":
@@ -1905,7 +1934,7 @@ def expert_logic():
 # 🚨 메인 구동
 # =======================================================
 root = ctk.CTk()
-root.geometry("195x500+0+0")
+root.geometry("195x520+0+0")
 root.attributes("-topmost", True)
 def auto_resize_height():
     if root and root.winfo_exists():
@@ -1963,6 +1992,7 @@ chk_shield = ctk.BooleanVar(value=False)
 chk_blue = ctk.BooleanVar(value=False)
 chk_poison = ctk.BooleanVar(value=False)
 chk_target_poison = ctk.BooleanVar(value=False)
+chk_party_poison = ctk.BooleanVar(value=False)
 chk_loot = ctk.BooleanVar(value=False) 
 f9_prob_var = ctk.DoubleVar(value=0.3) 
 
@@ -2058,7 +2088,8 @@ ctk.CTkEntry(f_blu, textvariable=v_blu, width=40, height=20, font=ft, text_color
 
 RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: log_event(f"☠️ 독해독 {'ON' if chk_poison.get() else 'OFF'}")).grid(row=3, column=1, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=4, column=0, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=4, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=lambda: log_event(f"💚 파티해독 {'ON' if chk_party_poison.get() else 'OFF'}")).grid(row=4, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=5, column=0, padx=3, pady=2, sticky="w")
 
 
 frame_selfhp = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
