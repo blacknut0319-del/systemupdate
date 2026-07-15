@@ -1442,9 +1442,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-15 14:45"
+PATCH_UPDATED_AT = "2026-07-15 14:50"
 LATEST_PATCH = [
-    "⚡ 파티 모드 상위힐 수정 — HP가 기준% 이하일 때 F7(상위힐) 나가도록 (기존엔 F9만)",
+    "🎯 노파티 격수 — 독(초록바) UDP HP% 정상 인식 + 독 걸려도 힐 우선",
     "✨ 버프 그리드 — F1/F2/F3 단축창 × F5~F12 체크 (뚱헌터 방식), F10/F11/2-F5 등 삭제",
     "▶ 접이식 UI — 옵션/버프/힐 섹션 펼침·접기 (폼 커짐 방지)",
     "💚 파티 해독 — 파티창 초록바 클릭 후 큐어포이즌 (F2→F10→F1)",
@@ -1868,7 +1868,11 @@ def expert_logic():
             if chk_poison and chk_poison.get() and is_green_bar(frame, SELF_HP_ROI):
                 fix_mode_keys(['2', '9', '1'], 0.5); log_event('🟢 독해독'); continue
             if chk_target_poison and chk_target_poison.get() and attacker_poisoned:
-                fix_mode_keys(['2', 'X', '1'], 0.45); attacker_poisoned = False; log_event('🟢 격수 독해독'); continue
+                # 노파티 격수 HP 위험 시 해독보다 힐 우선 (해독만 반복되며 힐 막히는 문제 방지)
+                udp_fresh = (time.time() - last_udp_time) < 5
+                hp_need_heal = udp_fresh and attacker_hp_udp < attacker_hp_threshold
+                if not (m == "노파티" and hp_need_heal):
+                    fix_mode_keys(['2', 'X', '1'], 0.45); attacker_poisoned = False; log_event('🟢 격수 독해독'); continue
             if chk_party_poison and chk_party_poison.get() and (now - last_party_cure >= 0.5):
                 party_flags = party_mode_flags if m == "파티" else selected_party_flags
                 cure_pi = -1; cure_tx = 0; cure_ty = 0
@@ -2044,13 +2048,14 @@ def expert_logic():
                 
                 if not action_taken and (now - last_noparty_heal >= 0.2):
                     if chk_attacker_sw.get() and (time.time() - last_udp_time < 5) and attacker_hp_udp < attacker_hp_threshold:
-                        if chk_strong_heal and chk_strong_heal.get() and attacker_hp_udp < strong_heal_pct:
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and attacker_hp_udp < strong_heal_pct
+                        if use_strong:
                             ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{attacker_hp_udp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
                         elif random.randint(1, 100) <= 85:
-                            ser.write(b'A'); time.sleep(human_delay(1.2, 1.6))
+                            ser.write(b'A'); log_event(f"💚 격수힐 HP{attacker_hp_udp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
                         else:
                             time.sleep(human_delay(0.2, 0.3))
-                        last_noparty_heal = now  
+                        last_noparty_heal = now
 
                 
         if not running: time.sleep(0.2)

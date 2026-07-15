@@ -16,7 +16,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-07-01 04:40"
+PATCH_UPDATED_AT = "2026-07-15 14:50"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
@@ -342,12 +342,16 @@ def sender():
             img = sct.grab({"left":x,"top":y,"width":max(w,1),"height":max(h,1)})
             arr = np.array(img, dtype=np.uint8)[:,:,:3][:,:,::-1]
             red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
-            raw = int(np.sum(red))
-            green = (arr[:,:,1]>80)&(arr[:,:,1]>arr[:,:,0]*1.2)&(arr[:,:,1]>arr[:,:,2]*1.2)
-            poisoned = int(np.sum(green)) > (w*h*0.08)
+            green = (arr[:,:,1]>15)&(arr[:,:,1]>arr[:,:,0]*1.03)&(arr[:,:,1]>arr[:,:,2]*1.03)
+            red_cnt = int(np.sum(red))
+            green_cnt = int(np.sum(green))
+            total_px = max(w * h, 1)
+            poisoned = green_cnt > (total_px * 0.08)
             gray = (abs(arr[:,:,0]-arr[:,:,1])<25)&(abs(arr[:,:,1]-arr[:,:,2])<25)&(abs(arr[:,:,0]-arr[:,:,2])<25)&(arr[:,:,0]>30)
-            petrified = int(np.sum(gray)) > (w*h*0.12)
-            hp_pct = round(raw/HP_100_REF*100,1) if (HP_100_REF and HP_100_REF>0) else round(raw/max(w*h,1)*100,1)
+            petrified = int(np.sum(gray)) > (total_px * 0.12)
+            # 독(초록바)이어도 채움% 정상 — 빨강/초록 자동 (뚱힐러 bar_fill_pct와 동일)
+            raw = green_cnt if (green_cnt > red_cnt and green_cnt > total_px * 0.02) else red_cnt
+            hp_pct = round(raw/HP_100_REF*100,1) if (HP_100_REF and HP_100_REF>0) else round(raw/total_px*100,1)
             sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (ip_var.get(), TARGET_PORT))
             root.after(0, update_bar)
             root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))
