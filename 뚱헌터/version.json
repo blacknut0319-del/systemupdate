@@ -1,0 +1,5 @@
+{
+  "version": "1.4.16",
+  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v1.4.16/ddonghunter.exe",
+  "builder": "pyinstaller"
+}
