@@ -26,7 +26,13 @@ import keyboard
 import serial
 import serial.tools.list_ports
 import random
-# import dxcam  # mss 전용으로 전환 — dxcam 네이티브 크래시 방지
+try:
+    import dxcam  # GPU 레벨(DXGI Desktop Duplication) 캡처 — 게임의 실제 렌더링을 정확히 봄.
+                  # mss(GDI/BitBlt)는 일부 게임 렌더링 방식에서 실제 화면과 다른 내용을 캡처하는
+                  # 경우가 있어(예: 실제 전투로 피가 빠져도 안 반영됨) dxcam을 우선 사용하고,
+                  # 오류/크래시 가능성 때문에 실패 시 자동으로 mss로 넘어가는 안전장치를 둠.
+except Exception:
+    dxcam = None  # 설치 안 됐거나 이 PC에서 로드 실패해도 mss로 계속 동작하도록
 import tkinter as tk
 from tkinter import messagebox
 from threading import Thread, Lock
@@ -1331,7 +1337,83 @@ class MSSCamera:
         except Exception:
             return None
 
-camera = MSSCamera()
+class HybridCamera:
+    """dxcam(GPU/DXGI Desktop Duplication)을 우선 사용 — 게임의 실제 렌더링을 정확히 캡처.
+    mss(GDI/BitBlt)는 일부 렌더링 방식에서 실제 화면과 다른 내용을 보여줄 수 있어서(예:
+    전투로 실제 피가 빠져도 인식이 안 되던 문제) dxcam을 기본으로 되돌림.
+    단, dxcam은 간헐적으로 오류/크래시가 날 수 있으므로 모든 호출을 try/except로 감싸고,
+    연속 실패시 자동으로 mss로 전환(그리고 잠시 후 dxcam 재시도)해서 프로그램이 죽지 않게 함."""
+    def __init__(self):
+        self._mss = MSSCamera()
+        self._dx = None
+        self._dx_ok = False
+        self._fail_streak = 0
+        self._last_retry = 0.0
+        self._lock = Lock()
+        self._init_dxcam()
+    def _init_dxcam(self):
+        if dxcam is None:
+            self._dx_ok = False
+            return
+        try:
+            with self._lock:
+                if self._dx is not None:
+                    try: self._dx.release()
+                    except Exception: pass
+                self._dx = dxcam.create(output_color="RGB")
+                self._dx.start(target_fps=60)
+                self._dx_ok = True
+                self._fail_streak = 0
+        except Exception:
+            self._dx = None
+            self._dx_ok = False
+    def start(self, **kw): pass
+    def stop(self):
+        try:
+            if self._dx: self._dx.stop()
+        except Exception:
+            pass
+    def release(self):
+        try:
+            if self._dx: self._dx.release()
+        except Exception:
+            pass
+        self._mss.release()
+    def get_latest_frame(self):
+        if self._dx_ok and self._dx is not None:
+            try:
+                f = self._dx.get_latest_frame()
+                if f is not None:
+                    self._fail_streak = 0
+                    return f
+                self._fail_streak += 1
+            except Exception:
+                self._fail_streak += 1
+            if self._fail_streak >= 5:
+                # dxcam이 계속 실패/불안정하면 즉시 mss로 전환해서 끊김 없이 계속 동작
+                self._dx_ok = False
+                now_t = time.time()
+                self._last_retry = now_t
+        elif not self._dx_ok and dxcam is not None and (time.time() - self._last_retry >= 10.0):
+            self._last_retry = time.time()
+            self._init_dxcam()   # 10초마다 dxcam 복구 재시도(드라이버 일시오류 등 회복 가능성)
+        return self._mss.get_latest_frame()
+    def grab_roi(self, roi):
+        """dxcam이 살아있으면 dxcam의 풀프레임에서 잘라씀(실제 게임 렌더링을 정확히 보기 위해),
+        dxcam이 없거나 죽어있을 때만 mss 직접캡처로 대체."""
+        if self._dx_ok and self._dx is not None:
+            try:
+                x1, y1, x2, y2 = roi
+                f = self.get_latest_frame()
+                if f is not None:
+                    cropped = f[y1:y2, x1:x2]
+                    if cropped.size > 0:
+                        return cropped
+            except Exception:
+                pass
+        return self._mss.grab_roi(roi)
+
+camera = HybridCamera()
 
 def get_rgb(frame, x, y):
     try:
@@ -1783,8 +1865,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 15:11"
+PATCH_UPDATED_AT = "2026-07-16 15:25"
 LATEST_PATCH = [
+    "🎥 캡처 dxcam 우선으로 복귀(mss는 실패시 자동대체) — GDI(mss)가 게임의 실제 피통 렌더링을 못 보던 게 위기베르 오작동의 근본원인이었음. dxcam 크래시 방지용 자동복구(연속실패시 mss전환→10초마다 dxcam 재시도) 추가",
     "🚨 쫄법 HP 상대밝기 계산버그 수정 — 흰 배경(채도없음)이 채도필터 적용 전에 기준밝기(peak)를 끌어올려서, 정작 진짜 빨간 채움이 그 기준에 못미쳐 통째로 탈락하던 문제. peak는 이미 채도조건 통과한 픽셀 중에서만 계산하도록 수정",
     "🚨 쫄법 HP 근본원인 수정 — 빈 피통(트랙)이 어두운 빨강/자주색이면 채움으로 같이 잡혀서 항상 100%로 고정되던 치명적 버그, 상대밝기 비교로 진짜 채움만 인식하도록 수정 (실전투 중 위기베르 전혀 반응 안 하던 근본원인)",
     "🩻 HP급락 진단정보를 화면 로그에 직접 표시 — 배포판/다른 컴퓨터에서도 파일없이 화면 캡처만으로 원인 확인 가능하게 변경",
