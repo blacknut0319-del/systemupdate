@@ -275,7 +275,6 @@ DANGER_HP_RGB = [78, 69, 74]
 DANGER_HP_ROI = (0,0,0,0)
 DANGER_HP_100_REF = None
 danger_hp_threshold = 20
-_danger_confirm_streak = 0   # 위험베르 오발동 방지 — 캡처 한프레임 순간오독(예: 피격이펙트) 걸러내기용 연속판정 카운터
 
 MNA_ROI = (0,0,0,0)
 MNA_100_REF = None
@@ -1718,8 +1717,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 14:19"
+PATCH_UPDATED_AT = "2026-07-16 14:24"
 LATEST_PATCH = [
+    "🚨 위험베르 연속2프레임 확인(디바운스) 제거 — 전투이펙트로 매프레임 흔들리면 연속확인이 오히려 실발동을 막던 치명적 문제, 즉시발동으로 복귀",
     "🔧 쫄법 HP% 행(row) 자동탐지 제거 — 잘못된 행을 고르면 전체가 틀어지는 위험요소였음, 예전 초기버전처럼 단순하게 복귀",
     "🛡️ 위험베르 오발동 방지 — 캡처 한프레임 순간오독 걸러내는 연속2프레임 확인 로직 추가",
     "🎨 쫄법 HP% 위험경고색(주황·노랑 등)으로 바뀌어도 채움 인식 — 색상 전환시 %가 훅 떨어지던 문제 대응",
@@ -2147,14 +2147,13 @@ def expert_logic():
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
             if danger_roi[0] != 0:
                 danger_pct = self_hp_pct(frame, danger_roi, danger_ref)
+                # 연속프레임 확인(디바운스)은 제거함 — 전투 이펙트로 매 프레임 픽셀이
+                # 미세하게 흔들리면 "연속으로 낮게"가 오히려 잘 안 걸려서, 진짜 위험한
+                # 순간에 위기베르가 발동을 안 하는 훨씬 위험한 문제가 생겼음(생명과 직결).
+                # 한 프레임 오독으로 어쩌다 한번 더 발동하는 것보다, 위험할 때 반드시
+                # 발동하는 쪽이 훨씬 중요하므로 즉시발동으로 원복.
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
-                    globals()['_danger_confirm_streak'] += 1
-                    # 한 프레임만 낮게 나온 건 발동 안 함(피격이펙트·캡처 한번 삐끗 등으로
-                    # 그 순간만 오독될 수 있음) — 바로 다음 프레임에서도 또 낮으면(진짜 위험) 즉시 발동.
-                    if globals()['_danger_confirm_streak'] >= 2:
-                        ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
-                else:
-                    globals()['_danger_confirm_streak'] = 0
+                    ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
             # 줍기
             if chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
