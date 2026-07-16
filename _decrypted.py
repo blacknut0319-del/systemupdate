@@ -4,7 +4,7 @@ import subprocess
 def install_requirements():
     try:
         import customtkinter
-        import dxcam
+        import mss
         import keyboard
         import serial
         import win32gui  
@@ -13,7 +13,7 @@ def install_requirements():
         print("[안내] PC 환경에 따라 1~2분 정도 소요될 수 있습니다. 잠시만 기다려주세요...\n")
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "dxcam", "opencv-python", "numpy", "keyboard", "pyserial", "mss", "pillow", "cryptography", "customtkinter", "pywin32"])
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python", "numpy", "keyboard", "pyserial", "mss", "pillow", "cryptography", "customtkinter", "pywin32"])
             print("\n[완료] 모듈 설치가 성공적으로 끝났습니다! 시스템을 가동합니다.\n")
         except Exception as e:
             print(f"\n[오류] 자동 설치 중 문제가 발생했습니다: {e}")
@@ -26,7 +26,7 @@ import keyboard
 import serial
 import serial.tools.list_ports
 import random
-import dxcam  
+# import dxcam  # mss 전용으로 전환 — dxcam 네이티브 크래시 방지
 import tkinter as tk
 from tkinter import messagebox
 from threading import Thread, Lock
@@ -793,9 +793,13 @@ def _open_admin_panel_impl():
                         if PARTY_ROIS[pi][0] > 0:
                             hp_pct = scan_party_hp(frame, pi)
                             bar = entries[f"P{pi+1}_BAR"]
-                            bar.set(hp_pct / 100.0)
-                            bar.configure(progress_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
-                            entries[f"P{pi+1}_PCT"].configure(text=f"{int(hp_pct)}%", text_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
+                            if hp_pct is None:
+                                bar.set(0)
+                                entries[f"P{pi+1}_PCT"].configure(text="없음", text_color="#6c7086")
+                            else:
+                                bar.set(hp_pct / 100.0)
+                                bar.configure(progress_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
+                                entries[f"P{pi+1}_PCT"].configure(text=f"{int(hp_pct)}%", text_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
             except: pass
         admin.after(500, update_admin_live)
 
@@ -837,18 +841,18 @@ def _open_admin_panel_impl():
             photo = ImageTk.PhotoImage(pil_img); preview_label.config(image=photo); preview_label.image = photo
         except: pass
         if roi_lbl:
-            Rq = arr[:,:,0].astype(int); Gq = arr[:,:,1].astype(int); Bq = arr[:,:,2].astype(int)
             if is_blue:
-                px = (Bq>50)&(Bq>Rq*1.1)&(Bq>Gq*1.1); label = "MP"
+                Rq = arr[:,:,0].astype(int); Gq = arr[:,:,1].astype(int); Bq = arr[:,:,2].astype(int)
+                blue = (Bq>50)&(Bq>Rq*1.1)&(Bq>Gq*1.1)
+                raw = int(np.sum(blue)); wh = max(x2-x1,1)*max(y2-y1,1)
+                pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
+                roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | MP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
             else:
-                red_px = (Rq>80)&(Rq>Gq*1.2)&(Rq>Bq*1.2)
-                grn_px = (Gq>15)&(Gq>Rq*1.03)&(Gq>Bq*1.03)
-                rc, gc = int(np.sum(red_px)), int(np.sum(grn_px))
-                px = grn_px if gc > rc else red_px
-                label = "HP(독)" if gc > rc and gc > 0 else "HP"
-            raw = int(np.sum(px)); wh = max(x2-x1,1)*max(y2-y1,1)
-            pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
-            roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | {label}:{pct:.0f}% | 100%:{ref100 or '?'}px", text_color="#f0f0f0")
+                if not party_slot_active_rgb(arr):
+                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | 없음 (빈칸/사망)", text_color="#6c7086")
+                else:
+                    pct = bar_fill_pct_from_rgb(arr, ref100)
+                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
 
     def open_self_hp_overlay():
         ov = tk.Toplevel(admin); ov.overrideredirect(True)
@@ -884,10 +888,9 @@ def _open_admin_panel_impl():
         import mss as _mss; sct = _mss.MSS()
         img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
         arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
-        SELF_HP_100_REF = int(np.sum(red))
+        SELF_HP_100_REF = max(1, _hp_bar_band_cols(arr)[0])
         save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-        messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"px")
+        messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"col")
         admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF))
 
     def open_mna_roi_overlay():
@@ -933,8 +936,7 @@ def _open_admin_panel_impl():
         import mss as _mss; sct=_mss.MSS()
         img=sct.grab({"left":x1,"top":y1,"width":max(x2-x1,1),"height":max(y2-y1,1)})
         arr=np.array(img,dtype=np.uint8)[:,:,:3][:,:,::-1]
-        red=(arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
-        PARTY_HP_100_REF[pi]=int(np.sum(red))
+        PARTY_HP_100_REF[pi]=max(1, _hp_bar_band_cols(arr)[0])
         save_hidden_config(loaded_pwd if (loaded_pwd) else "")
         pv=entries.get(f"P{pi+1}_PREVIEW")
         if pv: refresh_preview(pv, None, PARTY_ROIS[pi], PARTY_HP_100_REF[pi])
@@ -1267,26 +1269,54 @@ else:
 if not authenticated:
     sys.exit()
 
-try:
-    camera = dxcam.create(output_color="RGB")
-    camera.start(target_fps=30)
-except Exception as e:
-    print("dxcam failed, using mss fallback")
-    import mss as _mss
-    class MSSCamera:
-        def __init__(self):
-            self.sct = _mss.MSS()
-            self._monitor = self.sct.monitors[1]
-            self._frame = None
-        def start(self, **kw): pass
-        def stop(self): pass
-        def release(self): pass
-        def get_latest_frame(self):
-            img = self.sct.grab(self._monitor)
+import mss as _mss
+import threading as _threading
+
+class MSSCamera:
+    """스레드 안전 mss 캡처.
+    - 스레드마다 별도 MSS 인스턴스(thread-local) → mss는 스레드 안전하지 않으므로 필수.
+    - grab 일시 오류 시 마지막 정상 프레임 반환 → None/검은프레임 오작동 방지.
+    - dxcam 미사용 → Desktop Duplication 네이티브 크래시 원천 제거."""
+    def __init__(self):
+        self._local = _threading.local()
+        self._monitor = None
+        self._last_frame = None
+        self._flock = Lock()
+        try:
+            _s = _mss.MSS()
+            self._monitor = _s.monitors[1]
+            _s.close()
+        except Exception:
+            self._monitor = None
+    def _get_sct(self):
+        sct = getattr(self._local, "sct", None)
+        if sct is None:
+            sct = _mss.MSS()
+            self._local.sct = sct
+            if self._monitor is None:
+                self._monitor = sct.monitors[1]
+        return sct
+    def start(self, **kw): pass
+    def stop(self): pass
+    def release(self):
+        sct = getattr(self._local, "sct", None)
+        if sct is not None:
+            try: sct.close()
+            except Exception: pass
+            self._local.sct = None
+    def get_latest_frame(self):
+        try:
+            sct = self._get_sct()
+            img = sct.grab(self._monitor)
             arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-            self._frame = arr.copy()
-            return self._frame
-    camera = MSSCamera()
+            with self._flock:
+                self._last_frame = arr
+            return arr
+        except Exception:
+            with self._flock:
+                return self._last_frame
+
+camera = MSSCamera()
 
 def get_rgb(frame, x, y):
     try:
@@ -1300,25 +1330,108 @@ def chk_color(f, coord, target_rgb, tol=25):
     if r == -1 or (r == 0 and g == 0 and b == 0): return False
     return abs(r - target_rgb[0]) <= tol and abs(g - target_rgb[1]) <= tol and abs(b - target_rgb[2]) <= tol
 
+def _hp_bar_poisoned(red_cnt, green_cnt, total):
+    """독(초록바) 판별 — HP% 계산과 분리."""
+    return green_cnt > total * 0.05 or (green_cnt > red_cnt and green_cnt > total * 0.02)
+
+def _hp_fill_masks(R, G, B):
+    """빨강 HP / 초록(독) HP 채움 마스크.
+    노란 선택테두리(R,G 둘 다 높음)·회색UI·어두운 빈칸은 R>G+30 / G>R+30 조건에서 모두 제외됨."""
+    red = (R > 70) & (R > G + 30) & (R > B + 30)
+    grn = (G > 70) & (G > R + 30) & (G > B + 30)   # 독(초록)바
+    return red, grn
+
+def _hp_bar_pixels(R, G, B):
+    """호환용 — 빨강|초록(독) 채움 마스크."""
+    red, grn = _hp_fill_masks(R, G, B)
+    return red | grn
+
+def _hp_bar_band_cols(arr):
+    """ROI 안에서 실제 HP바 '행'을 자동 탐지 → 그 바에서 채워진 '열' 수와 폭 반환.
+    노란 선택테두리·초상화·초록 장식테두리는 자동으로 무시된다.
+    반환: (채움열수, 폭, 바있음여부)."""
+    if arr.size == 0:
+        return 0, 1, False
+    R = arr[:, :, 0].astype(int)
+    G = arr[:, :, 1].astype(int)
+    B = arr[:, :, 2].astype(int)
+    red, grn = _hp_fill_masks(R, G, B)
+    h, w = red.shape
+    start_window = max(3, w // 8)   # 진짜 HP바는 ROI 좌측에서 시작
+    gap_tol = max(2, w // 20)       # 연속 판정 시 허용하는 작은 틈
+
+    def _measure(mask, floor):
+        """바 행 자동탐지 후 '세로로 꽉 찬 + 좌측에서 시작하는 연속 막대' 폭 측정.
+        진짜 HP바 = 얇은 가로 사각형(밴드 높이의 대부분이 같은 색으로 채워짐).
+        게임 배경(흩어진 빨강)·우측 시작 잡픽셀은 세로가 안 차거나 좌측시작이 아니라 걸러짐."""
+        rows = mask.sum(axis=1)
+        if int(rows.max()) < 2:
+            return 0, False
+        peak = int(rows.max()); py = int(np.argmax(rows))
+        lo = py; hi = py
+        while lo - 1 >= 0 and rows[lo - 1] >= peak * 0.4:
+            lo -= 1
+        while hi + 1 < h and rows[hi + 1] >= peak * 0.4:
+            hi += 1
+        sub = mask[lo:hi + 1]
+        bh = sub.shape[0]
+        need = max(2, math.ceil(bh * 0.6))   # 열이 밴드 높이의 60% 이상 채워야 '진짜 바 열'
+        solid = sub.sum(axis=0) >= need
+        idx = np.nonzero(solid)[0]
+        if idx.size == 0:
+            return 0, False
+        first = int(idx[0])
+        if first > start_window:              # 좌측 시작 아님 → 게임배경/잡픽셀 → 바 아님
+            return 0, False
+        run_end = first; gap = 0
+        for c in range(first, w):
+            if solid[c]:
+                run_end = c; gap = 0
+            else:
+                gap += 1
+                if gap > gap_tol:
+                    break
+        if (run_end - first + 1) < floor:     # 연속 막대 최소 길이 미달 → 바 아님
+            return 0, False
+        return run_end - first + 1, True
+
+    red_cols, red_ok = _measure(red, max(3, w // 25))   # 빨강 HP (저피통 5%도 통과)
+    if red_ok:
+        return red_cols, w, True
+    grn_cols, grn_ok = _measure(grn, max(8, w // 5))    # 독(초록)바는 넓게 채워질 때만
+    if grn_ok:
+        return grn_cols, w, True
+    return 0, w, False        # 빈칸·사망·게임배경(바 없음)
+
+def _hp_filled_cols(bar_px):
+    """호환용 — 채워진 '열' 수(가로)."""
+    if bar_px.size == 0:
+        return 0
+    return int(bar_px.any(axis=0).sum())
+
+def _hp_bar_fill_span(bar_px):
+    """호환용 — 채워진 열 수."""
+    return _hp_filled_cols(bar_px)
+
+def bar_fill_pct_from_rgb(arr, ref100=None):
+    """HP바 채움% — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
+    노란 선택테두리·초상화·회색UI 자동 무시. 바 없음(빈칸/사망)이면 0%."""
+    if arr.size == 0:
+        return 100.0
+    cols, w, is_bar = _hp_bar_band_cols(arr)
+    if not is_bar:
+        return 0.0
+    denom = ref100 if (ref100 and 0 < ref100 <= w) else w
+    return min(100.0, round(cols / max(denom, 1) * 100, 1))
+
 def bar_fill_pct(frame, roi, ref100=None):
-    """HP바 채움% — 빨강(평소) / 초록(독) 자동 판별."""
+    """HP바 채움% — ROI 가로 채움 span, 100% 보정 연동."""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
         return 100.0
     try:
         r = frame[y1:y2, x1:x2]
-        if r.size == 0:
-            return 100.0
-        R, G, B = r[:, :, 0].astype(int), r[:, :, 1].astype(int), r[:, :, 2].astype(int)
-        red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
-        green = (G > 15) & (G > R * 1.03) & (G > B * 1.03)
-        red_cnt = int(np.sum(red))
-        green_cnt = int(np.sum(green))
-        total = max(r.shape[0] * r.shape[1], 1)
-        raw = green_cnt if (green_cnt > red_cnt and green_cnt > total * 0.02) else red_cnt
-        if ref100 and ref100 > 0:
-            return min(100.0, round(raw / ref100 * 100, 1))
-        return min(100.0, round(raw / total * 100, 1))
+        return bar_fill_pct_from_rgb(r, ref100)
     except Exception:
         return 100.0
 
@@ -1372,8 +1485,33 @@ def is_green_bar(frame, roi):
         return avgG > avgR*1.05 and avgR < 120
     except: return False
 
+def party_slot_active(frame, roi):
+    """파티 슬롯에 HP바 존재 여부 — 빈칸·사망(바 없음/회색) 힐 차단."""
+    x1, y1, x2, y2 = roi
+    if x1 == 0 and x2 == 0:
+        return False
+    try:
+        r = frame[y1:y2, x1:x2]
+        return party_slot_active_rgb(r)
+    except Exception:
+        return False
+
+def party_slot_active_rgb(arr):
+    """슬롯에 실제 HP바(빨강 또는 넓은 독초록)가 있으면 True.
+    빈칸·사망(바 없음)·노란 선택테두리만 있는 슬롯은 False → 힐 차단.
+    독(초록)바는 인식됨 — 색 무관."""
+    if arr.size == 0:
+        return False
+    _, _, is_bar = _hp_bar_band_cols(arr)
+    return is_bar
+
 def scan_party_hp(frame, pi):
-    return bar_fill_pct(frame, PARTY_ROIS[pi], PARTY_HP_100_REF[pi])
+    roi = PARTY_ROIS[pi]
+    if roi[0] == 0 and roi[2] == 0:
+        return None
+    if not party_slot_active(frame, roi):
+        return None
+    return bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi])
 
 def load_buff_templates():
     global buff_templates, buff_template_hu
@@ -1393,12 +1531,26 @@ def human_delay(min_val, max_val):
     mean = (min_val + max_val) / 2; std_dev = (max_val - min_val) / 6 
     return max(min_val, min(max_val, random.gauss(mean, std_dev)))
 
+def _clamp_to_screen(x, y, margin=4):
+    """이동 목표를 (가상)화면 안으로 제한 + 좌측하단 시작 핫코너 회피.
+    상대이동 오버슈트/경계 clamp로 커서가 코너(0,maxY=시작버튼)로 튀는 것 방지."""
+    try:
+        gm = ctypes.windll.user32.GetSystemMetrics
+        vx, vy = gm(76), gm(77)          # 가상데스크톱 좌상단(멀티모니터 대응)
+        vw, vh = gm(78), gm(79)          # 가상데스크톱 크기
+        x = max(vx + margin, min(vx + vw - 1 - margin, int(x)))
+        y = max(vy + margin, min(vy + vh - 1 - margin, int(y)))
+    except Exception:
+        pass
+    return x, y
+
 def human_mouse_move(tx, ty):
     global ser
     if not ser or not ser.is_open: return
     pt = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     cx, cy = pt.x, pt.y
     tx += random.randint(-2, 2); ty += random.randint(-2, 2)
+    tx, ty = _clamp_to_screen(tx, ty)    # 화면 밖/핫코너 진입 차단 (목표·복귀 좌표 모두 경유)
     steps = random.randint(20, 30) 
     _km = (hw_var.get() in ("뚱박스", "KMBox")) if ('hw_var' in globals() and hw_var) else (HW_MODE in ("뚱박스", "KMBox"))
     # KMBox: 하드웨어가 ms 동안 직선을 부드럽게 보간(1패킷) → 네트워크 뚝뚝거림 제거, 아두이노 느낌.
@@ -1458,8 +1610,19 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-15 15:00"
+PATCH_UPDATED_AT = "2026-07-16 11:20"
 LATEST_PATCH = [
+    "🚫 빈 파티칸(게임배경만 있는 슬롯) 힐 차단 강화 — 세로로 꽉 찬 좌측시작 막대만 HP바로 인정",
+    "🖱️ 마우스 좌측하단(시작버튼) 튐 방지 — 이동 좌표 화면경계 clamp 적용",
+    "🛡️ 캡처 백엔드 mss 전용 전환 — dxcam 네이티브 크래시(전체화면 전환 등) 제거",
+    "🎯 파티 HP 바행 자동탐지 — 선택 시 노란 테두리로 100% 오독되던 문제 해결",
+    "🎯 HP 감지 색무관 재설계 — 밝기+채도로 채움 판정 (독=초록도 정상%, 0% 오독 해결)",
+    "🚫 빈칸·사망만 힐 차단 — 채움 0일 때만 '없음' (독바를 사망으로 오인하던 버그 수정)",
+    "🎯 파티 HP% 보정 수정 — 100%ref=채움컬럼 수 연동, ROI 테두리 오독(50%→93%) 차단",
+    "👁 제어판 미리보기 = 실제 힐 판정 동일 계산식",
+    "🩹 HP% 색상무관 — 빨강/초록(독) 모두 ROI 가로폭%로 계산 (위기·상위힐·익힐 오발동 차단)",
+    "🟢 독·힐 분리 — 독은 해독용, 노파티 격수힐은 독 무관 HP% 임계값만 (상위힐 오발동 차단)",
+    "🩹 격수 독 시 상위힐 오발동 수정 — 초록바는 가로폭%로 계산 (빨강 100% ref 오차 제거)",
     "⏱️ 버프 간격 랜덤화 — 1200초 고정 아님, 설정값 ±14% 흔들림 (사람처럼)",
     "🎯 노파티 격수 — 독(초록바) UDP HP% 정상 인식 + 독 걸려도 힐 우선",
     "✨ 버프 그리드 — F1/F2/F3 단축창 × F5~F12 체크 (뚱헌터 방식), F10/F11/2-F5 등 삭제",
@@ -1624,7 +1787,7 @@ def on_space_save(e=None):
     if time.time() - debounce['space'] < 0.5: return
     debounce['space'] = time.time()
     if not running:
-        pt = POINT(); ctypes.windll.user32.GetCursorPos(pt); cx, cy = pt.x, pt.y
+        pt = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)); cx, cy = pt.x, pt.y
         try:
             frame = camera.get_latest_frame() if camera else None
             r, g, b = get_rgb(frame, cx, cy) if frame is not None else (0,0,0)
@@ -1860,6 +2023,14 @@ def expert_logic():
             frame = camera.get_latest_frame() if camera else None
             if frame is None: time.sleep(0.01); continue 
 
+            # 위험베르 — 최우선 (HP%만 판정, 빨강/초록 독 무관)
+            danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
+            danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
+            if danger_roi[0] != 0:
+                danger_pct = bar_fill_pct(frame, danger_roi, danger_ref)
+                if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
+                    ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
+
             # 줍기
             if chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
                 last_loot_sent_time = now; ser.write(b'4'); last_loot = now; loot_interval = random.uniform(4.0, 7.0); log_event('🎒 줍기') 
@@ -1883,9 +2054,10 @@ def expert_logic():
             if chk_poison and chk_poison.get() and is_green_bar(frame, SELF_HP_ROI):
                 fix_mode_keys(['2', '9', '1'], 0.5); log_event('🟢 독해독'); continue
             if chk_target_poison and chk_target_poison.get() and attacker_poisoned:
-                # 노파티 격수 HP 위험 시 해독보다 힐 우선 (해독만 반복되며 힐 막히는 문제 방지)
+                # 노파티: HP 임계값 미만이면 해독보다 힐 우선 (독이어도 HP%만 본다)
                 udp_fresh = (time.time() - last_udp_time) < 5
-                hp_need_heal = udp_fresh and attacker_hp_udp < attacker_hp_threshold
+                atk_hp = attacker_hp_udp
+                hp_need_heal = udp_fresh and atk_hp < attacker_hp_threshold
                 if not (m == "노파티" and hp_need_heal):
                     fix_mode_keys(['2', 'X', '1'], 0.45); attacker_poisoned = False; log_event('🟢 격수 독해독'); continue
             if chk_party_poison and chk_party_poison.get() and (now - last_party_cure >= 0.5):
@@ -1894,6 +2066,7 @@ def expert_logic():
                 for pi in range(1, 8):
                     if not party_flags[pi]: continue
                     if PARTY_ROIS[pi][0] <= 0: continue
+                    if not party_slot_active(frame, PARTY_ROIS[pi]): continue
                     if is_green_bar(frame, PARTY_ROIS[pi]):
                         x1, y1, x2, y2 = PARTY_ROIS[pi]
                         cure_pi = pi; cure_tx, cure_ty = (x1 + x2) // 2, (y1 + y2) // 2
@@ -1911,13 +2084,6 @@ def expert_logic():
                     else:
                         fix_mode_keys(['2', 'X', '1'], 0.45)
                     last_party_cure = now; log_event(f'🟢 파티해독 P{cure_pi + 1}'); continue
-            # 위험베르 (HP% — 독=초록바도 bar_fill_pct로 판정)
-            danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
-            danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
-            if danger_roi[0] != 0:
-                danger_pct = bar_fill_pct(frame, danger_roi, danger_ref)
-                if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
-                    ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
             # 버프 (F1/F2/F3 × F5~F12 그리드)
             if chk_buff_on and chk_buff_on.get() and (now - last_buff_global >= 1.0) and (now - last_buff_seq >= BUFF_SEQ_GAP):
@@ -1976,7 +2142,7 @@ def expert_logic():
                     for i in range(8):
                         if selected_party_flags[i] and PARTY_ROIS[i][0] != 0:
                             hp_pct = scan_party_hp(frame, i)
-                            if hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[i]:
+                            if hp_pct is not None and hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[i]:
                                 if hp_pct < best_hp:
                                     best_hp = hp_pct; best_i = i
                     if best_i >= 0:
@@ -2019,7 +2185,7 @@ def expert_logic():
                         if not party_mode_flags[pi]: continue
                         if PARTY_ROIS[pi][0] > 0:
                             hp_pct = scan_party_hp(frame, pi)
-                            if hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[pi]:
+                            if hp_pct is not None and hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[pi]:
                                 if hp_pct < best_hp:
                                     best_hp = hp_pct; best_pi = pi
                                     x1,y1,x2,y2 = PARTY_ROIS[pi]
@@ -2037,7 +2203,7 @@ def expert_logic():
                         if use_strong:
                             log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
 
-            # 노파티
+            # 노파티 — 격수힐: 독 여부와 무관, UDP HP% vs 격수% 임계값만 판단
             elif m == "노파티":
                 action_taken = False
                 if SELF_HP_ROI[0] != 0:
@@ -2062,12 +2228,14 @@ def expert_logic():
                     last_self_heal = now; action_taken = True
                 
                 if not action_taken and (now - last_noparty_heal >= 0.2):
-                    if chk_attacker_sw.get() and (time.time() - last_udp_time < 5) and attacker_hp_udp < attacker_hp_threshold:
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and attacker_hp_udp < strong_heal_pct
+                    udp_ok = (time.time() - last_udp_time) < 5
+                    atk_hp = attacker_hp_udp
+                    if chk_attacker_sw.get() and udp_ok and atk_hp < attacker_hp_threshold:
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
                         if use_strong:
-                            ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{attacker_hp_udp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
+                            ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
                         elif random.randint(1, 100) <= 85:
-                            ser.write(b'A'); log_event(f"💚 격수힐 HP{attacker_hp_udp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
+                            ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
                         else:
                             time.sleep(human_delay(0.2, 0.3))
                         last_noparty_heal = now
