@@ -1454,15 +1454,25 @@ def _hp_bar_lenient_cols(arr):
     return run_end - int(idx[0]) + 1, w
 
 def _self_hp_fill_cols(arr):
-    """쫄법(자기) HP·위기베르 전용 — 파티 로직과 완전 분리, 구조판정·span 없음.
-    그냥 '색 있는 열 개수'만 센다. 피가 줄면 딱 그만큼만 열이 줄어드는 단순·단조 계산이라
-    span 뻥튀기(우측 잔상 1픽셀로 98%)나 구조판정 실패로 인한 오탐(0%/즉시위기베르) 문제가 없다."""
+    """쫄법(자기) HP·위기베르 전용 — 파티 로직과 완전 분리, 구조판정(좌측시작·세로꽉참)·span 없음.
+    바가 있는 '행'만 자동으로 찾아 그 안에서 '색 있는 열 개수'만 센다 (ROI 위아래 여유에 걸린
+    숫자표시·장식선 등이 섞여 실제보다 조금 높게 계산되는 것 방지). 피가 줄면 딱 그만큼만
+    열이 줄어드는 단순·단조 계산이라 span 뻥튀기나 구조판정 실패로 인한 오탐 문제가 없다."""
     if arr.size == 0:
         return 0, 1
     R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
     red, grn = _hp_fill_masks(R, G, B)
     mask = red | grn
-    w = mask.shape[1]
+    h, w = mask.shape
+    rows = mask.sum(axis=1)
+    if int(rows.max()) >= 2:
+        peak = int(rows.max()); py = int(np.argmax(rows))
+        lo = py; hi = py
+        while lo - 1 >= 0 and rows[lo - 1] >= max(1, peak * 0.3):
+            lo -= 1
+        while hi + 1 < h and rows[hi + 1] >= max(1, peak * 0.3):
+            hi += 1
+        mask = mask[lo:hi + 1]
     return int(mask.any(axis=0).sum()), w
 
 def _self_hp_pct_from_arr(arr, ref100=None):
@@ -1684,8 +1694,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 13:15"
+PATCH_UPDATED_AT = "2026-07-16 13:20"
 LATEST_PATCH = [
+    "🎯 쫄법 HP% 정밀도 개선 — 바가 있는 행만 자동으로 좁혀서 셈 (ROI 여유분에 걸린 숫자·장식 오염 감소)",
     "🔧 쫄법 HP·위기베르 완전 독립화 — 파티 판정 로직과 100% 분리, 피 닳으면 그만큼만 단순·정확하게 반영",
     "🚨 위기베르 20%까지 피 빠져도 미발동 치명적 버그 수정 — 관대계산이 우측 잔상픽셀로 %를 뻥튀기하던 문제",
     "🖥️ 제어판 쫄법 피통 미리보기 — 피 깎이면 '없음(사망)' 오표시 수정 (실제 힐판정과 동일 계산식으로 통일)",
