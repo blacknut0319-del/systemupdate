@@ -1476,11 +1476,14 @@ def _self_hp_fill_cols(arr):
             hi += 1
         mask = mask[lo:hi + 1]
     col = mask.any(axis=0)
-    start_window = max(3, w // 8)   # 바 시작 전 약간의 여백(테두리 등) 허용
     gap_tol = max(2, w // 20)       # 연속 판정 중 허용하는 작은 틈
     idx = np.nonzero(col)[0]
-    if idx.size == 0 or int(idx[0]) > start_window:
+    if idx.size == 0:
         return 0, w
+    # 좌측 시작을 강제하지 않음 — 피격 플래시가 바 왼쪽 일부를 잠깐 가려도
+    # (그래서 색이 처음 발견되는 위치가 뒤로 밀려도) 0%로 잘못 떨어지지 않게,
+    # '색이 처음 발견된 지점'부터 끊기지 않는 연속 구간의 길이만 잰다.
+    # 중앙 숫자표시처럼 진짜 채움과 떨어진 덩어리는 그 사이 큰 틈에서 자동으로 끊긴다.
     run_end = int(idx[0]); gap = 0
     for c in range(int(idx[0]), w):
         if col[c]:
@@ -1710,8 +1713,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 13:28"
+PATCH_UPDATED_AT = "2026-07-16 13:34"
 LATEST_PATCH = [
+    "🚨 쫄법 HP% 피격시 90%대에서도 0%로 오인식하던 버그 수정 — 좌측시작 강제 조건 제거(피격플래시 대응)",
     "🚨 쫄법 HP% 저피통일수록 실제보다 훨씬 높게 뻥튀기되던 문제 수정 — 바 중앙 숫자표시 오염 차단(좌측 연속구간만 인정)",
     "🎯 쫄법 HP% 정밀도 개선 — 바가 있는 행만 자동으로 좁혀서 셈 (ROI 여유분에 걸린 숫자·장식 오염 감소)",
     "🔧 쫄법 HP·위기베르 완전 독립화 — 파티 판정 로직과 100% 분리, 피 닳으면 그만큼만 단순·정확하게 반영",
