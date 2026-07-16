@@ -1783,8 +1783,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 22:30"
+PATCH_UPDATED_AT = "2026-07-17 03:00"
 LATEST_PATCH = [
+    "🔒 인증 ERROR(네트워크 일시장애)는 강제종료하지 않음 — 만료/코드없음/중복사용일 때만 종료. USB·뚱박스 연결 로직은 건드리지 않음",
     "🔒 인증 만료 시 프로그램 강제 종료 — 예전엔 '인증 만료' 문구만 띄우고 사냥만 멈춰서, 다시 시작하면 다음 5분 검사 전까지 잠깐 더 돌릴 수 있었음. 이제 만료/코드없음/중복사용이면 메시지 띄운 뒤 프로세스 완전 종료. 시작 버튼 누를 때도 즉시 재검증",
     "🔒 인증 만료 실시간 반영 — 5분 재검증 때는 시트의 만료값이 '0'일 때만 정지시켰고, 절대날짜/일수로 넣은 만료는 프로그램 켜놓은 채로 기간이 지나도 안 걸리던 문제 수정. 시작 시점과 동일한 만료판정(_is_code_expired)을 5분마다도 적용",
     "🚨 쫄법 피통·위기베르 — 독(초록바) 걸리면 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동(귀환)하던 문제 수정. 빨강뿐 아니라 초록(독)도 채움으로 인식하도록 변경. 100%기준 재보정 필요",
@@ -1962,16 +1963,17 @@ def update_ui_timer():
                 lbl_log.configure(state="disabled")
             root.after(0, _upd)
         # 5분마다 구글시트 재검증 (실행 중이 아니어도 만료되면 프로그램 강제 종료)
+        # ERROR(네트워크 일시장애)는 만료가 아니므로 강제종료하지 않음 — USB/뚱박스와 무관
         now_ts = time.time()
         if loaded_pwd and (now_ts - last_auth_check > 300):
             last_auth_check = now_ts
             cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
-            if cs_result in ("NOT_FOUND", "ERROR", "ALREADY_IN_USE"):
+            if cs_result == "ERROR":
                 time.sleep(2)
                 cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
-                if cs_result in ("NOT_FOUND", "ERROR", "ALREADY_IN_USE"):
-                    force_auth_exit("인증 만료")
-            if _is_code_expired(cs_info, cs_start):
+            if cs_result in ("NOT_FOUND", "ALREADY_IN_USE"):
+                force_auth_exit("인증 만료")
+            elif cs_result != "ERROR" and _is_code_expired(cs_info, cs_start):
                 force_auth_exit("코드 만료")
         if running:
             now = time.time(); txt_parts = []
@@ -2052,11 +2054,13 @@ def on_main_toggle(e=None):
             if root and lbl_ard:
                 root.after(0, lambda m=msg: lbl_ard.configure(text=m, text_color="#f85149"))
             return
-        # 시작 직 인증 즉시 재검증 — 만료 후 다시 시작해서 다음 5분 검사 전까지
-        # 잠깐 더 돌리는 꼼수를 막기 위함
+        # 시작 직 인증 즉시 재검증 — 만료 후 다시 시작해서 잠깐 더 돌리는 꼼수 차단
+        # ERROR(네트워크)는 무시하고 시작 허용. USB/뚱박스 연결과 무관하게 인증만 봄.
         if loaded_pwd:
             cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
-            if cs_result in ("NOT_FOUND", "ERROR", "ALREADY_IN_USE") or _is_code_expired(cs_info, cs_start):
+            if cs_result in ("NOT_FOUND", "ALREADY_IN_USE") or (
+                cs_result not in ("ERROR",) and _is_code_expired(cs_info, cs_start)
+            ):
                 force_auth_exit("인증 만료")
                 return
         running = True; now = time.time()
