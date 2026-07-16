@@ -1507,12 +1507,26 @@ def human_delay(min_val, max_val):
     mean = (min_val + max_val) / 2; std_dev = (max_val - min_val) / 6 
     return max(min_val, min(max_val, random.gauss(mean, std_dev)))
 
+def _clamp_to_screen(x, y, margin=4):
+    """이동 목표를 (가상)화면 안으로 제한 + 좌측하단 시작 핫코너 회피.
+    상대이동 오버슈트/경계 clamp로 커서가 코너(0,maxY=시작버튼)로 튀는 것 방지."""
+    try:
+        gm = ctypes.windll.user32.GetSystemMetrics
+        vx, vy = gm(76), gm(77)          # 가상데스크톱 좌상단(멀티모니터 대응)
+        vw, vh = gm(78), gm(79)          # 가상데스크톱 크기
+        x = max(vx + margin, min(vx + vw - 1 - margin, int(x)))
+        y = max(vy + margin, min(vy + vh - 1 - margin, int(y)))
+    except Exception:
+        pass
+    return x, y
+
 def human_mouse_move(tx, ty):
     global ser
     if not ser or not ser.is_open: return
     pt = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     cx, cy = pt.x, pt.y
     tx += random.randint(-2, 2); ty += random.randint(-2, 2)
+    tx, ty = _clamp_to_screen(tx, ty)    # 화면 밖/핫코너 진입 차단 (목표·복귀 좌표 모두 경유)
     steps = random.randint(20, 30) 
     _km = (hw_var.get() in ("뚱박스", "KMBox")) if ('hw_var' in globals() and hw_var) else (HW_MODE in ("뚱박스", "KMBox"))
     # KMBox: 하드웨어가 ms 동안 직선을 부드럽게 보간(1패킷) → 네트워크 뚝뚝거림 제거, 아두이노 느낌.
@@ -1745,7 +1759,7 @@ def on_space_save(e=None):
     if time.time() - debounce['space'] < 0.5: return
     debounce['space'] = time.time()
     if not running:
-        pt = POINT(); ctypes.windll.user32.GetCursorPos(pt); cx, cy = pt.x, pt.y
+        pt = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)); cx, cy = pt.x, pt.y
         try:
             frame = camera.get_latest_frame() if camera else None
             r, g, b = get_rgb(frame, cx, cy) if frame is not None else (0,0,0)
