@@ -1453,7 +1453,7 @@ def _hp_bar_band_cols(arr):
     R = arr[:, :, 0].astype(int)
     G = arr[:, :, 1].astype(int)
     B = arr[:, :, 2].astype(int)
-    red, grn = _hp_fill_masks(R, G, B)
+    red, _grn = _hp_fill_masks(R, G, B)
     h, w = red.shape
     start_window = max(3, w // 8)   # 진짜 HP바는 ROI 좌측에서 시작
     gap_tol = max(2, w // 20)       # 연속 판정 시 허용하는 작은 틈
@@ -1493,13 +1493,10 @@ def _hp_bar_band_cols(arr):
             return 0, False
         return run_end - first + 1, True
 
-    red_cols, red_ok = _measure(red, max(3, w // 25))   # 빨강 HP (저피통 5%도 통과)
+    red_cols, red_ok = _measure(red, max(3, w // 25))   # 정확히 빨간 HP바 있을 때만 힐감지(오탐 방지)
     if red_ok:
         return red_cols, w, True
-    grn_cols, grn_ok = _measure(grn, max(8, w // 5))    # 독(초록)바는 넓게 채워질 때만
-    if grn_ok:
-        return grn_cols, w, True
-    return 0, w, False        # 빈칸·사망·게임배경(바 없음)
+    return 0, w, False        # 빈칸·사망·게임배경(바 없음) — 초록(독) 등 빨강 아닌 색은 바로 간주 안 함
 
 def _hp_filled_cols(bar_px):
     """호환용 — 채워진 '열' 수(가로)."""
@@ -1778,8 +1775,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 15:40"
+PATCH_UPDATED_AT = "2026-07-16 15:45"
 LATEST_PATCH = [
+    "🩹 파티 HP바 감지 — 정확히 '빨간 HP바'가 있을 때만 힐 감지하도록 변경(독/초록 배경 오인식으로 빈 슬롯에 힐 시도하던 문제 방지)",
     "🚨 쫄법 피통ROI·위기베르 — 예전 초창기 버전 로직으로 완전 원복. 그동안 추가됐던 보정(행밴드탐지·좌측런·색마스크·디바운스·직접캡처 등)을 전부 제거하고, frame에서 ROI를 잘라 빨강픽셀(R>80,R>G*1.2,R>B*1.2) 개수를 세어 100%기준으로 나누는 단순 방식으로 복귀. 100%기준 보정도 동일 방식으로 재설정 필요(다시 보정해주세요)",
     "🎥 캡처 dxcam 우선으로 복귀(mss는 실패시 자동대체) — GDI(mss)가 게임의 실제 피통 렌더링을 못 보던 게 위기베르 오작동의 근본원인이었음. dxcam 크래시 방지용 자동복구(연속실패시 mss전환→10초마다 dxcam 재시도) 추가",
     "🚨 쫄법 HP 상대밝기 계산버그 수정 — 흰 배경(채도없음)이 채도필터 적용 전에 기준밝기(peak)를 끌어올려서, 정작 진짜 빨간 채움이 그 기준에 못미쳐 통째로 탈락하던 문제. peak는 이미 채도조건 통과한 픽셀 중에서만 계산하도록 수정",
