@@ -828,7 +828,7 @@ def _open_admin_panel_impl():
             ctk.CTkButton(row, text="적용", width=35, height=22, fg_color="#800020", hover_color="#9e1a3a", text_color="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(side="right", padx=2)
 
     # --- ROI 미리보기 유틸 ---
-    def refresh_preview(preview_label, roi_lbl, roi, ref100, is_blue=False):
+    def refresh_preview(preview_label, roi_lbl, roi, ref100, is_blue=False, strict=True):
         if roi[0] == 0: return
         import mss as _mss
         sct = _mss.MSS()
@@ -848,10 +848,10 @@ def _open_admin_panel_impl():
                 pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
                 roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | MP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
             else:
-                if not party_slot_active_rgb(arr):
+                if strict and not party_slot_active_rgb(arr):
                     roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | 없음 (빈칸/사망)", text_color="#6c7086")
                 else:
-                    pct = bar_fill_pct_from_rgb(arr, ref100)
+                    pct = bar_fill_pct_from_rgb(arr, ref100, strict=False)
                     roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
 
     def open_self_hp_overlay():
@@ -875,7 +875,7 @@ def _open_admin_panel_impl():
             global SELF_HP_ROI; SELF_HP_ROI=(x1,y1,x2,y2)
             save_hidden_config(loaded_pwd if (loaded_pwd) else "")
             ov.destroy()
-            admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF))
+            admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
         cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
         tk.Label(ov,text="🟢 쫄법 피통 왼쪽→오른쪽 드래그",fg="#10b981",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
         tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
@@ -891,7 +891,7 @@ def _open_admin_panel_impl():
         SELF_HP_100_REF = max(1, _hp_bar_band_cols(arr)[0])
         save_hidden_config(loaded_pwd if (loaded_pwd) else "")
         messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"col")
-        admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF))
+        admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
 
     def open_mna_roi_overlay():
         ov=tk.Toplevel(admin); ov.overrideredirect(True)
@@ -1045,7 +1045,7 @@ def _open_admin_panel_impl():
 
     def auto_refresh():
         if not admin.winfo_exists(): return
-        if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF)
+        if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF, strict=False)
         if MNA_ROI[0] != 0: refresh_preview(mna_roi_preview, mna_roi_lbl, MNA_ROI, MNA_100_REF, True)
         for pi in range(8):
             if PARTY_ROIS[pi][0] != 0:
@@ -1640,8 +1640,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 12:52"
+PATCH_UPDATED_AT = "2026-07-16 12:58"
 LATEST_PATCH = [
+    "🖥️ 제어판 쫄법 피통 미리보기 — 피 깎이면 '없음(사망)' 오표시 수정 (실제 힐판정과 동일 계산식으로 통일)",
     "🛡️ 쫄법 HP·위기베르 한대맞고 오발동 수정 — 파티용 엄격판정과 분리, 관대한 계산으로 복귀",
     "🚫 빈 파티칸(게임배경만 있는 슬롯) 힐 차단 강화 — 세로로 꽉 찬 좌측시작 막대만 HP바로 인정",
     "🖱️ 마우스 좌측하단(시작버튼) 튐 방지 — 이동 좌표 화면경계 clamp 적용",
