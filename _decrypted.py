@@ -898,8 +898,10 @@ def _open_admin_panel_impl():
         import mss as _mss; sct = _mss.MSS()
         img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
         arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        red = (arr[:, :, 0] > 80) & (arr[:, :, 0] > arr[:, :, 1] * 1.2) & (arr[:, :, 0] > arr[:, :, 2] * 1.2)
-        SELF_HP_100_REF = max(1, int(np.sum(red)))
+        R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
+        grn = (G > 80) & (G > R * 1.2) & (G > B * 1.2)
+        SELF_HP_100_REF = max(1, int(np.sum(red | grn)))
         save_hidden_config(loaded_pwd if (loaded_pwd) else "")
         messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"px")
         admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
@@ -1546,13 +1548,16 @@ def _hp_bar_lenient_cols(arr):
 
 def _self_hp_pct_from_arr(arr, ref100=None):
     """쫄법(자기) HP% — 예전 초창기 버전(06191252.py)의 roi_hp_pct 로직을 그대로 사용.
-    가공/보정 없이 단순하게: 빨강 픽셀 개수 세서 ref100(픽셀개수, 100%일때 값)으로 나눔."""
+    가공/보정 없이 단순하게: 채움 픽셀 개수 세서 ref100(픽셀개수, 100%일때 값)으로 나눔.
+    빨강뿐 아니라 독(초록)일 때도 채움으로 잡음 — 안 그러면 독 걸려서 바가
+    초록으로 바뀌는 순간 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동함."""
     if arr.size == 0:
         return 100.0
     try:
         R, G, B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
         red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
-        raw = int(np.sum(red))
+        grn = (G > 80) & (G > R * 1.2) & (G > B * 1.2)
+        raw = int(np.sum(red | grn))
         if ref100 and ref100 > 0:
             return min(100.0, round(raw / ref100 * 100, 1))
         return min(100.0, round(raw / max(arr.shape[0] * arr.shape[1], 1) * 100, 1))
@@ -1775,8 +1780,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 16:00"
+PATCH_UPDATED_AT = "2026-07-16 21:10"
 LATEST_PATCH = [
+    "🚨 쫄법 피통·위기베르 — 독(초록바) 걸리면 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동(귀환)하던 문제 수정. 빨강뿐 아니라 초록(독)도 채움으로 인식하도록 변경. 100%기준 재보정 필요",
     "⚡ 파티힐 클릭속도 개선 — 힐키 전 좌클릭(타겟선택) 2번→1번으로 줄여서 힐이 더 빠르게 들어가게 함(뒤쪽 클릭 2번은 그대로 유지)",
     "🩹 파티 HP바 감지 — 정확히 '빨간 HP바'가 있을 때만 힐 감지하도록 변경(독/초록 배경 오인식으로 빈 슬롯에 힐 시도하던 문제 방지)",
     "🚨 쫄법 피통ROI·위기베르 — 예전 초창기 버전 로직으로 완전 원복. 그동안 추가됐던 보정(행밴드탐지·좌측런·색마스크·디바운스·직접캡처 등)을 전부 제거하고, frame에서 ROI를 잘라 빨강픽셀(R>80,R>G*1.2,R>B*1.2) 개수를 세어 100%기준으로 나누는 단순 방식으로 복귀. 100%기준 보정도 동일 방식으로 재설정 필요(다시 보정해주세요)",
