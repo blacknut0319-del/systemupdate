@@ -1530,34 +1530,39 @@ _last_selfhp_debug_pct = 100.0
 _last_selfhp_debug_time = 0.0
 
 def _debug_dump_self_hp(arr, roi, ref100, pct, prev_pct):
-    """퍼센트가 순간적으로 크게 뚝 떨어질 때, 그 순간의 실제 ROI 픽셀을 그대로
-    파일로 저장 — 추측 대신 실제 화면 데이터를 직접 눈으로 확인하기 위한 진단용.
-    _selfhp_debug 폴더에 스냅샷 PNG + 판정과정 텍스트가 같이 저장된다.
-    arr는 이미 ROI만큼 잘라진(cropped) 이미지."""
+    """퍼센트가 순간적으로 크게 뚝 떨어질 때, 그 순간의 실제 ROI 픽셀 판정과정을
+    화면 로그(log_event)에 바로 보이는 요약 문자열로 만들어 돌려준다 — 배포판이라
+    파일을 못 꺼내는 다른 컴퓨터에서도, 화면 캡처만으로 원인 확인이 가능하게 함.
+    arr는 이미 ROI만큼 잘라진(cropped) 이미지. 실패해도 프로그램에 영향 없음.
+    (같은 컴퓨터에서 직접 확인 가능한 사람을 위해 _selfhp_debug 폴더에 PNG도 같이 남김)"""
     try:
         if arr is None or arr.size == 0:
-            return
-        os.makedirs("_selfhp_debug", exist_ok=True)
-        ts = time.strftime("%H%M%S")
-        base = os.path.join("_selfhp_debug", f"drop_{ts}_{prev_pct:.0f}to{pct:.0f}")
-        Image.fromarray(arr).resize((arr.shape[1]*4, arr.shape[0]*4), Image.NEAREST).save(base + ".png")
+            return None
         R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
         mask = _self_hp_fill_masks(R, G, B)
         col = mask.any(axis=0)
         cols, w = _self_hp_fill_cols(arr)
-        with open(base + ".txt", "w", encoding="utf-8") as f:
-            f.write(f"roi={roi} ref100={ref100} prev_pct={prev_pct} pct={pct}\n")
-            f.write(f"cols(채움열수)={cols} w(폭)={w}\n")
-            f.write(f"열별 채움여부(0/1, 왼쪽부터): {''.join('1' if v else '0' for v in col.tolist())}\n")
-            for row_i in range(arr.shape[0]):
-                f.write(f"row{row_i} RGB샘플(5칸마다): " +
-                        " ".join(f"({arr[row_i,c,0]},{arr[row_i,c,1]},{arr[row_i,c,2]})" for c in range(0, arr.shape[1], max(1, arr.shape[1]//25))) + "\n")
-    except Exception as e:
+        idx = np.nonzero(col)[0]
+        start_c = int(idx[0]) if idx.size else -1
+        end_c = start_c + cols - 1 if start_c >= 0 else -1
+        rgb_start = tuple(int(v) for v in arr[arr.shape[0]//2, start_c]) if start_c >= 0 else (0,0,0)
+        rgb_end = tuple(int(v) for v in arr[arr.shape[0]//2, min(end_c, w-1)]) if end_c >= 0 else (0,0,0)
+        rgb_after = tuple(int(v) for v in arr[arr.shape[0]//2, min(end_c+1, w-1)]) if end_c >= 0 else (0,0,0)
+        buckets = 30
+        bar = "".join("#" if col[int(i*w/buckets):int((i+1)*w/buckets) or 1].any() else "." for i in range(buckets))
+        summary = f"열{cols}/{w} 시작@{start_c}RGB{rgb_start} 끝@{end_c}RGB{rgb_end} 끝다음RGB{rgb_after} [{bar}]"
         try:
-            with open(os.path.join("_selfhp_debug", "error.txt"), "a", encoding="utf-8") as f:
-                f.write(f"{time.strftime('%H%M%S')} dump error: {e}\n")
+            os.makedirs("_selfhp_debug", exist_ok=True)
+            ts = time.strftime("%H%M%S")
+            base = os.path.join("_selfhp_debug", f"drop_{ts}_{prev_pct:.0f}to{pct:.0f}")
+            Image.fromarray(arr).resize((arr.shape[1]*4, arr.shape[0]*4), Image.NEAREST).save(base + ".png")
+            with open(base + ".txt", "w", encoding="utf-8") as f:
+                f.write(f"roi={roi} ref100={ref100} prev_pct={prev_pct} pct={pct}\n{summary}\n")
         except Exception:
             pass
+        return summary
+    except Exception:
+        return None
 
 def bar_fill_pct_from_rgb(arr, ref100=None, strict=False):
     """HP바 채움% (파티 전용) — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
@@ -1769,8 +1774,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 14:41"
+PATCH_UPDATED_AT = "2026-07-16 14:49"
 LATEST_PATCH = [
+    "🩻 HP급락 진단정보를 화면 로그에 직접 표시 — 배포판/다른 컴퓨터에서도 파일없이 화면 캡처만으로 원인 확인 가능하게 변경",
     "🩻 쫄법 HP·위기베르 — 전체화면 캡처를 잘라쓰지 않고 ROI만 직접 캡처하도록 변경(미리보기와 100% 동일 경로) + HP급락시 실제픽셀 자동저장 진단기능 추가",
     "🚨 위험베르 연속2프레임 확인(디바운스) 제거 — 전투이펙트로 매프레임 흔들리면 연속확인이 오히려 실발동을 막던 치명적 문제, 즉시발동으로 복귀",
     "🔧 쫄법 HP% 행(row) 자동탐지 제거 — 잘못된 행을 고르면 전체가 틀어지는 위험요소였음, 예전 초기버전처럼 단순하게 복귀",
@@ -2208,9 +2214,11 @@ def expert_logic():
                 # 원인을 확인하기 위한 진단용 스냅샷(과도한 저장 방지용 쿨다운 2초).
                 global _last_selfhp_debug_pct, _last_selfhp_debug_time
                 if (_last_selfhp_debug_pct - danger_pct >= 15) and (now - _last_selfhp_debug_time >= 2.0):
-                    _debug_dump_self_hp(_danger_arr, danger_roi, danger_ref, danger_pct, _last_selfhp_debug_pct)
+                    _dbg_summary = _debug_dump_self_hp(_danger_arr, danger_roi, danger_ref, danger_pct, _last_selfhp_debug_pct)
                     _last_selfhp_debug_time = now
-                    log_event(f"🩻 HP급락 스냅샷 저장 ({_last_selfhp_debug_pct:.0f}%→{danger_pct:.0f}%)")
+                    # 파일이 아니라 화면 로그에 바로 판정과정을 찍음 — 배포판 다른 컴퓨터에서도
+                    # 화면 캡처(스크린샷)만 보내주면 원인 확인 가능하게.
+                    log_event(f"🩻 HP급락 {_last_selfhp_debug_pct:.0f}%→{danger_pct:.0f}% {_dbg_summary or ''}")
                 _last_selfhp_debug_pct = danger_pct
                 # 연속프레임 확인(디바운스)은 제거함 — 전투 이펙트로 매 프레임 픽셀이
                 # 미세하게 흔들리면 "연속으로 낮게"가 오히려 잘 안 걸려서, 진짜 위험한
