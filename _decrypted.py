@@ -848,10 +848,14 @@ def _open_admin_panel_impl():
                 pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
                 roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | MP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
             else:
-                if strict and not party_slot_active_rgb(arr):
-                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | 없음 (빈칸/사망)", text_color="#6c7086")
+                if strict:
+                    if not party_slot_active_rgb(arr):
+                        roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | 없음 (빈칸/사망)", text_color="#6c7086")
+                    else:
+                        pct = bar_fill_pct_from_rgb(arr, ref100, strict=True)
+                        roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
                 else:
-                    pct = bar_fill_pct_from_rgb(arr, ref100, strict=False)
+                    pct = _self_hp_pct_from_arr(arr, ref100)   # 쫄법 전용 — 파티 판정과 무관, 단순 열개수
                     roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
 
     def open_self_hp_overlay():
@@ -888,7 +892,7 @@ def _open_admin_panel_impl():
         import mss as _mss; sct = _mss.MSS()
         img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
         arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        SELF_HP_100_REF = max(1, _hp_bar_band_cols(arr)[0])
+        SELF_HP_100_REF = max(1, _self_hp_fill_cols(arr)[0])
         save_hidden_config(loaded_pwd if (loaded_pwd) else "")
         messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"col")
         admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
@@ -1449,11 +1453,39 @@ def _hp_bar_lenient_cols(arr):
                 break                # 큰 틈 이후의 우측 잔상/장식은 무시 (span 뻥튀기 방지)
     return run_end - int(idx[0]) + 1, w
 
+def _self_hp_fill_cols(arr):
+    """쫄법(자기) HP·위기베르 전용 — 파티 로직과 완전 분리, 구조판정·span 없음.
+    그냥 '색 있는 열 개수'만 센다. 피가 줄면 딱 그만큼만 열이 줄어드는 단순·단조 계산이라
+    span 뻥튀기(우측 잔상 1픽셀로 98%)나 구조판정 실패로 인한 오탐(0%/즉시위기베르) 문제가 없다."""
+    if arr.size == 0:
+        return 0, 1
+    R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
+    red, grn = _hp_fill_masks(R, G, B)
+    mask = red | grn
+    w = mask.shape[1]
+    return int(mask.any(axis=0).sum()), w
+
+def _self_hp_pct_from_arr(arr, ref100=None):
+    if arr.size == 0:
+        return 100.0
+    cols, w = _self_hp_fill_cols(arr)
+    denom = ref100 if (ref100 and 0 < ref100 <= w) else w
+    return min(100.0, round(cols / max(denom, 1) * 100, 1))
+
+def self_hp_pct(frame, roi, ref100=None):
+    """쫄법(자기) HP% — 위기베르·자힐 전용, 파티 판정과 무관."""
+    x1, y1, x2, y2 = roi
+    if x1 == 0 and x2 == 0:
+        return 100.0
+    try:
+        return _self_hp_pct_from_arr(frame[y1:y2, x1:x2], ref100)
+    except Exception:
+        return 100.0
+
 def bar_fill_pct_from_rgb(arr, ref100=None, strict=False):
-    """HP바 채움% — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
+    """HP바 채움% (파티 전용) — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
     노란 선택테두리·초상화·회색UI 자동 무시.
-    strict=True(파티만): 빈칸/사망 판정 시 0%. 이미 party_slot_active로 거른 뒤 호출되므로 안전.
-    strict=False(기본, 쫄법/위기베르): 구조판정 실패해도 색 있으면 관대하게 계산해 오탐(즉시0%) 방지."""
+    strict=True(파티): 빈칸/사망 판정 시 0%. 이미 party_slot_active로 거른 뒤 호출되므로 안전."""
     if arr.size == 0:
         return 100.0
     cols, w, is_bar = _hp_bar_band_cols(arr)
@@ -1478,7 +1510,7 @@ def bar_fill_pct(frame, roi, ref100=None, strict=False):
         return 100.0
 
 def roi_hp_pct(frame, roi, ref100=None):
-    return bar_fill_pct(frame, roi, ref100)
+    return self_hp_pct(frame, roi, ref100)
 
 def roi_mna_pct(frame, roi, ref100=None):
     x1,y1,x2,y2 = roi
@@ -1652,8 +1684,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 13:05"
+PATCH_UPDATED_AT = "2026-07-16 13:15"
 LATEST_PATCH = [
+    "🔧 쫄법 HP·위기베르 완전 독립화 — 파티 판정 로직과 100% 분리, 피 닳으면 그만큼만 단순·정확하게 반영",
     "🚨 위기베르 20%까지 피 빠져도 미발동 치명적 버그 수정 — 관대계산이 우측 잔상픽셀로 %를 뻥튀기하던 문제",
     "🖥️ 제어판 쫄법 피통 미리보기 — 피 깎이면 '없음(사망)' 오표시 수정 (실제 힐판정과 동일 계산식으로 통일)",
     "🛡️ 쫄법 HP·위기베르 한대맞고 오발동 수정 — 파티용 엄격판정과 분리, 관대한 계산으로 복귀",
@@ -2072,7 +2105,7 @@ def expert_logic():
             danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
             if danger_roi[0] != 0:
-                danger_pct = bar_fill_pct(frame, danger_roi, danger_ref)
+                danger_pct = self_hp_pct(frame, danger_roi, danger_ref)
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
                     ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
