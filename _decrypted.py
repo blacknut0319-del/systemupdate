@@ -275,6 +275,7 @@ DANGER_HP_RGB = [78, 69, 74]
 DANGER_HP_ROI = (0,0,0,0)
 DANGER_HP_100_REF = None
 danger_hp_threshold = 20
+_danger_confirm_streak = 0   # 위험베르 오발동 방지 — 캡처 한프레임 순간오독(예: 피격이펙트) 걸러내기용 연속판정 카운터
 
 MNA_ROI = (0,0,0,0)
 MNA_100_REF = None
@@ -1350,6 +1351,18 @@ def _hp_bar_pixels(R, G, B):
     red, grn = _hp_fill_masks(R, G, B)
     return red | grn
 
+def _self_hp_fill_masks(R, G, B):
+    """쫄법(자기) HP·위기베르 전용 채움 마스크 — 빨강뿐 아니라 위험경고색(주황·노랑)이나
+    독(초록)으로 바뀌어도 전부 '채워짐'으로 인식한다.
+    파티용 마스크(_hp_fill_masks)는 노란 선택테두리 오인식을 막기 위해 R>G+30(빨강 엄격)/
+    G>R+30(초록 엄격)만 잡지만, 자기 피통 ROI는 그런 노란 테두리가 없는 단일 바이므로
+    채도만 있으면(파랑이 주가 아니면) 색상 종류와 무관하게 채움으로 잡아도 안전함.
+    (버그: 낮은 피에서 바가 주황/노랑으로 바뀌면 R>G+30 조건을 못 통과해서 갑자기
+    채움이 하나도 안 잡히고 %가 훅 떨어지던 문제)."""
+    mx = np.maximum(np.maximum(R, G), B)
+    mn = np.minimum(np.minimum(R, G), B)
+    return (mx > 60) & ((mx - mn) > 40) & (B < mx - 15)
+
 def _hp_bar_band_cols(arr):
     """ROI 안에서 실제 HP바 '행'을 자동 탐지 → 그 바에서 채워진 '열' 수와 폭 반환.
     노란 선택테두리·초상화·초록 장식테두리는 자동으로 무시된다.
@@ -1463,8 +1476,7 @@ def _self_hp_fill_cols(arr):
     if arr.size == 0:
         return 0, 1
     R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
-    red, grn = _hp_fill_masks(R, G, B)
-    mask = red | grn
+    mask = _self_hp_fill_masks(R, G, B)
     h, w = mask.shape
     rows = mask.sum(axis=1)
     if int(rows.max()) >= 2:
@@ -1716,8 +1728,10 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 13:41"
+PATCH_UPDATED_AT = "2026-07-16 14:08"
 LATEST_PATCH = [
+    "🛡️ 위험베르 오발동 방지 — 캡처 한프레임 순간오독 걸러내는 연속2프레임 확인 로직 추가",
+    "🎨 쫄법 HP% 위험경고색(주황·노랑 등)으로 바뀌어도 채움 인식 — 색상 전환시 %가 훅 떨어지던 문제 대응",
     "🚨 쫄법 HP% 40% 밑으로 안 내려가던 바닥값 버그 수정 — 틈허용을 폭비례에서 고정 2px로 축소(숫자와 이어붙는 것 차단)",
     "🚨 쫄법 HP% 피격시 90%대에서도 0%로 오인식하던 버그 수정 — 좌측시작 강제 조건 제거(피격플래시 대응)",
     "🚨 쫄법 HP% 저피통일수록 실제보다 훨씬 높게 뻥튀기되던 문제 수정 — 바 중앙 숫자표시 오염 차단(좌측 연속구간만 인정)",
@@ -2143,7 +2157,13 @@ def expert_logic():
             if danger_roi[0] != 0:
                 danger_pct = self_hp_pct(frame, danger_roi, danger_ref)
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
-                    ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
+                    globals()['_danger_confirm_streak'] += 1
+                    # 한 프레임만 낮게 나온 건 발동 안 함(피격이펙트·캡처 한번 삐끗 등으로
+                    # 그 순간만 오독될 수 있음) — 바로 다음 프레임에서도 또 낮으면(진짜 위험) 즉시 발동.
+                    if globals()['_danger_confirm_streak'] >= 2:
+                        ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
+                else:
+                    globals()['_danger_confirm_streak'] = 0
 
             # 줍기
             if chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
