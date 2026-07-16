@@ -26,7 +26,13 @@ import keyboard
 import serial
 import serial.tools.list_ports
 import random
-# import dxcam  # mss 전용으로 전환 — dxcam 네이티브 크래시 방지
+try:
+    import dxcam  # GPU 레벨(DXGI Desktop Duplication) 캡처 — 게임의 실제 렌더링을 정확히 봄.
+                  # mss(GDI/BitBlt)는 일부 게임 렌더링 방식에서 실제 화면과 다른 내용을 캡처하는
+                  # 경우가 있어(예: 실제 전투로 피가 빠져도 안 반영됨) dxcam을 우선 사용하고,
+                  # 오류/크래시 가능성 때문에 실패 시 자동으로 mss로 넘어가는 안전장치를 둠.
+except Exception:
+    dxcam = None  # 설치 안 됐거나 이 PC에서 로드 실패해도 mss로 계속 동작하도록
 import tkinter as tk
 from tkinter import messagebox
 from threading import Thread, Lock
@@ -521,6 +527,27 @@ def check_google_sheet(input_code):
     except:
         return "ERROR", "", ""
 
+def _is_code_expired(cs_info, cs_start=None):
+    """구글시트 만료 컬럼(cs_info) 판정 — 절대날짜(YYYY-MM-DD) 또는 일수(숫자) 둘 다 지원.
+    시작 프로그램 실행 후에도(5분 재검증 시) 동일 기준으로 만료를 판정하기 위해
+    시작 시점 체크와 주기적 재검증 체크가 이 함수 하나를 공통으로 사용한다."""
+    if cs_info == "0":
+        return True   # 0 = 즉시 만료
+    if not cs_info:
+        return False
+    try:
+        expire_dt = datetime.strptime(cs_info, "%Y-%m-%d")   # 절대날짜
+        return datetime.now() > expire_dt
+    except Exception:
+        pass
+    try:
+        max_days = int(cs_info)   # 일수
+        start_str = cs_start or saved_expire_start or datetime.now().strftime("%Y-%m-%d")
+        start_dt = datetime.strptime(start_str, "%Y-%m-%d")
+        return (datetime.now() - start_dt).days >= max_days
+    except Exception:
+        return False
+
 def load_hidden_config():
     global MAIN_ATTACKER_COORD, SELF_HP_COORD, SELF_HP_RGB, NOPARTY_HP_COORD, NOPARTY_RGB, PARTY_COORDS
     global SELF_POISON_COORD, SELF_POISON_RGB, TARGET_POISON_COORD, TARGET_POISON_RGB, DANGER_HP_COORD, DANGER_HP_RGB
@@ -828,7 +855,7 @@ def _open_admin_panel_impl():
             ctk.CTkButton(row, text="적용", width=35, height=22, fg_color="#800020", hover_color="#9e1a3a", text_color="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(side="right", padx=2)
 
     # --- ROI 미리보기 유틸 ---
-    def refresh_preview(preview_label, roi_lbl, roi, ref100, is_blue=False):
+    def refresh_preview(preview_label, roi_lbl, roi, ref100, is_blue=False, strict=True):
         if roi[0] == 0: return
         import mss as _mss
         sct = _mss.MSS()
@@ -848,11 +875,15 @@ def _open_admin_panel_impl():
                 pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
                 roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | MP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
             else:
-                if not party_slot_active_rgb(arr):
-                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | 없음 (빈칸/사망)", text_color="#6c7086")
+                if strict:
+                    if not party_slot_active_rgb(arr):
+                        roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | 없음 (빈칸/사망)", text_color="#6c7086")
+                    else:
+                        pct = bar_fill_pct_from_rgb(arr, ref100, strict=True)
+                        roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
                 else:
-                    pct = bar_fill_pct_from_rgb(arr, ref100)
-                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
+                    pct = _self_hp_pct_from_arr(arr, ref100)   # 쫄법 전용 — 예전 초창기 버전 그대로(빨강 픽셀 개수)
+                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
 
     def open_self_hp_overlay():
         ov = tk.Toplevel(admin); ov.overrideredirect(True)
@@ -875,7 +906,7 @@ def _open_admin_panel_impl():
             global SELF_HP_ROI; SELF_HP_ROI=(x1,y1,x2,y2)
             save_hidden_config(loaded_pwd if (loaded_pwd) else "")
             ov.destroy()
-            admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF))
+            admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
         cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
         tk.Label(ov,text="🟢 쫄법 피통 왼쪽→오른쪽 드래그",fg="#10b981",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
         tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
@@ -888,10 +919,13 @@ def _open_admin_panel_impl():
         import mss as _mss; sct = _mss.MSS()
         img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
         arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        SELF_HP_100_REF = max(1, _hp_bar_band_cols(arr)[0])
+        R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
+        grn = (G > 80) & (G > R * 1.2) & (G > B * 1.2)
+        SELF_HP_100_REF = max(1, int(np.sum(red | grn)))
         save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-        messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"col")
-        admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF))
+        messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"px")
+        admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
 
     def open_mna_roi_overlay():
         ov=tk.Toplevel(admin); ov.overrideredirect(True)
@@ -1045,7 +1079,7 @@ def _open_admin_panel_impl():
 
     def auto_refresh():
         if not admin.winfo_exists(): return
-        if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF)
+        if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF, strict=False)
         if MNA_ROI[0] != 0: refresh_preview(mna_roi_preview, mna_roi_lbl, MNA_ROI, MNA_100_REF, True)
         for pi in range(8):
             if PARTY_ROIS[pi][0] != 0:
@@ -1141,28 +1175,10 @@ if loaded_pwd:
     # 🔒 실시간 구글시트 검증 (마스터키 없음, HWID 강제)
     cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
     if cs_result == "PASS":
-        # 만료일 검사
-        if cs_info == "0":
-            # 0 = 즉시 만료
+        # 만료일 검사 (절대날짜/일수 공통 판정 — _is_code_expired, 5분 재검증과 동일 기준)
+        if _is_code_expired(cs_info, cs_start):
             ctypes.windll.user32.MessageBoxW(0, "사용 기간이 만료된 코드입니다.", "만료", 0x10)
             sys.exit()
-        elif cs_info and cs_info != "":
-            try:
-                # 절대날짜 (예: 2026-07-20)
-                expire_dt = datetime.strptime(cs_info, "%Y-%m-%d")
-                if datetime.now() > expire_dt:
-                    ctypes.windll.user32.MessageBoxW(0, "사용 기간이 만료된 코드입니다.", "만료", 0x10)
-                    sys.exit()
-            except:
-                try:
-                    # 일수 (예: 30 → 첫 사용 후 30일)
-                    max_days = int(cs_info)
-                    start_str = cs_start or datetime.now().strftime("%Y-%m-%d")
-                    start_dt = datetime.strptime(start_str, "%Y-%m-%d")
-                    if (datetime.now() - start_dt).days >= max_days:
-                        ctypes.windll.user32.MessageBoxW(0, "사용 기간이 만료된 코드입니다.", "만료", 0x10)
-                        sys.exit()
-                except: pass
         authenticated = True
     elif cs_result == "REGISTER":
         # HWID 자동 등록 시도
@@ -1315,8 +1331,95 @@ class MSSCamera:
         except Exception:
             with self._flock:
                 return self._last_frame
+    def grab_roi(self, roi):
+        """ROI 좌표만 직접 캡처(전체화면 프레임을 잘라쓰지 않음) — 미리보기(refresh_preview)와
+        완전히 동일한 방식. 모니터 오프셋 등으로 전체화면 프레임 슬라이싱이 실제 화면과
+        어긋날 가능성을 원천적으로 없애기 위해, 절대좌표로 그 부분만 바로 캡처한다."""
+        try:
+            x1, y1, x2, y2 = roi
+            sct = self._get_sct()
+            img = sct.grab({"left": x1, "top": y1, "width": max(x2 - x1, 1), "height": max(y2 - y1, 1)})
+            return np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
+        except Exception:
+            return None
 
-camera = MSSCamera()
+class HybridCamera:
+    """dxcam(GPU/DXGI Desktop Duplication)을 우선 사용 — 게임의 실제 렌더링을 정확히 캡처.
+    mss(GDI/BitBlt)는 일부 렌더링 방식에서 실제 화면과 다른 내용을 보여줄 수 있어서(예:
+    전투로 실제 피가 빠져도 인식이 안 되던 문제) dxcam을 기본으로 되돌림.
+    단, dxcam은 간헐적으로 오류/크래시가 날 수 있으므로 모든 호출을 try/except로 감싸고,
+    연속 실패시 자동으로 mss로 전환(그리고 잠시 후 dxcam 재시도)해서 프로그램이 죽지 않게 함."""
+    def __init__(self):
+        self._mss = MSSCamera()
+        self._dx = None
+        self._dx_ok = False
+        self._fail_streak = 0
+        self._last_retry = 0.0
+        self._lock = Lock()
+        self._init_dxcam()
+    def _init_dxcam(self):
+        if dxcam is None:
+            self._dx_ok = False
+            return
+        try:
+            with self._lock:
+                if self._dx is not None:
+                    try: self._dx.release()
+                    except Exception: pass
+                self._dx = dxcam.create(output_color="RGB")
+                self._dx.start(target_fps=60)
+                self._dx_ok = True
+                self._fail_streak = 0
+        except Exception:
+            self._dx = None
+            self._dx_ok = False
+    def start(self, **kw): pass
+    def stop(self):
+        try:
+            if self._dx: self._dx.stop()
+        except Exception:
+            pass
+    def release(self):
+        try:
+            if self._dx: self._dx.release()
+        except Exception:
+            pass
+        self._mss.release()
+    def get_latest_frame(self):
+        if self._dx_ok and self._dx is not None:
+            try:
+                f = self._dx.get_latest_frame()
+                if f is not None:
+                    self._fail_streak = 0
+                    return f
+                self._fail_streak += 1
+            except Exception:
+                self._fail_streak += 1
+            if self._fail_streak >= 5:
+                # dxcam이 계속 실패/불안정하면 즉시 mss로 전환해서 끊김 없이 계속 동작
+                self._dx_ok = False
+                now_t = time.time()
+                self._last_retry = now_t
+        elif not self._dx_ok and dxcam is not None and (time.time() - self._last_retry >= 10.0):
+            self._last_retry = time.time()
+            self._init_dxcam()   # 10초마다 dxcam 복구 재시도(드라이버 일시오류 등 회복 가능성)
+        return self._mss.get_latest_frame()
+    def grab_roi(self, roi):
+        """dxcam이 살아있으면 dxcam의 풀프레임에서 잘라씀(실제 게임 렌더링을 정확히 보기 위해),
+        dxcam이 없거나 죽어있을 때만 mss 직접캡처로 대체."""
+        if self._dx_ok and self._dx is not None:
+            try:
+                x1, y1, x2, y2 = roi
+                f = self.get_latest_frame()
+                if f is not None:
+                    cropped = f[y1:y2, x1:x2]
+                    if cropped.size > 0:
+                        return cropped
+            except Exception:
+                pass
+        return self._mss.grab_roi(roi)
+
+camera = HybridCamera()
 
 def get_rgb(frame, x, y):
     try:
@@ -1355,7 +1458,7 @@ def _hp_bar_band_cols(arr):
     R = arr[:, :, 0].astype(int)
     G = arr[:, :, 1].astype(int)
     B = arr[:, :, 2].astype(int)
-    red, grn = _hp_fill_masks(R, G, B)
+    red, _grn = _hp_fill_masks(R, G, B)
     h, w = red.shape
     start_window = max(3, w // 8)   # 진짜 HP바는 ROI 좌측에서 시작
     gap_tol = max(2, w // 20)       # 연속 판정 시 허용하는 작은 틈
@@ -1395,13 +1498,10 @@ def _hp_bar_band_cols(arr):
             return 0, False
         return run_end - first + 1, True
 
-    red_cols, red_ok = _measure(red, max(3, w // 25))   # 빨강 HP (저피통 5%도 통과)
+    red_cols, red_ok = _measure(red, max(3, w // 25))   # 정확히 빨간 HP바 있을 때만 힐감지(오탐 방지)
     if red_ok:
         return red_cols, w, True
-    grn_cols, grn_ok = _measure(grn, max(8, w // 5))    # 독(초록)바는 넓게 채워질 때만
-    if grn_ok:
-        return grn_cols, w, True
-    return 0, w, False        # 빈칸·사망·게임배경(바 없음)
+    return 0, w, False        # 빈칸·사망·게임배경(바 없음) — 초록(독) 등 빨강 아닌 색은 바로 간주 안 함
 
 def _hp_filled_cols(bar_px):
     """호환용 — 채워진 '열' 수(가로)."""
@@ -1413,30 +1513,103 @@ def _hp_bar_fill_span(bar_px):
     """호환용 — 채워진 열 수."""
     return _hp_filled_cols(bar_px)
 
-def bar_fill_pct_from_rgb(arr, ref100=None):
-    """HP바 채움% — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
-    노란 선택테두리·초상화·회색UI 자동 무시. 바 없음(빈칸/사망)이면 0%."""
+def _hp_bar_lenient_cols(arr):
+    """관대한 채움 폭 측정 — 쫄법(자기) HP·위기베르처럼 항상 바가 존재하는 단일 바용.
+    피격 이펙트·데미지 텍스트 등으로 한 프레임 구조판정(세로꽉참/좌측시작)이 실패해도
+    즉시 0%로 잘못 떨어지지 않도록, 색이 조금이라도 있으면 읽어낸다.
+    단, '첫색~끝색 사이 거리(span)'가 아니라 '좌측부터 끊기지 않는 연속 열'만 센다 —
+    span 방식은 우측 끝 UI잔상 1픽셀만 있어도 거의 100%로 뻥튀기되어
+    실제로는 피가 20% 밑인데도 위기베르가 전혀 발동 안 하는 치명적 버그가 있었음."""
+    R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
+    red, grn = _hp_fill_masks(R, G, B)
+    h, w = red.shape
+    mask = red if int(red.sum()) >= int(grn.sum()) else grn
+    if int(mask.sum()) == 0:
+        return 0, w
+    rows = mask.sum(axis=1)
+    peak = int(rows.max()); py = int(np.argmax(rows))
+    lo = py; hi = py
+    while lo - 1 >= 0 and rows[lo - 1] >= max(1, peak * 0.3):
+        lo -= 1
+    while hi + 1 < h and rows[hi + 1] >= max(1, peak * 0.3):
+        hi += 1
+    col = mask[lo:hi + 1].any(axis=0)
+    start_window = max(3, w // 8)   # 바 시작 전 약간의 여백(테두리 등) 허용
+    gap_tol = max(2, w // 20)       # 연속 판정 중 허용하는 작은 틈
+    idx = np.nonzero(col)[0]
+    if idx.size == 0 or int(idx[0]) > start_window:
+        return 0, w                 # 좌측에 색이 없음 → 실제로 다 빠졌거나 바 아님
+    run_end = int(idx[0]); gap = 0
+    for c in range(int(idx[0]), w):
+        if col[c]:
+            run_end = c; gap = 0
+        else:
+            gap += 1
+            if gap > gap_tol:
+                break                # 큰 틈 이후의 우측 잔상/장식은 무시 (span 뻥튀기 방지)
+    return run_end - int(idx[0]) + 1, w
+
+def _self_hp_pct_from_arr(arr, ref100=None):
+    """쫄법(자기) HP% — 예전 초창기 버전(06191252.py)의 roi_hp_pct 로직을 그대로 사용.
+    가공/보정 없이 단순하게: 채움 픽셀 개수 세서 ref100(픽셀개수, 100%일때 값)으로 나눔.
+    빨강뿐 아니라 독(초록)일 때도 채움으로 잡음 — 안 그러면 독 걸려서 바가
+    초록으로 바뀌는 순간 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동함."""
+    if arr.size == 0:
+        return 100.0
+    try:
+        R, G, B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
+        red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
+        grn = (G > 80) & (G > R * 1.2) & (G > B * 1.2)
+        raw = int(np.sum(red | grn))
+        if ref100 and ref100 > 0:
+            return min(100.0, round(raw / ref100 * 100, 1))
+        return min(100.0, round(raw / max(arr.shape[0] * arr.shape[1], 1) * 100, 1))
+    except Exception:
+        return 100.0
+
+def self_hp_pct(frame, roi, ref100=None):
+    """쫄법(자기) HP% — 위기베르·자힐 전용, 파티 판정과 무관. (예전 초창기 버전 그대로)"""
+    x1, y1, x2, y2 = roi
+    if x1 == 0 and x2 == 0:
+        return 100.0
+    try:
+        r = frame[y1:y2, x1:x2]
+        if r.size == 0:
+            return 100.0
+        return _self_hp_pct_from_arr(r, ref100)
+    except Exception:
+        return 100.0
+
+def bar_fill_pct_from_rgb(arr, ref100=None, strict=False):
+    """HP바 채움% (파티 전용) — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
+    노란 선택테두리·초상화·회색UI 자동 무시.
+    strict=True(파티): 빈칸/사망 판정 시 0%. 이미 party_slot_active로 거른 뒤 호출되므로 안전."""
     if arr.size == 0:
         return 100.0
     cols, w, is_bar = _hp_bar_band_cols(arr)
-    if not is_bar:
+    if is_bar:
+        denom = ref100 if (ref100 and 0 < ref100 <= w) else w
+        return min(100.0, round(cols / max(denom, 1) * 100, 1))
+    if strict:
         return 0.0
-    denom = ref100 if (ref100 and 0 < ref100 <= w) else w
-    return min(100.0, round(cols / max(denom, 1) * 100, 1))
+    lcols, lw = _hp_bar_lenient_cols(arr)
+    denom = ref100 if (ref100 and 0 < ref100 <= lw) else lw
+    return min(100.0, round(lcols / max(denom, 1) * 100, 1))
 
-def bar_fill_pct(frame, roi, ref100=None):
+def bar_fill_pct(frame, roi, ref100=None, strict=False):
     """HP바 채움% — ROI 가로 채움 span, 100% 보정 연동."""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
         return 100.0
     try:
         r = frame[y1:y2, x1:x2]
-        return bar_fill_pct_from_rgb(r, ref100)
+        return bar_fill_pct_from_rgb(r, ref100, strict=strict)
     except Exception:
         return 100.0
 
 def roi_hp_pct(frame, roi, ref100=None):
-    return bar_fill_pct(frame, roi, ref100)
+    """쫄법(자기) HP% — 예전 초창기 버전 그대로, self_hp_pct와 동일(별칭)."""
+    return self_hp_pct(frame, roi, ref100)
 
 def roi_mna_pct(frame, roi, ref100=None):
     x1,y1,x2,y2 = roi
@@ -1511,7 +1684,7 @@ def scan_party_hp(frame, pi):
         return None
     if not party_slot_active(frame, roi):
         return None
-    return bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi])
+    return bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi], strict=True)
 
 def load_buff_templates():
     global buff_templates, buff_template_hu
@@ -1610,8 +1783,31 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 11:20"
+PATCH_UPDATED_AT = "2026-07-16 22:30"
 LATEST_PATCH = [
+    "🔒 인증 만료 시 프로그램 강제 종료 — 예전엔 '인증 만료' 문구만 띄우고 사냥만 멈춰서, 다시 시작하면 다음 5분 검사 전까지 잠깐 더 돌릴 수 있었음. 이제 만료/코드없음/중복사용이면 메시지 띄운 뒤 프로세스 완전 종료. 시작 버튼 누를 때도 즉시 재검증",
+    "🔒 인증 만료 실시간 반영 — 5분 재검증 때는 시트의 만료값이 '0'일 때만 정지시켰고, 절대날짜/일수로 넣은 만료는 프로그램 켜놓은 채로 기간이 지나도 안 걸리던 문제 수정. 시작 시점과 동일한 만료판정(_is_code_expired)을 5분마다도 적용",
+    "🚨 쫄법 피통·위기베르 — 독(초록바) 걸리면 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동(귀환)하던 문제 수정. 빨강뿐 아니라 초록(독)도 채움으로 인식하도록 변경. 100%기준 재보정 필요",
+    "⚡ 파티힐 클릭속도 개선 — 힐키 전 좌클릭(타겟선택) 2번→1번으로 줄여서 힐이 더 빠르게 들어가게 함(뒤쪽 클릭 2번은 그대로 유지)",
+    "🩹 파티 HP바 감지 — 정확히 '빨간 HP바'가 있을 때만 힐 감지하도록 변경(독/초록 배경 오인식으로 빈 슬롯에 힐 시도하던 문제 방지)",
+    "🚨 쫄법 피통ROI·위기베르 — 예전 초창기 버전 로직으로 완전 원복. 그동안 추가됐던 보정(행밴드탐지·좌측런·색마스크·디바운스·직접캡처 등)을 전부 제거하고, frame에서 ROI를 잘라 빨강픽셀(R>80,R>G*1.2,R>B*1.2) 개수를 세어 100%기준으로 나누는 단순 방식으로 복귀. 100%기준 보정도 동일 방식으로 재설정 필요(다시 보정해주세요)",
+    "🎥 캡처 dxcam 우선으로 복귀(mss는 실패시 자동대체) — GDI(mss)가 게임의 실제 피통 렌더링을 못 보던 게 위기베르 오작동의 근본원인이었음. dxcam 크래시 방지용 자동복구(연속실패시 mss전환→10초마다 dxcam 재시도) 추가",
+    "🚨 쫄법 HP 상대밝기 계산버그 수정 — 흰 배경(채도없음)이 채도필터 적용 전에 기준밝기(peak)를 끌어올려서, 정작 진짜 빨간 채움이 그 기준에 못미쳐 통째로 탈락하던 문제. peak는 이미 채도조건 통과한 픽셀 중에서만 계산하도록 수정",
+    "🚨 쫄법 HP 근본원인 수정 — 빈 피통(트랙)이 어두운 빨강/자주색이면 채움으로 같이 잡혀서 항상 100%로 고정되던 치명적 버그, 상대밝기 비교로 진짜 채움만 인식하도록 수정 (실전투 중 위기베르 전혀 반응 안 하던 근본원인)",
+    "🩻 HP급락 진단정보를 화면 로그에 직접 표시 — 배포판/다른 컴퓨터에서도 파일없이 화면 캡처만으로 원인 확인 가능하게 변경",
+    "🩻 쫄법 HP·위기베르 — 전체화면 캡처를 잘라쓰지 않고 ROI만 직접 캡처하도록 변경(미리보기와 100% 동일 경로) + HP급락시 실제픽셀 자동저장 진단기능 추가",
+    "🚨 위험베르 연속2프레임 확인(디바운스) 제거 — 전투이펙트로 매프레임 흔들리면 연속확인이 오히려 실발동을 막던 치명적 문제, 즉시발동으로 복귀",
+    "🔧 쫄법 HP% 행(row) 자동탐지 제거 — 잘못된 행을 고르면 전체가 틀어지는 위험요소였음, 예전 초기버전처럼 단순하게 복귀",
+    "🛡️ 위험베르 오발동 방지 — 캡처 한프레임 순간오독 걸러내는 연속2프레임 확인 로직 추가",
+    "🎨 쫄법 HP% 위험경고색(주황·노랑 등)으로 바뀌어도 채움 인식 — 색상 전환시 %가 훅 떨어지던 문제 대응",
+    "🚨 쫄법 HP% 40% 밑으로 안 내려가던 바닥값 버그 수정 — 틈허용을 폭비례에서 고정 2px로 축소(숫자와 이어붙는 것 차단)",
+    "🚨 쫄법 HP% 피격시 90%대에서도 0%로 오인식하던 버그 수정 — 좌측시작 강제 조건 제거(피격플래시 대응)",
+    "🚨 쫄법 HP% 저피통일수록 실제보다 훨씬 높게 뻥튀기되던 문제 수정 — 바 중앙 숫자표시 오염 차단(좌측 연속구간만 인정)",
+    "🎯 쫄법 HP% 정밀도 개선 — 바가 있는 행만 자동으로 좁혀서 셈 (ROI 여유분에 걸린 숫자·장식 오염 감소)",
+    "🔧 쫄법 HP·위기베르 완전 독립화 — 파티 판정 로직과 100% 분리, 피 닳으면 그만큼만 단순·정확하게 반영",
+    "🚨 위기베르 20%까지 피 빠져도 미발동 치명적 버그 수정 — 관대계산이 우측 잔상픽셀로 %를 뻥튀기하던 문제",
+    "🖥️ 제어판 쫄법 피통 미리보기 — 피 깎이면 '없음(사망)' 오표시 수정 (실제 힐판정과 동일 계산식으로 통일)",
+    "🛡️ 쫄법 HP·위기베르 한대맞고 오발동 수정 — 파티용 엄격판정과 분리, 관대한 계산으로 복귀",
     "🚫 빈 파티칸(게임배경만 있는 슬롯) 힐 차단 강화 — 세로로 꽉 찬 좌측시작 막대만 HP바로 인정",
     "🖱️ 마우스 좌측하단(시작버튼) 튐 방지 — 이동 좌표 화면경계 clamp 적용",
     "🛡️ 캡처 백엔드 mss 전용 전환 — dxcam 네이티브 크래시(전체화면 전환 등) 제거",
@@ -1716,6 +1912,23 @@ def stop_everything(reason="💤 대기 중"):
         try: time.sleep(0.05); ser.write(b'U'); time.sleep(0.1) 
         except: pass
 
+def force_auth_exit(reason="인증 만료"):
+    """인증 실패/만료 시 사냥만 멈추지 말고 프로그램 자체를 종료.
+    (stop_everything만 하면 UI가 남아 다시 시작 버튼으로 잠깐 더 돌릴 수 있음)"""
+    try:
+        stop_everything(reason)
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.MessageBoxW(0, f"{reason}\n프로그램을 종료합니다.", "인증", 0x10)
+    except Exception:
+        pass
+    try:
+        keyboard.unhook_all()
+    except Exception:
+        pass
+    os._exit(0)
+
 def get_safe_int(var, default=1200):
     try: return int(var.get())
     except: return default
@@ -1748,18 +1961,18 @@ def update_ui_timer():
                 lbl_log.see("end")
                 lbl_log.configure(state="disabled")
             root.after(0, _upd)
-        # 30분마다 구글시트 재검증
+        # 5분마다 구글시트 재검증 (실행 중이 아니어도 만료되면 프로그램 강제 종료)
         now_ts = time.time()
-        if running and loaded_pwd and (now_ts - last_auth_check > 300):
+        if loaded_pwd and (now_ts - last_auth_check > 300):
             last_auth_check = now_ts
-            cs_result, cs_info, _ = check_google_sheet(loaded_pwd)
+            cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
             if cs_result in ("NOT_FOUND", "ERROR", "ALREADY_IN_USE"):
                 time.sleep(2)
-                cs_result, cs_info, _ = check_google_sheet(loaded_pwd)
+                cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
                 if cs_result in ("NOT_FOUND", "ERROR", "ALREADY_IN_USE"):
-                    stop_everything("인증 만료"); continue
-            if cs_info == "0":
-                stop_everything("코드 만료"); continue
+                    force_auth_exit("인증 만료")
+            if _is_code_expired(cs_info, cs_start):
+                force_auth_exit("코드 만료")
         if running:
             now = time.time(); txt_parts = []
             gap_remain = max(0, int(BUFF_SEQ_GAP - (now - last_buff_seq)))
@@ -1839,6 +2052,13 @@ def on_main_toggle(e=None):
             if root and lbl_ard:
                 root.after(0, lambda m=msg: lbl_ard.configure(text=m, text_color="#f85149"))
             return
+        # 시작 직 인증 즉시 재검증 — 만료 후 다시 시작해서 다음 5분 검사 전까지
+        # 잠깐 더 돌리는 꼼수를 막기 위함
+        if loaded_pwd:
+            cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
+            if cs_result in ("NOT_FOUND", "ERROR", "ALREADY_IN_USE") or _is_code_expired(cs_info, cs_start):
+                force_auth_exit("인증 만료")
+                return
         running = True; now = time.time()
         last_loot = now; loot_interval = random.uniform(4.0, 7.0)
         last_buff_seq = now
@@ -2027,7 +2247,12 @@ def expert_logic():
             danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
             if danger_roi[0] != 0:
-                danger_pct = bar_fill_pct(frame, danger_roi, danger_ref)
+                danger_pct = self_hp_pct(frame, danger_roi, danger_ref)   # 예전 초창기 버전 그대로
+                # 연속프레임 확인(디바운스)은 제거함 — 전투 이펙트로 매 프레임 픽셀이
+                # 미세하게 흔들리면 "연속으로 낮게"가 오히려 잘 안 걸려서, 진짜 위험한
+                # 순간에 위기베르가 발동을 안 하는 훨씬 위험한 문제가 생겼음(생명과 직결).
+                # 한 프레임 오독으로 어쩌다 한번 더 발동하는 것보다, 위험할 때 반드시
+                # 발동하는 쪽이 훨씬 중요하므로 즉시발동으로 원복.
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
                     ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
@@ -2196,7 +2421,7 @@ def expert_logic():
                         human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
                         use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                         heal_key = '7' if use_strong else 'A'
-                        execute_keys(['K', 'K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
+                        execute_keys(['K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
                         human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
                         last_party_heal = now; healed = True

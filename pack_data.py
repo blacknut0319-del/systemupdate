@@ -20,7 +20,7 @@ def main():
     b64 = base64.b64encode(nonce + enc).decode("ascii")
     with open(DST, "w", encoding="utf-8") as f:
         f.write(b64)
-    print(f"OK {DST} ({len(b64)//1024}KB)")
+    print(f"완료 {DST} ({len(b64)//1024}KB)")
 
 
 if __name__ == "__main__":
