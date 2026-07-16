@@ -861,8 +861,8 @@ def _open_admin_panel_impl():
                         pct = bar_fill_pct_from_rgb(arr, ref100, strict=True)
                         roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
                 else:
-                    pct = _self_hp_pct_from_arr(arr, ref100)   # 쫄법 전용 — 파티 판정과 무관, 단순 열개수
-                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
+                    pct = _self_hp_pct_from_arr(arr, ref100)   # 쫄법 전용 — 예전 초창기 버전 그대로(빨강 픽셀 개수)
+                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
 
     def open_self_hp_overlay():
         ov = tk.Toplevel(admin); ov.overrideredirect(True)
@@ -898,9 +898,10 @@ def _open_admin_panel_impl():
         import mss as _mss; sct = _mss.MSS()
         img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
         arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        SELF_HP_100_REF = max(1, _self_hp_fill_cols(arr)[0])
+        red = (arr[:, :, 0] > 80) & (arr[:, :, 0] > arr[:, :, 1] * 1.2) & (arr[:, :, 0] > arr[:, :, 2] * 1.2)
+        SELF_HP_100_REF = max(1, int(np.sum(red)))
         save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-        messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"col")
+        messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"px")
         admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
 
     def open_mna_roi_overlay():
@@ -1443,27 +1444,6 @@ def _hp_bar_pixels(R, G, B):
     red, grn = _hp_fill_masks(R, G, B)
     return red | grn
 
-def _self_hp_fill_masks(R, G, B):
-    """쫄법(자기) HP·위기베르 전용 채움 마스크 — 빨강뿐 아니라 위험경고색(주황·노랑)이나
-    독(초록)으로 바뀌어도 전부 '채워짐'으로 인식한다.
-    파티용 마스크(_hp_fill_masks)는 노란 선택테두리 오인식을 막기 위해 R>G+30(빨강 엄격)/
-    G>R+30(초록 엄격)만 잡지만, 자기 피통 ROI는 그런 노란 테두리가 없는 단일 바이므로
-    채도만 있으면(파랑이 주가 아니면) 색상 종류와 무관하게 채움으로 잡아도 안전함.
-
-    실제 UI: 피가 빠지면 뒤에 흰색 배경이 드러나면서 빨간 채움이 줄어드는 방식.
-    흰색은 채도가 없어서(R≈G≈B) 아래 sat 조건에서 이미 확실히 제외됨.
-    (직전 버그: '가장 밝은 픽셀 대비 상대밝기'를 채도 필터링 *전* 전체 픽셀 기준으로
-    계산해서, 채도 없는 흰 배경의 밝기(255)가 기준을 끌어올려버림 → 정작 진짜
-    빨간 채움 픽셀 자체의 밝기가 그 기준(peak*0.6)에 못 미쳐 통째로 탈락하는
-    새 버그가 생겼음. 그래서 peak는 반드시 '이미 채도 조건을 통과한 픽셀'
-    중에서만 계산해야 함 — 흰 배경이 기준에 영향을 못 주도록)."""
-    mx = np.maximum(np.maximum(R, G), B)
-    mn = np.minimum(np.minimum(R, G), B)
-    candidate = ((mx - mn) > 40) & (B < mx - 15)   # 채도 있고 파랑이 주가 아닌, 색상후보만
-    peak = float(mx[candidate].max()) if candidate.any() else 0.0
-    bright_ok = mx >= max(60.0, peak * 0.6)
-    return bright_ok & candidate
-
 def _hp_bar_band_cols(arr):
     """ROI 안에서 실제 HP바 '행'을 자동 탐지 → 그 바에서 채워진 '열' 수와 폭 반환.
     노란 선택테두리·초상화·초록 장식테두리는 자동으로 무시된다.
@@ -1567,93 +1547,33 @@ def _hp_bar_lenient_cols(arr):
                 break                # 큰 틈 이후의 우측 잔상/장식은 무시 (span 뻥튀기 방지)
     return run_end - int(idx[0]) + 1, w
 
-def _self_hp_fill_cols(arr):
-    """쫄법(자기) HP·위기베르 전용 — 파티 로직과 완전 분리, 구조판정(세로꽉참)도 안 하고
-    '행 자동탐지'도 하지 않는다(예전 초기 버전처럼 최대한 단순하게).
-    행밴드 자동탐지는 잘못된 행(피격플래시·잡노이즈 행 등)을 고르면 계산 전체가
-    틀어지는 위험한 구조라 제거함 — ROI 전체 높이에서 그냥 '열별로 색이 있는지'만 보고,
-    왼쪽부터 끊기지 않는 연속 열만 센다. 중앙 숫자표시가 안티앨리어싱으로 살짝 붉게
-    잡혀도, 실제 채움이 적을 땐 숫자와 진짜 채움 사이에 틈이 생기므로 그 너머는 안 셈."""
-    if arr.size == 0:
-        return 0, 1
-    R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
-    mask = _self_hp_fill_masks(R, G, B)
-    h, w = mask.shape
-    col = mask.any(axis=0)
-    gap_tol = 2   # 진짜 이어진 바만 인정 — 크게 두면 중앙 숫자와의 틈을 뛰어넘어
-                  # 이어붙여서 피가 얼마나 빠지든 숫자 위치까지의 값으로 고정되어버림.
-                  # 안티앨리어싱 정도의 아주 작은 틈만 허용.
-    idx = np.nonzero(col)[0]
-    if idx.size == 0:
-        return 0, w
-    # 좌측 시작을 강제하지 않음 — 피격 플래시가 바 왼쪽 일부를 잠깐 가려도
-    # (그래서 색이 처음 발견되는 위치가 뒤로 밀려도) 0%로 잘못 떨어지지 않게,
-    # '색이 처음 발견된 지점'부터 끊기지 않는 연속 구간의 길이만 잰다.
-    # 중앙 숫자표시처럼 진짜 채움과 떨어진 덩어리는 그 사이 큰 틈에서 자동으로 끊긴다.
-    run_end = int(idx[0]); gap = 0
-    for c in range(int(idx[0]), w):
-        if col[c]:
-            run_end = c; gap = 0
-        else:
-            gap += 1
-            if gap > gap_tol:
-                break                # 큰 틈 이후(중앙 숫자 등 별개 덩어리)는 무시
-    return run_end - int(idx[0]) + 1, w
-
 def _self_hp_pct_from_arr(arr, ref100=None):
+    """쫄법(자기) HP% — 예전 초창기 버전(06191252.py)의 roi_hp_pct 로직을 그대로 사용.
+    가공/보정 없이 단순하게: 빨강 픽셀 개수 세서 ref100(픽셀개수, 100%일때 값)으로 나눔."""
     if arr.size == 0:
         return 100.0
-    cols, w = _self_hp_fill_cols(arr)
-    denom = ref100 if (ref100 and 0 < ref100 <= w) else w
-    return min(100.0, round(cols / max(denom, 1) * 100, 1))
+    try:
+        R, G, B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
+        red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
+        raw = int(np.sum(red))
+        if ref100 and ref100 > 0:
+            return min(100.0, round(raw / ref100 * 100, 1))
+        return min(100.0, round(raw / max(arr.shape[0] * arr.shape[1], 1) * 100, 1))
+    except Exception:
+        return 100.0
 
 def self_hp_pct(frame, roi, ref100=None):
-    """쫄법(자기) HP% — 위기베르·자힐 전용, 파티 판정과 무관."""
+    """쫄법(자기) HP% — 위기베르·자힐 전용, 파티 판정과 무관. (예전 초창기 버전 그대로)"""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
         return 100.0
     try:
-        return _self_hp_pct_from_arr(frame[y1:y2, x1:x2], ref100)
+        r = frame[y1:y2, x1:x2]
+        if r.size == 0:
+            return 100.0
+        return _self_hp_pct_from_arr(r, ref100)
     except Exception:
         return 100.0
-
-_last_selfhp_debug_pct = 100.0
-_last_selfhp_debug_time = 0.0
-
-def _debug_dump_self_hp(arr, roi, ref100, pct, prev_pct):
-    """퍼센트가 순간적으로 크게 뚝 떨어질 때, 그 순간의 실제 ROI 픽셀 판정과정을
-    화면 로그(log_event)에 바로 보이는 요약 문자열로 만들어 돌려준다 — 배포판이라
-    파일을 못 꺼내는 다른 컴퓨터에서도, 화면 캡처만으로 원인 확인이 가능하게 함.
-    arr는 이미 ROI만큼 잘라진(cropped) 이미지. 실패해도 프로그램에 영향 없음.
-    (같은 컴퓨터에서 직접 확인 가능한 사람을 위해 _selfhp_debug 폴더에 PNG도 같이 남김)"""
-    try:
-        if arr is None or arr.size == 0:
-            return None
-        R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
-        mask = _self_hp_fill_masks(R, G, B)
-        col = mask.any(axis=0)
-        cols, w = _self_hp_fill_cols(arr)
-        idx = np.nonzero(col)[0]
-        start_c = int(idx[0]) if idx.size else -1
-        end_c = start_c + cols - 1 if start_c >= 0 else -1
-        rgb_start = tuple(int(v) for v in arr[arr.shape[0]//2, start_c]) if start_c >= 0 else (0,0,0)
-        rgb_end = tuple(int(v) for v in arr[arr.shape[0]//2, min(end_c, w-1)]) if end_c >= 0 else (0,0,0)
-        rgb_after = tuple(int(v) for v in arr[arr.shape[0]//2, min(end_c+1, w-1)]) if end_c >= 0 else (0,0,0)
-        buckets = 30
-        bar = "".join("#" if col[int(i*w/buckets):int((i+1)*w/buckets) or 1].any() else "." for i in range(buckets))
-        summary = f"열{cols}/{w} 시작@{start_c}RGB{rgb_start} 끝@{end_c}RGB{rgb_end} 끝다음RGB{rgb_after} [{bar}]"
-        try:
-            os.makedirs("_selfhp_debug", exist_ok=True)
-            ts = time.strftime("%H%M%S")
-            base = os.path.join("_selfhp_debug", f"drop_{ts}_{prev_pct:.0f}to{pct:.0f}")
-            Image.fromarray(arr).resize((arr.shape[1]*4, arr.shape[0]*4), Image.NEAREST).save(base + ".png")
-            with open(base + ".txt", "w", encoding="utf-8") as f:
-                f.write(f"roi={roi} ref100={ref100} prev_pct={prev_pct} pct={pct}\n{summary}\n")
-        except Exception:
-            pass
-        return summary
-    except Exception:
-        return None
 
 def bar_fill_pct_from_rgb(arr, ref100=None, strict=False):
     """HP바 채움% (파티 전용) — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
@@ -1683,14 +1603,7 @@ def bar_fill_pct(frame, roi, ref100=None, strict=False):
         return 100.0
 
 def roi_hp_pct(frame, roi, ref100=None):
-    """쫄법(자기) HP% — 전체화면 프레임을 잘라쓰지 않고, 미리보기와 동일하게
-    ROI 부분만 직접 캡처해서 계산(모니터 오프셋 등으로 전체화면 슬라이싱이
-    실제 화면과 어긋날 가능성 제거). 직접캡처 실패시에만 기존 방식으로 대체."""
-    if roi[0] == 0 and roi[2] == 0:
-        return 100.0
-    arr = camera.grab_roi(roi) if camera else None
-    if arr is not None:
-        return _self_hp_pct_from_arr(arr, ref100)
+    """쫄법(자기) HP% — 예전 초창기 버전 그대로, self_hp_pct와 동일(별칭)."""
     return self_hp_pct(frame, roi, ref100)
 
 def roi_mna_pct(frame, roi, ref100=None):
@@ -2299,21 +2212,7 @@ def expert_logic():
             danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
             if danger_roi[0] != 0:
-                # 전체화면 프레임을 잘라쓰지 않고, 미리보기와 동일하게 ROI만 직접 캡처
-                # (모니터 오프셋 등으로 전체화면 슬라이싱이 실제 화면과 어긋날 가능성 제거)
-                _danger_arr = camera.grab_roi(danger_roi) if camera else None
-                danger_pct = _self_hp_pct_from_arr(_danger_arr, danger_ref) if _danger_arr is not None else self_hp_pct(frame, danger_roi, danger_ref)
-                # 순간적으로 크게 뚝 떨어지는 순간(예: 40->6%)을 자동으로 감지해서
-                # 그 프레임의 실제 픽셀을 파일로 남긴다 — 추측이 아니라 실제 데이터로
-                # 원인을 확인하기 위한 진단용 스냅샷(과도한 저장 방지용 쿨다운 2초).
-                global _last_selfhp_debug_pct, _last_selfhp_debug_time
-                if (_last_selfhp_debug_pct - danger_pct >= 15) and (now - _last_selfhp_debug_time >= 2.0):
-                    _dbg_summary = _debug_dump_self_hp(_danger_arr, danger_roi, danger_ref, danger_pct, _last_selfhp_debug_pct)
-                    _last_selfhp_debug_time = now
-                    # 파일이 아니라 화면 로그에 바로 판정과정을 찍음 — 배포판 다른 컴퓨터에서도
-                    # 화면 캡처(스크린샷)만 보내주면 원인 확인 가능하게.
-                    log_event(f"🩻 HP급락 {_last_selfhp_debug_pct:.0f}%→{danger_pct:.0f}% {_dbg_summary or ''}")
-                _last_selfhp_debug_pct = danger_pct
+                danger_pct = self_hp_pct(frame, danger_roi, danger_ref)   # 예전 초창기 버전 그대로
                 # 연속프레임 확인(디바운스)은 제거함 — 전투 이펙트로 매 프레임 픽셀이
                 # 미세하게 흔들리면 "연속으로 낮게"가 오히려 잘 안 걸려서, 진짜 위험한
                 # 순간에 위기베르가 발동을 안 하는 훨씬 위험한 문제가 생겼음(생명과 직결).
