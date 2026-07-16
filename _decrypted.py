@@ -1939,7 +1939,7 @@ def update_ui_timer():
                 lbl_log.see("end")
                 lbl_log.configure(state="disabled")
             root.after(0, _upd)
-        # 30분마다 구글시트 재검증
+        # 5분마다 구글시트 재검증
         now_ts = time.time()
         if running and loaded_pwd and (now_ts - last_auth_check > 300):
             last_auth_check = now_ts
