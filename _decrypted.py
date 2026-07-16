@@ -527,6 +527,27 @@ def check_google_sheet(input_code):
     except:
         return "ERROR", "", ""
 
+def _is_code_expired(cs_info, cs_start=None):
+    """구글시트 만료 컬럼(cs_info) 판정 — 절대날짜(YYYY-MM-DD) 또는 일수(숫자) 둘 다 지원.
+    시작 프로그램 실행 후에도(5분 재검증 시) 동일 기준으로 만료를 판정하기 위해
+    시작 시점 체크와 주기적 재검증 체크가 이 함수 하나를 공통으로 사용한다."""
+    if cs_info == "0":
+        return True   # 0 = 즉시 만료
+    if not cs_info:
+        return False
+    try:
+        expire_dt = datetime.strptime(cs_info, "%Y-%m-%d")   # 절대날짜
+        return datetime.now() > expire_dt
+    except Exception:
+        pass
+    try:
+        max_days = int(cs_info)   # 일수
+        start_str = cs_start or saved_expire_start or datetime.now().strftime("%Y-%m-%d")
+        start_dt = datetime.strptime(start_str, "%Y-%m-%d")
+        return (datetime.now() - start_dt).days >= max_days
+    except Exception:
+        return False
+
 def load_hidden_config():
     global MAIN_ATTACKER_COORD, SELF_HP_COORD, SELF_HP_RGB, NOPARTY_HP_COORD, NOPARTY_RGB, PARTY_COORDS
     global SELF_POISON_COORD, SELF_POISON_RGB, TARGET_POISON_COORD, TARGET_POISON_RGB, DANGER_HP_COORD, DANGER_HP_RGB
@@ -1154,28 +1175,10 @@ if loaded_pwd:
     # 🔒 실시간 구글시트 검증 (마스터키 없음, HWID 강제)
     cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
     if cs_result == "PASS":
-        # 만료일 검사
-        if cs_info == "0":
-            # 0 = 즉시 만료
+        # 만료일 검사 (절대날짜/일수 공통 판정 — _is_code_expired, 5분 재검증과 동일 기준)
+        if _is_code_expired(cs_info, cs_start):
             ctypes.windll.user32.MessageBoxW(0, "사용 기간이 만료된 코드입니다.", "만료", 0x10)
             sys.exit()
-        elif cs_info and cs_info != "":
-            try:
-                # 절대날짜 (예: 2026-07-20)
-                expire_dt = datetime.strptime(cs_info, "%Y-%m-%d")
-                if datetime.now() > expire_dt:
-                    ctypes.windll.user32.MessageBoxW(0, "사용 기간이 만료된 코드입니다.", "만료", 0x10)
-                    sys.exit()
-            except:
-                try:
-                    # 일수 (예: 30 → 첫 사용 후 30일)
-                    max_days = int(cs_info)
-                    start_str = cs_start or datetime.now().strftime("%Y-%m-%d")
-                    start_dt = datetime.strptime(start_str, "%Y-%m-%d")
-                    if (datetime.now() - start_dt).days >= max_days:
-                        ctypes.windll.user32.MessageBoxW(0, "사용 기간이 만료된 코드입니다.", "만료", 0x10)
-                        sys.exit()
-                except: pass
         authenticated = True
     elif cs_result == "REGISTER":
         # HWID 자동 등록 시도
@@ -1780,8 +1783,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 21:10"
+PATCH_UPDATED_AT = "2026-07-16 21:45"
 LATEST_PATCH = [
+    "🔒 인증 만료 실시간 반영 — 5분 재검증 때는 시트의 만료값이 '0'일 때만 정지시켰고, 절대날짜/일수로 넣은 만료는 프로그램 켜놓은 채로 기간이 지나도 안 걸리던 문제 수정. 시작 시점과 동일한 만료판정(_is_code_expired)을 5분마다도 적용",
     "🚨 쫄법 피통·위기베르 — 독(초록바) 걸리면 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동(귀환)하던 문제 수정. 빨강뿐 아니라 초록(독)도 채움으로 인식하도록 변경. 100%기준 재보정 필요",
     "⚡ 파티힐 클릭속도 개선 — 힐키 전 좌클릭(타겟선택) 2번→1번으로 줄여서 힐이 더 빠르게 들어가게 함(뒤쪽 클릭 2번은 그대로 유지)",
     "🩹 파티 HP바 감지 — 정확히 '빨간 HP바'가 있을 때만 힐 감지하도록 변경(독/초록 배경 오인식으로 빈 슬롯에 힐 시도하던 문제 방지)",
@@ -1943,13 +1947,13 @@ def update_ui_timer():
         now_ts = time.time()
         if running and loaded_pwd and (now_ts - last_auth_check > 300):
             last_auth_check = now_ts
-            cs_result, cs_info, _ = check_google_sheet(loaded_pwd)
+            cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
             if cs_result in ("NOT_FOUND", "ERROR", "ALREADY_IN_USE"):
                 time.sleep(2)
-                cs_result, cs_info, _ = check_google_sheet(loaded_pwd)
+                cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
                 if cs_result in ("NOT_FOUND", "ERROR", "ALREADY_IN_USE"):
                     stop_everything("인증 만료"); continue
-            if cs_info == "0":
+            if _is_code_expired(cs_info, cs_start):   # 절대날짜/일수 만료 실시간 반영(실행 중 만료일 도달 시 즉시 정지)
                 stop_everything("코드 만료"); continue
         if running:
             now = time.time(); txt_parts = []
