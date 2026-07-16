@@ -1319,6 +1319,17 @@ class MSSCamera:
         except Exception:
             with self._flock:
                 return self._last_frame
+    def grab_roi(self, roi):
+        """ROI 좌표만 직접 캡처(전체화면 프레임을 잘라쓰지 않음) — 미리보기(refresh_preview)와
+        완전히 동일한 방식. 모니터 오프셋 등으로 전체화면 프레임 슬라이싱이 실제 화면과
+        어긋날 가능성을 원천적으로 없애기 위해, 절대좌표로 그 부분만 바로 캡처한다."""
+        try:
+            x1, y1, x2, y2 = roi
+            sct = self._get_sct()
+            img = sct.grab({"left": x1, "top": y1, "width": max(x2 - x1, 1), "height": max(y2 - y1, 1)})
+            return np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
+        except Exception:
+            return None
 
 camera = MSSCamera()
 
@@ -1515,6 +1526,39 @@ def self_hp_pct(frame, roi, ref100=None):
     except Exception:
         return 100.0
 
+_last_selfhp_debug_pct = 100.0
+_last_selfhp_debug_time = 0.0
+
+def _debug_dump_self_hp(arr, roi, ref100, pct, prev_pct):
+    """퍼센트가 순간적으로 크게 뚝 떨어질 때, 그 순간의 실제 ROI 픽셀을 그대로
+    파일로 저장 — 추측 대신 실제 화면 데이터를 직접 눈으로 확인하기 위한 진단용.
+    _selfhp_debug 폴더에 스냅샷 PNG + 판정과정 텍스트가 같이 저장된다.
+    arr는 이미 ROI만큼 잘라진(cropped) 이미지."""
+    try:
+        if arr is None or arr.size == 0:
+            return
+        os.makedirs("_selfhp_debug", exist_ok=True)
+        ts = time.strftime("%H%M%S")
+        base = os.path.join("_selfhp_debug", f"drop_{ts}_{prev_pct:.0f}to{pct:.0f}")
+        Image.fromarray(arr).resize((arr.shape[1]*4, arr.shape[0]*4), Image.NEAREST).save(base + ".png")
+        R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
+        mask = _self_hp_fill_masks(R, G, B)
+        col = mask.any(axis=0)
+        cols, w = _self_hp_fill_cols(arr)
+        with open(base + ".txt", "w", encoding="utf-8") as f:
+            f.write(f"roi={roi} ref100={ref100} prev_pct={prev_pct} pct={pct}\n")
+            f.write(f"cols(채움열수)={cols} w(폭)={w}\n")
+            f.write(f"열별 채움여부(0/1, 왼쪽부터): {''.join('1' if v else '0' for v in col.tolist())}\n")
+            for row_i in range(arr.shape[0]):
+                f.write(f"row{row_i} RGB샘플(5칸마다): " +
+                        " ".join(f"({arr[row_i,c,0]},{arr[row_i,c,1]},{arr[row_i,c,2]})" for c in range(0, arr.shape[1], max(1, arr.shape[1]//25))) + "\n")
+    except Exception as e:
+        try:
+            with open(os.path.join("_selfhp_debug", "error.txt"), "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%H%M%S')} dump error: {e}\n")
+        except Exception:
+            pass
+
 def bar_fill_pct_from_rgb(arr, ref100=None, strict=False):
     """HP바 채움% (파티 전용) — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
     노란 선택테두리·초상화·회색UI 자동 무시.
@@ -1543,6 +1587,14 @@ def bar_fill_pct(frame, roi, ref100=None, strict=False):
         return 100.0
 
 def roi_hp_pct(frame, roi, ref100=None):
+    """쫄법(자기) HP% — 전체화면 프레임을 잘라쓰지 않고, 미리보기와 동일하게
+    ROI 부분만 직접 캡처해서 계산(모니터 오프셋 등으로 전체화면 슬라이싱이
+    실제 화면과 어긋날 가능성 제거). 직접캡처 실패시에만 기존 방식으로 대체."""
+    if roi[0] == 0 and roi[2] == 0:
+        return 100.0
+    arr = camera.grab_roi(roi) if camera else None
+    if arr is not None:
+        return _self_hp_pct_from_arr(arr, ref100)
     return self_hp_pct(frame, roi, ref100)
 
 def roi_mna_pct(frame, roi, ref100=None):
@@ -1717,8 +1769,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 14:24"
+PATCH_UPDATED_AT = "2026-07-16 14:41"
 LATEST_PATCH = [
+    "🩻 쫄법 HP·위기베르 — 전체화면 캡처를 잘라쓰지 않고 ROI만 직접 캡처하도록 변경(미리보기와 100% 동일 경로) + HP급락시 실제픽셀 자동저장 진단기능 추가",
     "🚨 위험베르 연속2프레임 확인(디바운스) 제거 — 전투이펙트로 매프레임 흔들리면 연속확인이 오히려 실발동을 막던 치명적 문제, 즉시발동으로 복귀",
     "🔧 쫄법 HP% 행(row) 자동탐지 제거 — 잘못된 행을 고르면 전체가 틀어지는 위험요소였음, 예전 초기버전처럼 단순하게 복귀",
     "🛡️ 위험베르 오발동 방지 — 캡처 한프레임 순간오독 걸러내는 연속2프레임 확인 로직 추가",
@@ -2146,7 +2199,19 @@ def expert_logic():
             danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
             if danger_roi[0] != 0:
-                danger_pct = self_hp_pct(frame, danger_roi, danger_ref)
+                # 전체화면 프레임을 잘라쓰지 않고, 미리보기와 동일하게 ROI만 직접 캡처
+                # (모니터 오프셋 등으로 전체화면 슬라이싱이 실제 화면과 어긋날 가능성 제거)
+                _danger_arr = camera.grab_roi(danger_roi) if camera else None
+                danger_pct = _self_hp_pct_from_arr(_danger_arr, danger_ref) if _danger_arr is not None else self_hp_pct(frame, danger_roi, danger_ref)
+                # 순간적으로 크게 뚝 떨어지는 순간(예: 40->6%)을 자동으로 감지해서
+                # 그 프레임의 실제 픽셀을 파일로 남긴다 — 추측이 아니라 실제 데이터로
+                # 원인을 확인하기 위한 진단용 스냅샷(과도한 저장 방지용 쿨다운 2초).
+                global _last_selfhp_debug_pct, _last_selfhp_debug_time
+                if (_last_selfhp_debug_pct - danger_pct >= 15) and (now - _last_selfhp_debug_time >= 2.0):
+                    _debug_dump_self_hp(_danger_arr, danger_roi, danger_ref, danger_pct, _last_selfhp_debug_pct)
+                    _last_selfhp_debug_time = now
+                    log_event(f"🩻 HP급락 스냅샷 저장 ({_last_selfhp_debug_pct:.0f}%→{danger_pct:.0f}%)")
+                _last_selfhp_debug_pct = danger_pct
                 # 연속프레임 확인(디바운스)은 제거함 — 전투 이펙트로 매 프레임 픽셀이
                 # 미세하게 흔들리면 "연속으로 낮게"가 오히려 잘 안 걸려서, 진짜 위험한
                 # 순간에 위기베르가 발동을 안 하는 훨씬 위험한 문제가 생겼음(생명과 직결).
