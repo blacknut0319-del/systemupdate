@@ -1416,8 +1416,10 @@ def _hp_bar_fill_span(bar_px):
 def _hp_bar_lenient_cols(arr):
     """관대한 채움 폭 측정 — 쫄법(자기) HP·위기베르처럼 항상 바가 존재하는 단일 바용.
     피격 이펙트·데미지 텍스트 등으로 한 프레임 구조판정(세로꽉참/좌측시작)이 실패해도
-    즉시 0%로 잘못 떨어지지 않도록, 색이 조금이라도 있으면 최대한 폭을 읽어낸다.
-    완전 무색(진짜 사망 등)일 때만 0."""
+    즉시 0%로 잘못 떨어지지 않도록, 색이 조금이라도 있으면 읽어낸다.
+    단, '첫색~끝색 사이 거리(span)'가 아니라 '좌측부터 끊기지 않는 연속 열'만 센다 —
+    span 방식은 우측 끝 UI잔상 1픽셀만 있어도 거의 100%로 뻥튀기되어
+    실제로는 피가 20% 밑인데도 위기베르가 전혀 발동 안 하는 치명적 버그가 있었음."""
     R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
     red, grn = _hp_fill_masks(R, G, B)
     h, w = red.shape
@@ -1432,10 +1434,20 @@ def _hp_bar_lenient_cols(arr):
     while hi + 1 < h and rows[hi + 1] >= max(1, peak * 0.3):
         hi += 1
     col = mask[lo:hi + 1].any(axis=0)
+    start_window = max(3, w // 8)   # 바 시작 전 약간의 여백(테두리 등) 허용
+    gap_tol = max(2, w // 20)       # 연속 판정 중 허용하는 작은 틈
     idx = np.nonzero(col)[0]
-    if idx.size == 0:
-        return 0, w
-    return int(idx[-1] - idx[0] + 1), w
+    if idx.size == 0 or int(idx[0]) > start_window:
+        return 0, w                 # 좌측에 색이 없음 → 실제로 다 빠졌거나 바 아님
+    run_end = int(idx[0]); gap = 0
+    for c in range(int(idx[0]), w):
+        if col[c]:
+            run_end = c; gap = 0
+        else:
+            gap += 1
+            if gap > gap_tol:
+                break                # 큰 틈 이후의 우측 잔상/장식은 무시 (span 뻥튀기 방지)
+    return run_end - int(idx[0]) + 1, w
 
 def bar_fill_pct_from_rgb(arr, ref100=None, strict=False):
     """HP바 채움% — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
@@ -1640,8 +1652,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 12:58"
+PATCH_UPDATED_AT = "2026-07-16 13:05"
 LATEST_PATCH = [
+    "🚨 위기베르 20%까지 피 빠져도 미발동 치명적 버그 수정 — 관대계산이 우측 잔상픽셀로 %를 뻥튀기하던 문제",
     "🖥️ 제어판 쫄법 피통 미리보기 — 피 깎이면 '없음(사망)' 오표시 수정 (실제 힐판정과 동일 계산식으로 통일)",
     "🛡️ 쫄법 HP·위기베르 한대맞고 오발동 수정 — 파티용 엄격판정과 분리, 관대한 계산으로 복귀",
     "🚫 빈 파티칸(게임배경만 있는 슬롯) 힐 차단 강화 — 세로로 꽉 찬 좌측시작 막대만 HP바로 인정",
