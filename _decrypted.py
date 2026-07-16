@@ -1357,27 +1357,51 @@ def _hp_bar_band_cols(arr):
     B = arr[:, :, 2].astype(int)
     red, grn = _hp_fill_masks(R, G, B)
     h, w = red.shape
-    red_rows = red.sum(axis=1)
-    grn_rows = grn.sum(axis=1)
-    red_floor = max(2, w // 40)   # 5%짜리 저피통도 살리는 낮은 문턱
-    grn_floor = max(6, w // 6)    # 초록 장식테두리(소수 픽셀) 배제, 넓은 독바만 인정
-    # 빨강 HP 우선. 빨강바가 없을 때만 넓은 초록(독)바를 바로 인정.
-    if int(red_rows.max()) >= red_floor:
-        fill, rows = red, red_rows
-    elif int(grn_rows.max()) >= grn_floor:
-        fill, rows = grn, grn_rows
-    else:
-        return 0, w, False        # 빈칸·사망(바 없음)
-    peak = int(rows.max())
-    py = int(np.argmax(rows))
-    lo = py
-    while lo - 1 >= 0 and rows[lo - 1] >= peak * 0.4:
-        lo -= 1
-    hi = py
-    while hi + 1 < h and rows[hi + 1] >= peak * 0.4:
-        hi += 1
-    col_filled = fill[lo:hi + 1].any(axis=0)
-    return int(col_filled.sum()), w, True
+    start_window = max(3, w // 8)   # 진짜 HP바는 ROI 좌측에서 시작
+    gap_tol = max(2, w // 20)       # 연속 판정 시 허용하는 작은 틈
+
+    def _measure(mask, floor):
+        """바 행 자동탐지 후 '세로로 꽉 찬 + 좌측에서 시작하는 연속 막대' 폭 측정.
+        진짜 HP바 = 얇은 가로 사각형(밴드 높이의 대부분이 같은 색으로 채워짐).
+        게임 배경(흩어진 빨강)·우측 시작 잡픽셀은 세로가 안 차거나 좌측시작이 아니라 걸러짐."""
+        rows = mask.sum(axis=1)
+        if int(rows.max()) < 2:
+            return 0, False
+        peak = int(rows.max()); py = int(np.argmax(rows))
+        lo = py; hi = py
+        while lo - 1 >= 0 and rows[lo - 1] >= peak * 0.4:
+            lo -= 1
+        while hi + 1 < h and rows[hi + 1] >= peak * 0.4:
+            hi += 1
+        sub = mask[lo:hi + 1]
+        bh = sub.shape[0]
+        need = max(2, math.ceil(bh * 0.6))   # 열이 밴드 높이의 60% 이상 채워야 '진짜 바 열'
+        solid = sub.sum(axis=0) >= need
+        idx = np.nonzero(solid)[0]
+        if idx.size == 0:
+            return 0, False
+        first = int(idx[0])
+        if first > start_window:              # 좌측 시작 아님 → 게임배경/잡픽셀 → 바 아님
+            return 0, False
+        run_end = first; gap = 0
+        for c in range(first, w):
+            if solid[c]:
+                run_end = c; gap = 0
+            else:
+                gap += 1
+                if gap > gap_tol:
+                    break
+        if (run_end - first + 1) < floor:     # 연속 막대 최소 길이 미달 → 바 아님
+            return 0, False
+        return run_end - first + 1, True
+
+    red_cols, red_ok = _measure(red, max(3, w // 25))   # 빨강 HP (저피통 5%도 통과)
+    if red_ok:
+        return red_cols, w, True
+    grn_cols, grn_ok = _measure(grn, max(8, w // 5))    # 독(초록)바는 넓게 채워질 때만
+    if grn_ok:
+        return grn_cols, w, True
+    return 0, w, False        # 빈칸·사망·게임배경(바 없음)
 
 def _hp_filled_cols(bar_px):
     """호환용 — 채워진 '열' 수(가로)."""
@@ -1586,8 +1610,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 11:04"
+PATCH_UPDATED_AT = "2026-07-16 11:20"
 LATEST_PATCH = [
+    "🚫 빈 파티칸(게임배경만 있는 슬롯) 힐 차단 강화 — 세로로 꽉 찬 좌측시작 막대만 HP바로 인정",
     "🖱️ 마우스 좌측하단(시작버튼) 튐 방지 — 이동 좌표 화면경계 clamp 적용",
     "🛡️ 캡처 백엔드 mss 전용 전환 — dxcam 네이티브 크래시(전체화면 전환 등) 제거",
     "🎯 파티 HP 바행 자동탐지 — 선택 시 노란 테두리로 100% 오독되던 문제 해결",
