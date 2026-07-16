@@ -1775,8 +1775,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 15:45"
+PATCH_UPDATED_AT = "2026-07-16 16:00"
 LATEST_PATCH = [
+    "⚡ 파티힐 클릭속도 개선 — 힐키 전 좌클릭(타겟선택) 2번→1번으로 줄여서 힐이 더 빠르게 들어가게 함(뒤쪽 클릭 2번은 그대로 유지)",
     "🩹 파티 HP바 감지 — 정확히 '빨간 HP바'가 있을 때만 힐 감지하도록 변경(독/초록 배경 오인식으로 빈 슬롯에 힐 시도하던 문제 방지)",
     "🚨 쫄법 피통ROI·위기베르 — 예전 초창기 버전 로직으로 완전 원복. 그동안 추가됐던 보정(행밴드탐지·좌측런·색마스크·디바운스·직접캡처 등)을 전부 제거하고, frame에서 ROI를 잘라 빨강픽셀(R>80,R>G*1.2,R>B*1.2) 개수를 세어 100%기준으로 나누는 단순 방식으로 복귀. 100%기준 보정도 동일 방식으로 재설정 필요(다시 보정해주세요)",
     "🎥 캡처 dxcam 우선으로 복귀(mss는 실패시 자동대체) — GDI(mss)가 게임의 실제 피통 렌더링을 못 보던 게 위기베르 오작동의 근본원인이었음. dxcam 크래시 방지용 자동복구(연속실패시 mss전환→10초마다 dxcam 재시도) 추가",
@@ -2385,7 +2386,7 @@ def expert_logic():
                         human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
                         use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                         heal_key = '7' if use_strong else 'A'
-                        execute_keys(['K', 'K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
+                        execute_keys(['K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
                         human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
                         last_party_heal = now; healed = True
