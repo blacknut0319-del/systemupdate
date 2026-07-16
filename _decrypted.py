@@ -4,7 +4,7 @@ import subprocess
 def install_requirements():
     try:
         import customtkinter
-        import dxcam
+        import mss
         import keyboard
         import serial
         import win32gui  
@@ -13,7 +13,7 @@ def install_requirements():
         print("[안내] PC 환경에 따라 1~2분 정도 소요될 수 있습니다. 잠시만 기다려주세요...\n")
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "dxcam", "opencv-python", "numpy", "keyboard", "pyserial", "mss", "pillow", "cryptography", "customtkinter", "pywin32"])
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python", "numpy", "keyboard", "pyserial", "mss", "pillow", "cryptography", "customtkinter", "pywin32"])
             print("\n[완료] 모듈 설치가 성공적으로 끝났습니다! 시스템을 가동합니다.\n")
         except Exception as e:
             print(f"\n[오류] 자동 설치 중 문제가 발생했습니다: {e}")
@@ -26,7 +26,7 @@ import keyboard
 import serial
 import serial.tools.list_ports
 import random
-import dxcam  
+# import dxcam  # mss 전용으로 전환 — dxcam 네이티브 크래시 방지
 import tkinter as tk
 from tkinter import messagebox
 from threading import Thread, Lock
@@ -1269,26 +1269,54 @@ else:
 if not authenticated:
     sys.exit()
 
-try:
-    camera = dxcam.create(output_color="RGB")
-    camera.start(target_fps=30)
-except Exception as e:
-    print("dxcam failed, using mss fallback")
-    import mss as _mss
-    class MSSCamera:
-        def __init__(self):
-            self.sct = _mss.MSS()
-            self._monitor = self.sct.monitors[1]
-            self._frame = None
-        def start(self, **kw): pass
-        def stop(self): pass
-        def release(self): pass
-        def get_latest_frame(self):
-            img = self.sct.grab(self._monitor)
+import mss as _mss
+import threading as _threading
+
+class MSSCamera:
+    """스레드 안전 mss 캡처.
+    - 스레드마다 별도 MSS 인스턴스(thread-local) → mss는 스레드 안전하지 않으므로 필수.
+    - grab 일시 오류 시 마지막 정상 프레임 반환 → None/검은프레임 오작동 방지.
+    - dxcam 미사용 → Desktop Duplication 네이티브 크래시 원천 제거."""
+    def __init__(self):
+        self._local = _threading.local()
+        self._monitor = None
+        self._last_frame = None
+        self._flock = Lock()
+        try:
+            _s = _mss.MSS()
+            self._monitor = _s.monitors[1]
+            _s.close()
+        except Exception:
+            self._monitor = None
+    def _get_sct(self):
+        sct = getattr(self._local, "sct", None)
+        if sct is None:
+            sct = _mss.MSS()
+            self._local.sct = sct
+            if self._monitor is None:
+                self._monitor = sct.monitors[1]
+        return sct
+    def start(self, **kw): pass
+    def stop(self): pass
+    def release(self):
+        sct = getattr(self._local, "sct", None)
+        if sct is not None:
+            try: sct.close()
+            except Exception: pass
+            self._local.sct = None
+    def get_latest_frame(self):
+        try:
+            sct = self._get_sct()
+            img = sct.grab(self._monitor)
             arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-            self._frame = arr.copy()
-            return self._frame
-    camera = MSSCamera()
+            with self._flock:
+                self._last_frame = arr
+            return arr
+        except Exception:
+            with self._flock:
+                return self._last_frame
+
+camera = MSSCamera()
 
 def get_rgb(frame, x, y):
     try:
