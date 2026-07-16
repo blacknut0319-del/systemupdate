@@ -1454,10 +1454,12 @@ def _hp_bar_lenient_cols(arr):
     return run_end - int(idx[0]) + 1, w
 
 def _self_hp_fill_cols(arr):
-    """쫄법(자기) HP·위기베르 전용 — 파티 로직과 완전 분리, 구조판정(좌측시작·세로꽉참)·span 없음.
-    바가 있는 '행'만 자동으로 찾아 그 안에서 '색 있는 열 개수'만 센다 (ROI 위아래 여유에 걸린
-    숫자표시·장식선 등이 섞여 실제보다 조금 높게 계산되는 것 방지). 피가 줄면 딱 그만큼만
-    열이 줄어드는 단순·단조 계산이라 span 뻥튀기나 구조판정 실패로 인한 오탐 문제가 없다."""
+    """쫄법(자기) HP·위기베르 전용 — 파티 로직과 완전 분리, 구조판정(세로꽉참)은 강제 안 함.
+    바가 있는 '행'만 자동으로 찾은 뒤, 그 안에서 '왼쪽부터 끊기지 않는 연속 열'만 센다.
+    바 중앙에 뜨는 숫자표시(예: 193/193)가 안티앨리어싱으로 살짝 붉게 잡혀도, 실제 채움이
+    적을 땐 숫자와 진짜 채움 사이에 큰 빈틈이 생기므로 그 틈 너머(숫자 덩어리)는 세지 않는다.
+    (이전에 '아무 열이나 다 셈' 방식이었을 때, 숫자 덩어리가 항상 더해져서
+    피가 적을수록 퍼센트가 실제보다 훨씬 덜 줄어드는 문제가 있었음)."""
     if arr.size == 0:
         return 0, 1
     R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
@@ -1473,7 +1475,21 @@ def _self_hp_fill_cols(arr):
         while hi + 1 < h and rows[hi + 1] >= max(1, peak * 0.3):
             hi += 1
         mask = mask[lo:hi + 1]
-    return int(mask.any(axis=0).sum()), w
+    col = mask.any(axis=0)
+    start_window = max(3, w // 8)   # 바 시작 전 약간의 여백(테두리 등) 허용
+    gap_tol = max(2, w // 20)       # 연속 판정 중 허용하는 작은 틈
+    idx = np.nonzero(col)[0]
+    if idx.size == 0 or int(idx[0]) > start_window:
+        return 0, w
+    run_end = int(idx[0]); gap = 0
+    for c in range(int(idx[0]), w):
+        if col[c]:
+            run_end = c; gap = 0
+        else:
+            gap += 1
+            if gap > gap_tol:
+                break                # 큰 틈 이후(중앙 숫자 등 별개 덩어리)는 무시
+    return run_end - int(idx[0]) + 1, w
 
 def _self_hp_pct_from_arr(arr, ref100=None):
     if arr.size == 0:
@@ -1694,8 +1710,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 13:20"
+PATCH_UPDATED_AT = "2026-07-16 13:28"
 LATEST_PATCH = [
+    "🚨 쫄법 HP% 저피통일수록 실제보다 훨씬 높게 뻥튀기되던 문제 수정 — 바 중앙 숫자표시 오염 차단(좌측 연속구간만 인정)",
     "🎯 쫄법 HP% 정밀도 개선 — 바가 있는 행만 자동으로 좁혀서 셈 (ROI 여유분에 걸린 숫자·장식 오염 감소)",
     "🔧 쫄법 HP·위기베르 완전 독립화 — 파티 판정 로직과 100% 분리, 피 닳으면 그만큼만 단순·정확하게 반영",
     "🚨 위기베르 20%까지 피 빠져도 미발동 치명적 버그 수정 — 관대계산이 우측 잔상픽셀로 %를 뻥튀기하던 문제",
