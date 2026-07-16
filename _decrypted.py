@@ -1413,25 +1413,55 @@ def _hp_bar_fill_span(bar_px):
     """호환용 — 채워진 열 수."""
     return _hp_filled_cols(bar_px)
 
-def bar_fill_pct_from_rgb(arr, ref100=None):
+def _hp_bar_lenient_cols(arr):
+    """관대한 채움 폭 측정 — 쫄법(자기) HP·위기베르처럼 항상 바가 존재하는 단일 바용.
+    피격 이펙트·데미지 텍스트 등으로 한 프레임 구조판정(세로꽉참/좌측시작)이 실패해도
+    즉시 0%로 잘못 떨어지지 않도록, 색이 조금이라도 있으면 최대한 폭을 읽어낸다.
+    완전 무색(진짜 사망 등)일 때만 0."""
+    R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
+    red, grn = _hp_fill_masks(R, G, B)
+    h, w = red.shape
+    mask = red if int(red.sum()) >= int(grn.sum()) else grn
+    if int(mask.sum()) == 0:
+        return 0, w
+    rows = mask.sum(axis=1)
+    peak = int(rows.max()); py = int(np.argmax(rows))
+    lo = py; hi = py
+    while lo - 1 >= 0 and rows[lo - 1] >= max(1, peak * 0.3):
+        lo -= 1
+    while hi + 1 < h and rows[hi + 1] >= max(1, peak * 0.3):
+        hi += 1
+    col = mask[lo:hi + 1].any(axis=0)
+    idx = np.nonzero(col)[0]
+    if idx.size == 0:
+        return 0, w
+    return int(idx[-1] - idx[0] + 1), w
+
+def bar_fill_pct_from_rgb(arr, ref100=None, strict=False):
     """HP바 채움% — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
-    노란 선택테두리·초상화·회색UI 자동 무시. 바 없음(빈칸/사망)이면 0%."""
+    노란 선택테두리·초상화·회색UI 자동 무시.
+    strict=True(파티만): 빈칸/사망 판정 시 0%. 이미 party_slot_active로 거른 뒤 호출되므로 안전.
+    strict=False(기본, 쫄법/위기베르): 구조판정 실패해도 색 있으면 관대하게 계산해 오탐(즉시0%) 방지."""
     if arr.size == 0:
         return 100.0
     cols, w, is_bar = _hp_bar_band_cols(arr)
-    if not is_bar:
+    if is_bar:
+        denom = ref100 if (ref100 and 0 < ref100 <= w) else w
+        return min(100.0, round(cols / max(denom, 1) * 100, 1))
+    if strict:
         return 0.0
-    denom = ref100 if (ref100 and 0 < ref100 <= w) else w
-    return min(100.0, round(cols / max(denom, 1) * 100, 1))
+    lcols, lw = _hp_bar_lenient_cols(arr)
+    denom = ref100 if (ref100 and 0 < ref100 <= lw) else lw
+    return min(100.0, round(lcols / max(denom, 1) * 100, 1))
 
-def bar_fill_pct(frame, roi, ref100=None):
+def bar_fill_pct(frame, roi, ref100=None, strict=False):
     """HP바 채움% — ROI 가로 채움 span, 100% 보정 연동."""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
         return 100.0
     try:
         r = frame[y1:y2, x1:x2]
-        return bar_fill_pct_from_rgb(r, ref100)
+        return bar_fill_pct_from_rgb(r, ref100, strict=strict)
     except Exception:
         return 100.0
 
@@ -1511,7 +1541,7 @@ def scan_party_hp(frame, pi):
         return None
     if not party_slot_active(frame, roi):
         return None
-    return bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi])
+    return bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi], strict=True)
 
 def load_buff_templates():
     global buff_templates, buff_template_hu
@@ -1610,8 +1640,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-16 11:20"
+PATCH_UPDATED_AT = "2026-07-16 12:52"
 LATEST_PATCH = [
+    "🛡️ 쫄법 HP·위기베르 한대맞고 오발동 수정 — 파티용 엄격판정과 분리, 관대한 계산으로 복귀",
     "🚫 빈 파티칸(게임배경만 있는 슬롯) 힐 차단 강화 — 세로로 꽉 찬 좌측시작 막대만 HP바로 인정",
     "🖱️ 마우스 좌측하단(시작버튼) 튐 방지 — 이동 좌표 화면경계 clamp 적용",
     "🛡️ 캡처 백엔드 mss 전용 전환 — dxcam 네이티브 크래시(전체화면 전환 등) 제거",
