@@ -1,8 +1,7 @@
 {
-  "version": "1.4.64",
-  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v1.4.64/ddonghunter.zip",
-  "builder": "pyinstaller-onedir",
-  "kind": "zip",
-  "app_dirname": "ddonghunter",
-  "size": 282665804
+  "version": "1.4.65",
+  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v1.4.65/ddonghunter.exe",
+  "builder": "pyinstaller-onefile",
+  "kind": "exe",
+  "size": 281915390
 }
