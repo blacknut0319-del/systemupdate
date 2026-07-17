@@ -4,5 +4,5 @@
   "builder": "pyinstaller-onedir",
   "kind": "zip",
   "app_dirname": "ddonghunter",
-  "size": 282664532
+  "size": 282661902
 }
