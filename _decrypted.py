@@ -1786,8 +1786,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-17 09:10"
+PATCH_UPDATED_AT = "2026-07-17 10:50"
 LATEST_PATCH = [
+    "📡 격수 UDP 수신 안정화 — 예전엔 포트오류/예외 1번에 수신스레드가 바로 죽어서 재시작 전까지 '수신안됨'만 뜨던 문제. 죽지 않고 재시도, 상태(포트오류/수신대기/수신중+송신IP) 표시",
     "🔌 장치연결실패 오표시 수정 — 시작버튼과 백그라운드 재연결이 동시에 COM을 열어 한쪽만 실패해도 라벨이 실패로 남던 문제. 연결 Lock+라벨 세대번호로 최신 결과만 표시, UI초기화 때 재연결 오발동 제거",
     "🔒 인증 ERROR(네트워크 일시장애)는 강제종료하지 않음 — 만료/코드없음/중복사용일 때만 종료. USB·뚱박스 연결 로직은 건드리지 않음",
     "🔒 인증 만료 시 프로그램 강제 종료 — 예전엔 '인증 만료' 문구만 띄우고 사냥만 멈춰서, 다시 시작하면 다음 5분 검사 전까지 잠깐 더 돌릴 수 있었음. 이제 만료/코드없음/중복사용이면 메시지 띄운 뒤 프로세스 완전 종료. 시작 버튼 누를 때도 즉시 재검증",
@@ -2842,7 +2843,8 @@ udp_hp_lbl = ctk.CTkLabel(row1, text="HP: --", text_color="#ef4444", font=('Malg
 udp_hp_lbl.pack(side='right', padx=1)
 
 row2 = ctk.CTkFrame(frame_ontop_ctrl, fg_color="transparent"); row2.pack(fill='x', padx=2, pady=(0,3))
-lbl_my_ip = ctk.CTkLabel(row2, text=f"내IP:{get_my_ip()}", text_color="#cdd6f4", font=('Consolas', 8))
+# 수신은 이 PC(내IP:9999). 격수모니터 IP칸에 아래 내IP를 넣어야 함.
+lbl_my_ip = ctk.CTkLabel(row2, text=f"내IP:{get_my_ip()} ←격수모니터에 이걸넣기", text_color="#a6e3a1", font=('Consolas', 8, 'bold'))
 lbl_my_ip.pack(side='left', padx=4)
 def toggle_ontop():
     if chk_ontop.get():
@@ -2871,15 +2873,24 @@ def draw_attacker_hp_bar():
             canvas_hp.create_text(w//2, h//2, text=f"격수 HP: {hp_pct:.0f}%", fill="#f3f4f6", font=("Malgun Gothic", 10, "bold"))
     except: pass
 
+udp_listen_ok = False          # 포트 9999 바인드 성공 여부
+udp_last_from = ""             # 마지막 송신측 IP (진단용)
+
 def update_udp_hp_label():
     try:
         if root and root.winfo_exists():
-            if last_udp_time == 0 or time.time() - last_udp_time > 2.0:
+            if not udp_listen_ok:
+                udp_hp_lbl.configure(text="HP: 포트오류", text_color="#ef4444")
+                lbl_ontop_status.configure(text=f"○ {UDP_ATTACKER_PORT}번 실패", text_color="#f38ba8")
+            elif last_udp_time == 0 or time.time() - last_udp_time > 2.0:
+                # 수신대기: 리스너는 살아있는데 격수모니터 패킷이 안 옴
+                # (격수모니터 IP칸에 뚱힐러 '내IP'를 넣었는지 / 방화벽 확인)
                 udp_hp_lbl.configure(text="HP: 수신안됨", text_color="#ef4444")
-                lbl_ontop_status.configure(text="○ 연결안됨", text_color="#f38ba8")
+                lbl_ontop_status.configure(text="○ 수신대기", text_color="#f9e2af")
             else:
                 udp_hp_lbl.configure(text=f"HP: {attacker_hp_udp:.0f}%", text_color="#ef4444")
-                lbl_ontop_status.configure(text="✅ 수신중", text_color="#a6e3a1")
+                from_txt = f" ←{udp_last_from}" if udp_last_from else ""
+                lbl_ontop_status.configure(text=f"✅ 수신중{from_txt}", text_color="#a6e3a1")
             draw_attacker_hp_bar()
             root.after(300, update_udp_hp_label)
     except: pass
@@ -2909,14 +2920,23 @@ def udp_macro_slot(n):
         if is_fixed: ser.write(b'H'); time.sleep(0.05)
     except: pass
 def udp_listener():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("0.0.0.0", UDP_ATTACKER_PORT))
-    sock.settimeout(1.0)
+    """격수모니터 → 뚱힐러 UDP 수신 (포트 9999).
+    예전엔 bind 실패/예외 1번에 스레드가 바로 죽어서 영원히 '수신안됨'만 떴음."""
     global attacker_hp_udp, attacker_poisoned, attacker_petrified, last_udp_time
+    global udp_listen_ok, udp_last_from
+    sock = None
     while timer_thread_active:
         try:
+            if sock is None:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("0.0.0.0", UDP_ATTACKER_PORT))
+                sock.settimeout(1.0)
+                udp_listen_ok = True
+                try: log_event(f"📡 UDP {UDP_ATTACKER_PORT} 수신대기 (격수모니터→내IP)")
+                except Exception: pass
             data, addr = sock.recvfrom(1024)
+            udp_last_from = addr[0] if addr else ""
             if len(data) == 1:
                 if data in UDP_CMD_MAP:
                     func_name = UDP_CMD_MAP[data]
@@ -2933,9 +2953,25 @@ def udp_listener():
             elif len(data) == 6:
                 attacker_hp_udp, poison_byte, petrify_byte = struct.unpack('fBB', data)
                 attacker_poisoned = bool(poison_byte); attacker_petrified = bool(petrify_byte); last_udp_time = time.time()
-        except socket.timeout: continue
-        except: break
-    sock.close()
+        except socket.timeout:
+            continue
+        except OSError as e:
+            # 포트 점유/방화벽 등으로 bind·수신 실패 → 죽지 말고 재시도
+            udp_listen_ok = False
+            try:
+                if sock: sock.close()
+            except Exception: pass
+            sock = None
+            try: log_event(f"📡 UDP오류 재시도: {e}")
+            except Exception: pass
+            time.sleep(2.0)
+        except Exception:
+            # 패킷 파싱 등 기타 오류 — 리스너 유지
+            time.sleep(0.05)
+    try:
+        if sock: sock.close()
+    except Exception: pass
+    udp_listen_ok = False
 
 is_gui_hidden = False
 def toggle_gui(e=None):
