@@ -119,6 +119,9 @@ BAUD_RATE = 9600
 # ── 하드웨어 선택 (아두이노 / KMBox) ──
 HW_MODE = "뚱USB"          # license.dat에서 로드됨. 드롭다운으로 변경 (뚱USB=아두이노 / 뚱박스=KMBox)
 _reconnect_req = False       # 드롭다운으로 장치 바꾸면 True → 워커가 재연결
+_hw_ui_ready = False         # UI 초기화 끝나기 전엔 재연결 요청 무시(콤보박스 생성시 command 오발동 방지)
+_hw_lock = Lock()            # connect_hardware 동시호출(시작버튼+워커) 직렬화
+_hw_status_gen = 0           # 장치 라벨 갱신 세대번호 — 예전 after 콜백이 최신 상태를 덮어쓰지 않게
 _logo_frames = []            # 뚱박스 LCD 로고 프레임 (BGR flatten)
 _logo_delay = 0.08           # 프레임 간격(초)
 
@@ -1783,8 +1786,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-17 03:00"
+PATCH_UPDATED_AT = "2026-07-17 09:10"
 LATEST_PATCH = [
+    "🔌 장치연결실패 오표시 수정 — 시작버튼과 백그라운드 재연결이 동시에 COM을 열어 한쪽만 실패해도 라벨이 실패로 남던 문제. 연결 Lock+라벨 세대번호로 최신 결과만 표시, UI초기화 때 재연결 오발동 제거",
     "🔒 인증 ERROR(네트워크 일시장애)는 강제종료하지 않음 — 만료/코드없음/중복사용일 때만 종료. USB·뚱박스 연결 로직은 건드리지 않음",
     "🔒 인증 만료 시 프로그램 강제 종료 — 예전엔 '인증 만료' 문구만 띄우고 사냥만 멈춰서, 다시 시작하면 다음 5분 검사 전까지 잠깐 더 돌릴 수 있었음. 이제 만료/코드없음/중복사용이면 메시지 띄운 뒤 프로세스 완전 종료. 시작 버튼 누를 때도 즉시 재검증",
     "🔒 인증 만료 실시간 반영 — 5분 재검증 때는 시트의 만료값이 '0'일 때만 정지시켰고, 절대날짜/일수로 넣은 만료는 프로그램 켜놓은 채로 기간이 지나도 안 걸리던 문제 수정. 시작 시점과 동일한 만료판정(_is_code_expired)을 5분마다도 적용",
@@ -2045,14 +2049,15 @@ def on_main_toggle(e=None):
     if time.time() - debounce['main'] < 0.25: return 
     debounce['main'] = time.time()
     if not running:
+        # 워커의 대기중 재연결과 시작버튼 연결이 겹치지 않게 재연결 요청 취소
+        globals()['_reconnect_req'] = False
         connect_hardware()
         if not ser or not getattr(ser, "is_open", False):
             _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
             msg = "○ 뚱박스 연결실패" if _hw in ("뚱박스", "KMBox") else "○ 장치 연결실패"
             if root and lbl_status:
                 root.after(0, lambda m=msg: lbl_status.configure(text=m, text_color="#f85149"))
-            if root and lbl_ard:
-                root.after(0, lambda m=msg: lbl_ard.configure(text=m, text_color="#f85149"))
+            # lbl_ard는 connect_hardware가 이미 최신 세대로 갱신함 — 여기서 또 after하면 덮어쓸 수 있음
             return
         # 시작 직 인증 즉시 재검증 — 만료 후 다시 시작해서 잠깐 더 돌리는 꼼수 차단
         # ERROR(네트워크)는 무시하고 시작 허용. USB/뚱박스 연결과 무관하게 인증만 봄.
@@ -2191,35 +2196,55 @@ def lcd_logo_worker():
         except Exception:
             time.sleep(0.3)
 
+def _set_hw_label(text, color, gen):
+    """장치 상태 라벨 갱신 — gen이 최신(_hw_status_gen)이 아니면 무시(예전 실패문구가 성공을 덮는 것 방지)."""
+    def _apply(t=text, c=color, g=gen):
+        if g != globals().get('_hw_status_gen'):
+            return
+        if lbl_ard:
+            try: lbl_ard.configure(text=t, text_color=c)
+            except Exception: pass
+    if root:
+        try: root.after(0, _apply)
+        except Exception: pass
+
 def connect_hardware():
-    """하드웨어 연결 (드롭다운 선택에 따라 아두이노/KMBox). 재연결에도 재사용."""
+    """하드웨어 연결 (드롭다운 선택에 따라 아두이노/KMBox). 재연결에도 재사용.
+    시작버튼과 워커가 동시에 부르면 COM포트 충돌로 한쪽만 실패→라벨만 실패로 남는
+    문제가 있어서 Lock으로 직렬화하고, 라벨은 세대번호로 최신 결과만 반영."""
     global ser
-    try:
-        if ser: ser.close()
-    except: pass
-    ser = None
-    try:
-        _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
-        if _hw in ("뚱박스", "KMBox"):
-            if kmNet is None or not hasattr(kmNet, "lcd_picture"):
-                if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text="⬇ 뚱박스 드라이버 받는중", text_color='#f9e2af'))
-                if not ensure_kmnet():
-                    if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text="○ kmNet 없음", text_color='#f85149'))
-                    return
-            _kip = ent_km_ip.get().strip() if ('ent_km_ip' in globals() and ent_km_ip and ent_km_ip.get().strip()) else KM_IP
-            _kport = ent_km_port.get().strip() if ('ent_km_port' in globals() and ent_km_port and ent_km_port.get().strip()) else KM_PORT
-            _kmac = ent_km_mac.get().strip() if ('ent_km_mac' in globals() and ent_km_mac and ent_km_mac.get().strip()) else KM_MAC
-            globals()['KM_IP'] = _kip; globals()['KM_PORT'] = _kport; globals()['KM_MAC'] = _kmac
-            ser = KmBox(_kip, _kport, _kmac)
-            try: ensure_logo()
-            except: pass
-            if root and lbl_ard: root.after(0, lambda ip=_kip: lbl_ard.configure(text=f"● 뚱박스 {ip}", text_color='#3fb950'))
-        else:
-            ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
-            if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text=f"● {SERIAL_PORT}", text_color='#3fb950'))
-    except Exception:
+    with _hw_lock:
+        globals()['_hw_status_gen'] = int(globals().get('_hw_status_gen', 0)) + 1
+        gen = globals()['_hw_status_gen']
+        try:
+            if ser: ser.close()
+        except Exception:
+            pass
         ser = None
-        if root and lbl_ard: root.after(0, lambda: lbl_ard.configure(text="○ 연결실패", text_color='#f85149'))
+        try:
+            _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
+            if _hw in ("뚱박스", "KMBox"):
+                if kmNet is None or not hasattr(kmNet, "lcd_picture"):
+                    _set_hw_label("⬇ 뚱박스 드라이버 받는중", '#f9e2af', gen)
+                    if not ensure_kmnet():
+                        _set_hw_label("○ kmNet 없음", '#f85149', gen)
+                        return False
+                _kip = ent_km_ip.get().strip() if ('ent_km_ip' in globals() and ent_km_ip and ent_km_ip.get().strip()) else KM_IP
+                _kport = ent_km_port.get().strip() if ('ent_km_port' in globals() and ent_km_port and ent_km_port.get().strip()) else KM_PORT
+                _kmac = ent_km_mac.get().strip() if ('ent_km_mac' in globals() and ent_km_mac and ent_km_mac.get().strip()) else KM_MAC
+                globals()['KM_IP'] = _kip; globals()['KM_PORT'] = _kport; globals()['KM_MAC'] = _kmac
+                ser = KmBox(_kip, _kport, _kmac)
+                try: ensure_logo()
+                except Exception: pass
+                _set_hw_label(f"● 뚱박스 {_kip}", '#3fb950', gen)
+            else:
+                ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
+                _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)
+            return bool(ser and getattr(ser, "is_open", False))
+        except Exception:
+            ser = None
+            _set_hw_label("○ 연결실패", '#f85149', gen)
+            return False
 
 def expert_logic():
     global ser, running, last_buff_seq, BUFF_SEQ_GAP
@@ -2562,7 +2587,7 @@ hw_var = tk.StringVar(value=HW_MODE)
 hw_combo = ctk.CTkComboBox(frame_hw, values=["뚱USB", "뚱박스"], variable=hw_var, width=110, height=22,
                            font=("Malgun Gothic", 9), dropdown_font=("Malgun Gothic", 9),
                            fg_color="#1e1e2e", button_color="#800020", border_width=1, border_color="#45475a",
-                           command=lambda v: _toggle_km_fields(v))
+                           command=lambda v: _on_hw_mode_change(v))
 hw_combo.pack(side="left", padx=2)
 
 frame_kmfields = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=6)
@@ -2579,13 +2604,22 @@ ctk.CTkLabel(_kmr3, text="UUID", width=34, anchor="w", text_color="#a6adc8", fon
 ent_km_mac = ctk.CTkEntry(_kmr3, width=132, height=20, font=("Malgun Gothic", 9))
 ent_km_mac.pack(side="left"); ent_km_mac.insert(0, KM_MAC)
 
-def _toggle_km_fields(*a):
-    if a: globals()['_reconnect_req'] = True   # 사용자가 드롭다운 바꿀 때만 재연결
+def _toggle_km_fields():
+    """뚱박스 입력칸 보이기/숨기기만 — 재연결 요청은 여기서 안 함."""
     if hw_var.get() in ("뚱박스", "KMBox"):
         frame_kmfields.pack(pady=(0,1), padx=2, fill='x', after=frame_hw)
     else:
         frame_kmfields.pack_forget()
+
+def _on_hw_mode_change(v=None):
+    """사용자가 장치 드롭다운을 바꿀 때만 재연결 요청.
+    UI 초기화 중 콤보박스가 command를 자동 호출해도 _hw_ui_ready 전에는 무시."""
+    if globals().get('_hw_ui_ready'):
+        globals()['_reconnect_req'] = True
+    _toggle_km_fields()
+
 _toggle_km_fields()
+globals()['_hw_ui_ready'] = True
 
 frame_mode = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
 frame_mode.pack(pady=(2,1), padx=2, fill='x')
