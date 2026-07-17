@@ -261,6 +261,10 @@ PARTY_ROIS = [(0,0,0,0)] * 8
 PARTY_HP_THRESHOLDS = [50] * 8
 PARTY_USE_ROI = [True] * 8
 PARTY_HP_100_REF = [None] * 8
+# 파티창 사망 직전 깜빡임 때 전체 ROI가 잠깐 '바 없음'으로 떨어지는 것 방지.
+# 슬롯별로 직전 정상 HP%를 잠시 유지(홀드). 진짜 사망/빈칸은 시간 지나면 폐기.
+_party_hp_hold = {}          # pi -> (hp_pct, last_ok_time)
+PARTY_HP_HOLD_SEC = 2.0
 MAIN_ATTACKER_COORD = PARTY_COORDS[1] 
 
 SELF_HP_COORD = [512, 591] 
@@ -1689,12 +1693,24 @@ def party_slot_active_rgb(arr):
     return is_bar
 
 def scan_party_hp(frame, pi):
+    """파티원 HP%. 사망 직전 파티창 깜빡임으로 잠깐 바 인식이 실패해도
+    직전 정상값을 짧게 유지해서, 한 명 죽는 깜빡임 때문에 나머지 전체 힐이
+    같이 멈추는 걸 완화한다. 2초 넘게 바가 안 보이면 홀드 폐기(진짜 사망/빈칸)."""
     roi = PARTY_ROIS[pi]
     if roi[0] == 0 and roi[2] == 0:
         return None
-    if not party_slot_active(frame, roi):
-        return None
-    return bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi], strict=True)
+    now = time.time()
+    if party_slot_active(frame, roi):
+        pct = bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi], strict=True)
+        _party_hp_hold[pi] = (pct, now)
+        return pct
+    held = _party_hp_hold.get(pi)
+    if held is not None:
+        last_pct, last_t = held
+        if (now - last_t) <= PARTY_HP_HOLD_SEC:
+            return last_pct   # 깜빡임 무시: 직전값 유지
+        _party_hp_hold.pop(pi, None)   # 오래 안 보임 → 사망/빈칸으로 확정
+    return None
 
 def load_buff_templates():
     global buff_templates, buff_template_hu
@@ -1793,8 +1809,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-17 12:10"
+PATCH_UPDATED_AT = "2026-07-17 12:15"
 LATEST_PATCH = [
+    "🩹 파티창 깜빡임 무시 — 한 명 죽는 직전 창이 깜빡여도 직전 HP값을 2초간 유지해서, 그 때문에 나머지 파티원 힐까지 같이 멈추던 문제 완화. 2초 넘게 바 없으면 사망/빈칸으로 처리",
     "🩹 파티 독(초록)바 힐 복구 — 빨간바·독초록바 둘 다 힐 대상. 빈칸 오힐 막는 구조판정은 유지하고, 초록은 넓은 연속바만 인정해서 배경 오탐은 차단",
     "🧹 격수 모니터 스위치·하단 피바 제거 — HP%/수신상태는 상단에 항상 표시",
     "📡 격수 UDP 수신 안정화 — 예전엔 포트오류/예외 1번에 수신스레드가 바로 죽어서 재시작 전까지 '수신안됨'만 뜨던 문제. 죽지 않고 재시도, 상태(포트오류/수신대기/수신중+송신IP) 표시",
