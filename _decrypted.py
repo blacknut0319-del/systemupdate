@@ -1151,7 +1151,7 @@ def open_guide_panel():
     add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐")
     add_d("위기% 슬라이더", "위험한 피통 이하일 때 위험베르 자동 사용")
     add_d("격수% 슬라이더", "노파티 모드 UDP로 받은 격수 체력 기준")
-    add_d("격수 모니터", "UDP로 받은 격수 HP를 폼 하단에 표시")
+    add_d("격수 HP", "UDP로 받은 격수 체력을 폼에서 HP%/수신상태로 표시")
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
     add_t("🚨 주의사항 (필독)")
     add_w("파티 모드 시 쫄법사는 파티창이 활성화된 상태여야 합니다 (안 그러면 베르)")
@@ -1786,8 +1786,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-17 10:50"
+PATCH_UPDATED_AT = "2026-07-17 11:00"
 LATEST_PATCH = [
+    "🧹 격수 모니터 스위치·하단 피바 제거 — HP%/수신상태는 상단에 항상 표시",
     "📡 격수 UDP 수신 안정화 — 예전엔 포트오류/예외 1번에 수신스레드가 바로 죽어서 재시작 전까지 '수신안됨'만 뜨던 문제. 죽지 않고 재시도, 상태(포트오류/수신대기/수신중+송신IP) 표시",
     "🔌 장치연결실패 오표시 수정 — 시작버튼과 백그라운드 재연결이 동시에 COM을 열어 한쪽만 실패해도 라벨이 실패로 남던 문제. 연결 Lock+라벨 세대번호로 최신 결과만 표시, UI초기화 때 재연결 오발동 제거",
     "🔒 인증 ERROR(네트워크 일시장애)는 강제종료하지 않음 — 만료/코드없음/중복사용일 때만 종료. USB·뚱박스 연결 로직은 건드리지 않음",
@@ -2810,7 +2811,6 @@ lbl_buff.pack(pady=0)
 lbl_saved_coord = ctk.CTkLabel(root, text="", text_color="#a6e3a1", font=('Malgun Gothic', 10, 'bold'))
 
 # UDP 모듈
-chk_ontop = ctk.BooleanVar(value=False)
 UDP_CONFIG_FILE = "udp_config.json"
 udp_target_ip = "192.168.0.100"
 if os.path.exists(UDP_CONFIG_FILE):
@@ -2845,32 +2845,8 @@ udp_hp_lbl.pack(side='right', padx=1)
 row2 = ctk.CTkFrame(frame_ontop_ctrl, fg_color="transparent"); row2.pack(fill='x', padx=2, pady=(0,3))
 lbl_my_ip = ctk.CTkLabel(row2, text=f"내IP:{get_my_ip()}", text_color="#a6e3a1", font=('Consolas', 8, 'bold'))
 lbl_my_ip.pack(side='left', padx=4)
-def toggle_ontop():
-    if chk_ontop.get():
-        frame_ontop_view.pack(pady=2, padx=2, fill='x')
-    else:
-        frame_ontop_view.pack_forget()
-    auto_resize_height()
-
-ctk.CTkSwitch(frame_ontop_ctrl, text="👁️ 격수 모니터", text_color="#ffffff", variable=chk_ontop, command=toggle_ontop, font=('Malgun Gothic', 11, 'bold'), switch_width=28, switch_height=14, progress_color="#a371f7", button_color="#ffffff", button_hover_color="#9e1a3a").pack(side="right", padx=10, pady=2)
-lbl_ontop_status = ctk.CTkLabel(frame_ontop_ctrl, text="○ 대기중", text_color="#6c7086", font=('Malgun Gothic', 10, 'bold'))
+lbl_ontop_status = ctk.CTkLabel(row2, text="○ 대기중", text_color="#6c7086", font=('Malgun Gothic', 10, 'bold'))
 lbl_ontop_status.pack(side="right", padx=10)
-
-frame_ontop_view = tk.Frame(root, bg="#181825", height=30)
-canvas_hp = tk.Canvas(frame_ontop_view, bg="#181825", height=30, highlightthickness=0)
-canvas_hp.pack(fill="both", expand=True, padx=4, pady=3)
-
-def draw_attacker_hp_bar():
-    try:
-        if canvas_hp and canvas_hp.winfo_exists():
-            canvas_hp.delete("all")
-            w = canvas_hp.winfo_width() or 225; h = canvas_hp.winfo_height() or 24
-            hp_pct = max(0, min(100, attacker_hp_udp))
-            fill_w = max(1, int(w * hp_pct / 100))
-            canvas_hp.create_rectangle(0, 0, w, h, fill="#0d0f14", outline="#262a33", width=1)
-            canvas_hp.create_rectangle(1, 1, fill_w, h-1, fill="#ef4444", outline="")
-            canvas_hp.create_text(w//2, h//2, text=f"격수 HP: {hp_pct:.0f}%", fill="#f3f4f6", font=("Malgun Gothic", 10, "bold"))
-    except: pass
 
 udp_listen_ok = False          # 포트 9999 바인드 성공 여부
 udp_last_from = ""             # 마지막 송신측 IP (진단용)
@@ -2882,14 +2858,11 @@ def update_udp_hp_label():
                 udp_hp_lbl.configure(text="HP: 포트오류", text_color="#ef4444")
                 lbl_ontop_status.configure(text=f"○ {UDP_ATTACKER_PORT}번 실패", text_color="#f38ba8")
             elif last_udp_time == 0 or time.time() - last_udp_time > 2.0:
-                # 수신대기: 리스너는 살아있는데 격수모니터 패킷이 안 옴
-                # (격수모니터 IP칸에 뚱힐러 '내IP'를 넣었는지 / 방화벽 확인)
                 udp_hp_lbl.configure(text="HP: 수신안됨", text_color="#ef4444")
                 lbl_ontop_status.configure(text="○ 수신대기", text_color="#f9e2af")
             else:
                 udp_hp_lbl.configure(text=f"HP: {attacker_hp_udp:.0f}%", text_color="#ef4444")
                 lbl_ontop_status.configure(text="✅ 수신중", text_color="#a6e3a1")
-            draw_attacker_hp_bar()
             root.after(300, update_udp_hp_label)
     except: pass
 
