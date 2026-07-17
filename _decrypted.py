@@ -2843,8 +2843,7 @@ udp_hp_lbl = ctk.CTkLabel(row1, text="HP: --", text_color="#ef4444", font=('Malg
 udp_hp_lbl.pack(side='right', padx=1)
 
 row2 = ctk.CTkFrame(frame_ontop_ctrl, fg_color="transparent"); row2.pack(fill='x', padx=2, pady=(0,3))
-# 수신은 이 PC(내IP:9999). 격수모니터 IP칸에 아래 내IP를 넣어야 함.
-lbl_my_ip = ctk.CTkLabel(row2, text=f"내IP:{get_my_ip()} ←격수모니터에 이걸넣기", text_color="#a6e3a1", font=('Consolas', 8, 'bold'))
+lbl_my_ip = ctk.CTkLabel(row2, text=f"내IP:{get_my_ip()}", text_color="#a6e3a1", font=('Consolas', 8, 'bold'))
 lbl_my_ip.pack(side='left', padx=4)
 def toggle_ontop():
     if chk_ontop.get():
@@ -2889,8 +2888,7 @@ def update_udp_hp_label():
                 lbl_ontop_status.configure(text="○ 수신대기", text_color="#f9e2af")
             else:
                 udp_hp_lbl.configure(text=f"HP: {attacker_hp_udp:.0f}%", text_color="#ef4444")
-                from_txt = f" ←{udp_last_from}" if udp_last_from else ""
-                lbl_ontop_status.configure(text=f"✅ 수신중{from_txt}", text_color="#a6e3a1")
+                lbl_ontop_status.configure(text="✅ 수신중", text_color="#a6e3a1")
             draw_attacker_hp_bar()
             root.after(300, update_udp_hp_label)
     except: pass
