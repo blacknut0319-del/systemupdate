@@ -1730,6 +1730,91 @@ def human_delay(min_val, max_val):
     mean = (min_val + max_val) / 2; std_dev = (max_val - min_val) / 6 
     return max(min_val, min(max_val, random.gauss(mean, std_dev)))
 
+_lineage_hwnd = None
+_lineage_hwnd_at = 0.0
+
+def find_lineage_hwnd():
+    """작업관리자에 보이는 'Lineage Classic - ...' 창을 자동 검색.
+    제목에 Lineage Classic / 리니지클래식 이 들어간 보이는 창 중 가장 큰 것."""
+    global _lineage_hwnd, _lineage_hwnd_at
+    now = time.time()
+    if _lineage_hwnd and (now - _lineage_hwnd_at) < 3.0:
+        try:
+            if win32gui.IsWindow(_lineage_hwnd) and win32gui.IsWindowVisible(_lineage_hwnd):
+                return _lineage_hwnd
+        except Exception:
+            pass
+    cands = []
+    def _enum(hwnd, _):
+        try:
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
+            title = win32gui.GetWindowText(hwnd) or ""
+            compact = title.replace(" ", "").lower()
+            if ("lineageclassic" in compact) or ("리니지클래식" in title.replace(" ", "")):
+                l, t, r, b = win32gui.GetWindowRect(hwnd)
+                w, h = r - l, b - t
+                if w > 200 and h > 150:
+                    cands.append((hwnd, w * h))
+        except Exception:
+            pass
+        return True
+    try:
+        win32gui.EnumWindows(_enum, None)
+    except Exception:
+        return None
+    if not cands:
+        _lineage_hwnd = None
+        return None
+    cands.sort(key=lambda x: x[1], reverse=True)
+    _lineage_hwnd = cands[0][0]
+    _lineage_hwnd_at = now
+    return _lineage_hwnd
+
+def focus_lineage_window():
+    """리니지클래식 창만 앞으로(키보드 포커스).
+    뚱힐러 폼은 -topmost 로 화면에 그대로 위에 두고, 포커스는 뺏지 않음."""
+    hwnd = find_lineage_hwnd()
+    if not hwnd:
+        return False
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        fg = win32gui.GetForegroundWindow()
+        if fg != hwnd:
+            try:
+                ctypes.windll.user32.AllowSetForegroundWindow(ctypes.c_uint(-1).value)
+            except Exception:
+                pass
+            try:
+                cur = ctypes.windll.kernel32.GetCurrentThreadId()
+                pid = ctypes.c_ulong(0)
+                fg_tid = ctypes.windll.user32.GetWindowThreadProcessId(fg, ctypes.byref(pid)) if fg else 0
+                tg_tid = ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if fg_tid and fg_tid != cur:
+                    ctypes.windll.user32.AttachThreadInput(cur, fg_tid, True)
+                if tg_tid and tg_tid != cur:
+                    ctypes.windll.user32.AttachThreadInput(cur, tg_tid, True)
+                win32gui.SetForegroundWindow(hwnd)
+                if fg_tid and fg_tid != cur:
+                    ctypes.windll.user32.AttachThreadInput(cur, fg_tid, False)
+                if tg_tid and tg_tid != cur:
+                    ctypes.windll.user32.AttachThreadInput(cur, tg_tid, False)
+            except Exception:
+                try: win32gui.SetForegroundWindow(hwnd)
+                except Exception: pass
+    except Exception:
+        return False
+    finally:
+        # 폼은 뒤로 안 넘어가게(항상 위). focus_force는 안 써서 리니지 포커스는 유지.
+        try:
+            if root:
+                root.attributes("-topmost", True)
+                root.lift()
+        except Exception:
+            pass
+    return True
+
 def _clamp_to_screen(x, y, margin=4):
     """이동 목표를 (가상)화면 안으로 제한 + 좌측하단 시작 핫코너 회피.
     상대이동 오버슈트/경계 clamp로 커서가 코너(0,maxY=시작버튼)로 튀는 것 방지."""
@@ -1782,6 +1867,8 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
     global ser, running
     if not running: return
     if not ser or not getattr(ser, "is_open", False): return
+    # 키/클릭이 게임에 먹히려면 리니지 포커스 필요. 폼은 topmost로 위에 유지.
+    focus_lineage_window()
     time.sleep(0.02)
     was_auto = chk_follow.get() if chk_follow else False
     if was_auto:
@@ -1797,6 +1884,11 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
         if was_auto:
             try: ser.write(b'T'); time.sleep(0.04)
             except: pass
+        # 키가 끝난 뒤에도 폼이 뒤로 안 가게
+        try:
+            if root: root.attributes("-topmost", True)
+        except Exception:
+            pass
 
 def fix_mode_keys(keys, delay=0.5):
     if not ser or not getattr(ser, "is_open", False): return
@@ -1809,8 +1901,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-17 12:15"
+PATCH_UPDATED_AT = "2026-07-17 12:30"
 LATEST_PATCH = [
+    "🎮 리니지클래식 창 자동 포커스 — 힐/키 전에 'Lineage Classic' 창만 앞으로. 뚱힐러 폼은 topmost로 위에 유지(뒤로 안 넘어감). 포커스 빠져서 키가 안 먹히던 문제 완화",
     "🩹 파티창 깜빡임 무시 — 한 명 죽는 직전 창이 깜빡여도 직전 HP값을 2초간 유지해서, 그 때문에 나머지 파티원 힐까지 같이 멈추던 문제 완화. 2초 넘게 바 없으면 사망/빈칸으로 처리",
     "🩹 파티 독(초록)바 힐 복구 — 빨간바·독초록바 둘 다 힐 대상. 빈칸 오힐 막는 구조판정은 유지하고, 초록은 넓은 연속바만 인정해서 배경 오탐은 차단",
     "🧹 격수 모니터 스위치·하단 피바 제거 — HP%/수신상태는 상단에 항상 표시",
@@ -2310,6 +2403,7 @@ def expert_logic():
                 # 한 프레임 오독으로 어쩌다 한번 더 발동하는 것보다, 위험할 때 반드시
                 # 발동하는 쪽이 훨씬 중요하므로 즉시발동으로 원복.
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
+                    focus_lineage_window()
                     ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
             # 줍기
@@ -2358,6 +2452,7 @@ def expert_logic():
                         orig_x, orig_y = pt_orig.x, pt_orig.y
                         was_auto = chk_follow.get() if chk_follow else False
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
+                        focus_lineage_window()
                         human_mouse_move(cure_tx + random.randint(-3, 3), cure_ty + random.randint(-2, 2)); time.sleep(0.02)
                         fix_mode_keys(['2', 'X', '1'], 0.45)
                         human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
@@ -2427,6 +2522,7 @@ def expert_logic():
                                 if hp_pct < best_hp:
                                     best_hp = hp_pct; best_i = i
                     if best_i >= 0:
+                        focus_lineage_window()
                         if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
                             ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
                         else:
@@ -2474,6 +2570,7 @@ def expert_logic():
                     if best_pi >= 0:
                         was_auto = chk_follow.get() if chk_follow else False
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
+                        focus_lineage_window()
                         human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
                         use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                         heal_key = '7' if use_strong else 'A'
@@ -2512,6 +2609,7 @@ def expert_logic():
                     udp_ok = (time.time() - last_udp_time) < 5
                     atk_hp = attacker_hp_udp
                     if chk_attacker_sw.get() and udp_ok and atk_hp < attacker_hp_threshold:
+                        focus_lineage_window()
                         use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
                         if use_strong:
                             ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
