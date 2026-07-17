@@ -1461,7 +1461,7 @@ def _hp_bar_band_cols(arr):
     R = arr[:, :, 0].astype(int)
     G = arr[:, :, 1].astype(int)
     B = arr[:, :, 2].astype(int)
-    red, _grn = _hp_fill_masks(R, G, B)
+    red, grn = _hp_fill_masks(R, G, B)
     h, w = red.shape
     start_window = max(3, w // 8)   # 진짜 HP바는 ROI 좌측에서 시작
     gap_tol = max(2, w // 20)       # 연속 판정 시 허용하는 작은 틈
@@ -1501,10 +1501,17 @@ def _hp_bar_band_cols(arr):
             return 0, False
         return run_end - first + 1, True
 
-    red_cols, red_ok = _measure(red, max(3, w // 25))   # 정확히 빨간 HP바 있을 때만 힐감지(오탐 방지)
+    # 빨간 HP바 또는 독(초록)바 — 둘 다 힐 대상.
+    # 빈칸 오힐 방지: 구조판정(좌측시작·세로꽉참)은 그대로 유지.
+    # 초록은 floor를 더 크게 해서, 게임 뒷배경의 흩어진 초록 잡픽셀은 바로 안 보고
+    # 진짜 독 HP바처럼 넓게 이어진 초록만 인정.
+    red_cols, red_ok = _measure(red, max(3, w // 25))
     if red_ok:
         return red_cols, w, True
-    return 0, w, False        # 빈칸·사망·게임배경(바 없음) — 초록(독) 등 빨강 아닌 색은 바로 간주 안 함
+    grn_cols, grn_ok = _measure(grn, max(8, w // 5))
+    if grn_ok:
+        return grn_cols, w, True
+    return 0, w, False        # 빈칸·사망·게임배경(바 없음)
 
 def _hp_filled_cols(bar_px):
     """호환용 — 채워진 '열' 수(가로)."""
@@ -1786,8 +1793,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-17 11:00"
+PATCH_UPDATED_AT = "2026-07-17 12:10"
 LATEST_PATCH = [
+    "🩹 파티 독(초록)바 힐 복구 — 빨간바·독초록바 둘 다 힐 대상. 빈칸 오힐 막는 구조판정은 유지하고, 초록은 넓은 연속바만 인정해서 배경 오탐은 차단",
     "🧹 격수 모니터 스위치·하단 피바 제거 — HP%/수신상태는 상단에 항상 표시",
     "📡 격수 UDP 수신 안정화 — 예전엔 포트오류/예외 1번에 수신스레드가 바로 죽어서 재시작 전까지 '수신안됨'만 뜨던 문제. 죽지 않고 재시도, 상태(포트오류/수신대기/수신중+송신IP) 표시",
     "🔌 장치연결실패 오표시 수정 — 시작버튼과 백그라운드 재연결이 동시에 COM을 열어 한쪽만 실패해도 라벨이 실패로 남던 문제. 연결 Lock+라벨 세대번호로 최신 결과만 표시, UI초기화 때 재연결 오발동 제거",
