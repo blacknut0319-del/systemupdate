@@ -1901,8 +1901,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-17 12:30"
+PATCH_UPDATED_AT = "2026-07-19 03:40"
 LATEST_PATCH = [
+    "🟢 파티 독해독 — 마우스만 가고 클릭(K)이 빠져서 해독키가 대상에게 안 먹히던 문제 수정. 파티창 이동→클릭→F2→F10→F1 순서로 복구",
     "🎮 리니지클래식 창 자동 포커스 — 힐/키 전에 'Lineage Classic' 창만 앞으로. 뚱힐러 폼은 topmost로 위에 유지(뒤로 안 넘어감). 포커스 빠져서 키가 안 먹히던 문제 완화",
     "🩹 파티창 깜빡임 무시 — 한 명 죽는 직전 창이 깜빡여도 직전 HP값을 2초간 유지해서, 그 때문에 나머지 파티원 힐까지 같이 멈추던 문제 완화. 2초 넘게 바 없으면 사망/빈칸으로 처리",
     "🩹 파티 독(초록)바 힐 복구 — 빨간바·독초록바 둘 다 힐 대상. 빈칸 오힐 막는 구조판정은 유지하고, 초록은 넓은 연속바만 인정해서 배경 오탐은 차단",
@@ -2454,7 +2455,8 @@ def expert_logic():
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
                         focus_lineage_window()
                         human_mouse_move(cure_tx + random.randint(-3, 3), cure_ty + random.randint(-2, 2)); time.sleep(0.02)
-                        fix_mode_keys(['2', 'X', '1'], 0.45)
+                        # 파티원 타겟 클릭(K) 후 F2→F10→F1 — 예전엔 마우스만 가고 클릭 없이 키만 눌러서 해독이 안 먹힘
+                        fix_mode_keys(['K', '2', 'X', '1'], 0.45)
                         human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
                     else:
