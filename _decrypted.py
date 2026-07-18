@@ -1149,7 +1149,7 @@ def open_guide_panel():
     add_d("버프", "▶ 버프 펼침 → F1/F2/F3 단축창 선택 후 F5~F12 체크·초 설정")
     add_d("독 해독", "본인 독 걸리면 엔줄 자동 섭취 (두번째단축키 F9)")
     add_d("격수 해독", "격수 독 걸리면 큐어포이즌 자동 시전 (두번째단축키 F10)")
-    add_d("파티 해독", "파티원 HP바 초록(독)이면 파티창 클릭 후 큐어포이즌 (F2→F10→F1, 격수해독과 동일)")
+    add_d("파티 해독", "파티원 HP바 초록(독)이면 F2→F10→파티창클릭→F1")
     add_d("파란물약", "두번째단축키 F8 · 엠통% 이하 시 10분마다 자동 복용")
     add_d("확률(%)", "0%: 물약만 / 100%: 힐만 / 그 외: 섞어서 확률 시전")
     add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐")
@@ -1901,9 +1901,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-19 03:40"
+PATCH_UPDATED_AT = "2026-07-19 03:45"
 LATEST_PATCH = [
-    "🟢 파티 독해독 — 마우스만 가고 클릭(K)이 빠져서 해독키가 대상에게 안 먹히던 문제 수정. 파티창 이동→클릭→F2→F10→F1 순서로 복구",
+    "🟢 파티 독해독 — F2→F10→클릭→F1 순서로 수정 (큐어포이즌 후 파티원 클릭으로 대상지정)",
     "🎮 리니지클래식 창 자동 포커스 — 힐/키 전에 'Lineage Classic' 창만 앞으로. 뚱힐러 폼은 topmost로 위에 유지(뒤로 안 넘어감). 포커스 빠져서 키가 안 먹히던 문제 완화",
     "🩹 파티창 깜빡임 무시 — 한 명 죽는 직전 창이 깜빡여도 직전 HP값을 2초간 유지해서, 그 때문에 나머지 파티원 힐까지 같이 멈추던 문제 완화. 2초 넘게 바 없으면 사망/빈칸으로 처리",
     "🩹 파티 독(초록)바 힐 복구 — 빨간바·독초록바 둘 다 힐 대상. 빈칸 오힐 막는 구조판정은 유지하고, 초록은 넓은 연속바만 인정해서 배경 오탐은 차단",
@@ -2424,7 +2424,7 @@ def expert_logic():
             # ── 해독 ──────────────────────────────────────
             # 쫄법 독:   F2→F9(엔줄고정)→F1
             # 격수 독:   F2→F10(큐어포이즌)→F1 (UDP)
-            # 파티 독:   파티창 클릭 → F2→F10(큐어포이즌)→F1 (격수해독과 동일)
+            # 파티 독:   마우스이동 → F2→F10(큐어포이즌)→클릭(대상)→F1
             # 쫄법 석화: F2→F12(리무브커스)→F1 (ROI)
             # 격수 석화: F2→F12(리무브커스)→F1 (UDP)
             if chk_poison and chk_poison.get() and is_green_bar(frame, SELF_HP_ROI):
@@ -2455,8 +2455,8 @@ def expert_logic():
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
                         focus_lineage_window()
                         human_mouse_move(cure_tx + random.randint(-3, 3), cure_ty + random.randint(-2, 2)); time.sleep(0.02)
-                        # 파티원 타겟 클릭(K) 후 F2→F10→F1 — 예전엔 마우스만 가고 클릭 없이 키만 눌러서 해독이 안 먹힘
-                        fix_mode_keys(['K', '2', 'X', '1'], 0.45)
+                        # F2→F10(큐어포이즌)→클릭(대상지정)→F1
+                        fix_mode_keys(['2', 'X', 'K', '1'], 0.45)
                         human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
                         if was_auto: ser.write(b'T'); time.sleep(0.03)
                     else:
