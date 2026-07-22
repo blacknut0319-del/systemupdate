@@ -1,11 +1,45 @@
 # -*- coding: utf-8 -*-
 """뚱시스템 로더 — data.txt AES 복호화 + 실행 (GitHub API, CDN 캐시 회피)"""
 import base64
+import ctypes
 import json
 import os
 import ssl
+import sys
 import urllib.request
 import zlib
+
+# Insert/Home/PageUp 전역핫키는 관리자 권한이 있어야 리니지 위에서 바로 먹힘
+def _ensure_admin():
+    try:
+        if ctypes.windll.shell32.IsUserAnAdmin():
+            return True
+    except Exception:
+        pass
+    try:
+        script = os.path.abspath(__file__)
+        cwd = os.path.dirname(script) or None
+        # UAC 뜨면 '예' → 관리자 pythonw로 다시 실행
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, f'"{script}"', cwd, 1
+        )
+        # ret > 32 면 성공 요청. 취소(ERROR_CANCELLED=1223) 등이면 그냥 종료
+        if ret <= 32:
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                "관리자 권한이 필요합니다.\nUAC에서 '예'를 눌러주세요.",
+                "뚱힐러",
+                0x30,
+            )
+    except Exception as e:
+        try:
+            ctypes.windll.user32.MessageBoxW(0, f"관리자 실행 실패: {e}", "뚱힐러", 0x10)
+        except Exception:
+            pass
+    sys.exit(0)
+
+
+_ensure_admin()
 
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
@@ -34,6 +68,4 @@ try:
         pass
     exec(code)
 except Exception as err:
-    import ctypes
-
     ctypes.windll.user32.MessageBoxW(0, f"실행 실패: {err}", "오류", 0x10)
