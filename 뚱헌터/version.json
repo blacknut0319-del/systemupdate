@@ -1,7 +1,7 @@
 {
-  "version": "1.4.198",
-  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v1.4.198/ddonghunter.exe",
+  "version": "1.4.199",
+  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v1.4.199/ddonghunter.exe",
   "builder": "nuitka-onefile",
   "kind": "exe",
-  "size": 125631488
+  "size": 145025536
 }
