@@ -1603,13 +1603,16 @@ def _self_hp_pct_from_arr(arr, ref100=None):
     """쫄법(자기) HP% — 예전 초창기 버전(06191252.py)의 roi_hp_pct 로직을 그대로 사용.
     가공/보정 없이 단순하게: 채움 픽셀 개수 세서 ref100(픽셀개수, 100%일때 값)으로 나눔.
     빨강뿐 아니라 독(초록)일 때도 채움으로 잡음 — 안 그러면 독 걸려서 바가
-    초록으로 바뀌는 순간 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동함."""
+    초록으로 바뀌는 순간 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동함.
+    초록 기준은 is_green_bar(독 감지)와 반드시 동일해야 함 — 기준이 서로 다르면
+    "독 걸림"으로는 인식되는데 "채움"으로는 인식 안 되는 색 구간이 생겨서,
+    피가 가득 차있어도 독 상태에서 위기베르가 잘못 발동하는 문제가 있었음."""
     if arr.size == 0:
         return 100.0
     try:
         R, G, B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
         red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
-        grn = (G > 80) & (G > R * 1.2) & (G > B * 1.2)
+        grn = (G > 15) & (G > R * 1.03) & (G > B * 1.03)   # is_green_bar와 동일 기준
         raw = int(np.sum(red | grn))
         if ref100 and ref100 > 0:
             return min(100.0, round(raw / ref100 * 100, 1))
@@ -1937,8 +1940,10 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-23 09:50"
+PATCH_UPDATED_AT = "2026-07-24 04:20"
 LATEST_PATCH = [
+    "🛡️ 위기베르 독 오발동 수정 — 위기베르 %계산의 초록(독) 판정 기준이 독 감지 기준보다 빡빡해서, 독 걸리면 피가 가득해도 채움으로 안 잡혀 귀환하던 문제. 두 기준을 동일하게 통일",
+    "📋 실시간 로그창 표시 수정 — 위기베르 등으로 정지된 순간 running이 바로 꺼져서 하단 로그창에 안 뜨던 문제, 정지 여부와 무관하게 항상 표시",
     "💾 힐·물약 체크 저장 — 자힐/위기/상위힐/격수/엠약 ON·OFF를 껏다 켜도 유지. 토글 즉시 license.dat에 저장",
     "🟢 파티 독해독 — F2→F10→클릭→F1 순서로 수정 (큐어포이즌 후 파티원 클릭으로 대상지정)",
     "🎮 리니지클래식 창 자동 포커스 — 힐/키 전에 'Lineage Classic' 창만 앞으로. 뚱힐러 폼은 topmost로 위에 유지(뒤로 안 넘어감). 포커스 빠져서 키가 안 먹히던 문제 완화",
@@ -2115,7 +2120,7 @@ def update_ui_timer():
                 except: auth_text = "🔑 영구 사용"
             elif loaded_pwd: auth_text = "🔑 영구 사용"
             root.after(0, lambda t=auth_text: lbl_auth.configure(text=t))
-        if root and lbl_log and running and last_log:
+        if root and lbl_log and last_log:
             txt = last_log
             def _upd(t=txt):
                 lbl_log.configure(state="normal")
