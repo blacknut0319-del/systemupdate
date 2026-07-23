@@ -296,6 +296,12 @@ strong_heal_pct = 30
 chk_strong_heal = None
 last_mna_potion = 0
 chk_mna = None
+# 힐·물약 스위치 저장값 (재시작 복원) — 기본은 기존 UI 기본과 동일
+saved_chk_self_heal = "1"
+saved_chk_danger = "1"
+saved_chk_strong_heal = "1"
+saved_chk_attacker = "1"
+saved_chk_mna = "0"
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ddong.log")
 last_log = ""
@@ -567,6 +573,8 @@ def load_hidden_config():
     global MNA_ROI, MNA_100_REF, mna_threshold
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
+    global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna
+    global strong_heal_pct
     
     text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11", "EXPIRE_START", "EXPIRE_DAYS",
                        "PARTY_FLAGS", "PARTY_MODE_FLAGS", "BUFF_ON"}
@@ -575,6 +583,11 @@ def load_hidden_config():
     saved_expire_days = "0"
     saved_buff_on = "0"
     saved_buff_grid = {}
+    saved_chk_self_heal = "1"
+    saved_chk_danger = "1"
+    saved_chk_strong_heal = "1"
+    saved_chk_attacker = "1"
+    saved_chk_mna = "0"
     
     if os.path.exists(AUTH_FILE):
         ctypes.windll.kernel32.SetFileAttributesW(AUTH_FILE, 2)
@@ -647,6 +660,12 @@ def load_hidden_config():
                 if key == "MNA_ROI_Y2": mna_roi_vals[3] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
                 if key == "MNA_100_REF": MNA_100_REF = int(val_str) if val_str.lstrip('-').isdigit() else None; continue
                 if key == "MNA_THRESHOLD": mna_threshold = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
+                if key == "STRONG_HEAL_PCT": strong_heal_pct = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
+                if key == "CHK_SELF_HEAL": saved_chk_self_heal = val_str; continue
+                if key == "CHK_DANGER": saved_chk_danger = val_str; continue
+                if key == "CHK_STRONG_HEAL": saved_chk_strong_heal = val_str; continue
+                if key == "CHK_ATTACKER": saved_chk_attacker = val_str; continue
+                if key == "CHK_MNA": saved_chk_mna = val_str; continue
                 for pi in range(8):
                     if key == f"PARTY_ROI_P{pi+1}_X1": party_roi_vals[pi][0] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
                     if key == f"PARTY_ROI_P{pi+1}_Y1": party_roi_vals[pi][1] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
@@ -755,6 +774,23 @@ def save_hidden_config(pwd_to_save):
             if MNA_100_REF is not None: f.write(f"MNA_100_REF={MNA_100_REF}\n")
             f.write(f"MNA_THRESHOLD={mna_threshold}\n")
             f.write(f"STRONG_HEAL_PCT={strong_heal_pct}\n")
+            def _sw01(var, fallback):
+                if var is not None:
+                    try: return "1" if var.get() else "0"
+                    except Exception: pass
+                return "1" if str(fallback).strip() in ("1", "true", "True") else "0"
+            # 힐·물약 스위치 — 껏다 켜도 유지
+            cur_self = _sw01(chk_self_heal_sw if 'chk_self_heal_sw' in globals() else None, saved_chk_self_heal)
+            cur_danger = _sw01(chk_danger_sw if 'chk_danger_sw' in globals() else None, saved_chk_danger)
+            cur_strong = _sw01(chk_strong_heal, saved_chk_strong_heal)
+            cur_atk = _sw01(chk_attacker_sw if 'chk_attacker_sw' in globals() else None, saved_chk_attacker)
+            cur_mna = _sw01(chk_mna, saved_chk_mna)
+            globals()['saved_chk_self_heal'] = cur_self
+            globals()['saved_chk_danger'] = cur_danger
+            globals()['saved_chk_strong_heal'] = cur_strong
+            globals()['saved_chk_attacker'] = cur_atk
+            globals()['saved_chk_mna'] = cur_mna
+            f.write(f"CHK_SELF_HEAL={cur_self}\nCHK_DANGER={cur_danger}\nCHK_STRONG_HEAL={cur_strong}\nCHK_ATTACKER={cur_atk}\nCHK_MNA={cur_mna}\n")
             for pi in range(8):
                 r = PARTY_ROIS[pi]
                 f.write(f"PARTY_ROI_P{pi+1}_X1={r[0]}\nPARTY_ROI_P{pi+1}_Y1={r[1]}\nPARTY_ROI_P{pi+1}_X2={r[2]}\nPARTY_ROI_P{pi+1}_Y2={r[3]}\n")
@@ -1901,8 +1937,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-19 03:45"
+PATCH_UPDATED_AT = "2026-07-23 09:50"
 LATEST_PATCH = [
+    "💾 힐·물약 체크 저장 — 자힐/위기/상위힐/격수/엠약 ON·OFF를 껏다 켜도 유지. 토글 즉시 license.dat에 저장",
     "🟢 파티 독해독 — F2→F10→클릭→F1 순서로 수정 (큐어포이즌 후 파티원 클릭으로 대상지정)",
     "🎮 리니지클래식 창 자동 포커스 — 힐/키 전에 'Lineage Classic' 창만 앞으로. 뚱힐러 폼은 topmost로 위에 유지(뒤로 안 넘어감). 포커스 빠져서 키가 안 먹히던 문제 완화",
     "🩹 파티창 깜빡임 무시 — 한 명 죽는 직전 창이 깜빡여도 직전 HP값을 2초간 유지해서, 그 때문에 나머지 파티원 힐까지 같이 멈추던 문제 완화. 2초 넘게 바 없으면 사망/빈칸으로 처리",
@@ -2836,8 +2873,12 @@ heal_body = coll_heal.body
 
 frame_selfhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_selfhp.pack(pady=1, padx=2, fill='x')
-chk_self_heal_sw = ctk.BooleanVar(value=True)
-RoundedToggle(frame_selfhp, "🔴 자힐", "#58a6ff", var=chk_self_heal_sw, cmd=lambda: log_event(f"🔴 자힐 {'ON' if chk_self_heal_sw.get() else 'OFF'}")).pack(side='left', padx=5)
+chk_self_heal_sw = ctk.BooleanVar(value=saved_chk_self_heal in ("1", "true", "True"))
+def _on_self_heal_sw():
+    log_event(f"🔴 자힐 {'ON' if chk_self_heal_sw.get() else 'OFF'}")
+    try: save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception: pass
+RoundedToggle(frame_selfhp, "🔴 자힐", "#58a6ff", var=chk_self_heal_sw, cmd=_on_self_heal_sw).pack(side='left', padx=5)
 self_hp_var = ctk.IntVar(value=self_hp_threshold)
 self_hp_sld = ctk.CTkSlider(frame_selfhp, from_=10, to=90, variable=self_hp_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8")
 self_hp_sld.pack(side='left', padx=2)
@@ -2851,8 +2892,12 @@ self_hp_var.trace_add("write", update_self_hp_thr)
 
 frame_dangerhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_dangerhp.pack(pady=1, padx=2, fill='x')
-chk_danger_sw = ctk.BooleanVar(value=True)
-RoundedToggle(frame_dangerhp, "🛡️ 위기", "#58a6ff", var=chk_danger_sw, cmd=lambda: log_event(f"🛡️ 위기 {'ON' if chk_danger_sw.get() else 'OFF'}")).pack(side='left', padx=4)
+chk_danger_sw = ctk.BooleanVar(value=saved_chk_danger in ("1", "true", "True"))
+def _on_danger_sw():
+    log_event(f"🛡️ 위기 {'ON' if chk_danger_sw.get() else 'OFF'}")
+    try: save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception: pass
+RoundedToggle(frame_dangerhp, "🛡️ 위기", "#58a6ff", var=chk_danger_sw, cmd=_on_danger_sw).pack(side='left', padx=4)
 danger_hp_var = ctk.IntVar(value=danger_hp_threshold)
 danger_hp_sld = ctk.CTkSlider(frame_dangerhp, from_=5, to=50, variable=danger_hp_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#ef4444")
 danger_hp_sld.pack(side='left', padx=2)
@@ -2866,8 +2911,12 @@ danger_hp_var.trace_add("write", update_danger_hp_thr)
 
 frame_strong = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_strong.pack(pady=1, padx=2, fill="x")
-chk_strong_heal = ctk.BooleanVar(value=True)
-RoundedToggle(frame_strong, "⚡ 상위힐", "#58a6ff", var=chk_strong_heal).pack(side="left", padx=4)
+chk_strong_heal = ctk.BooleanVar(value=saved_chk_strong_heal in ("1", "true", "True"))
+def _on_strong_heal():
+    log_event(f"⚡ 상위힐 {'ON' if chk_strong_heal.get() else 'OFF'}")
+    try: save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception: pass
+RoundedToggle(frame_strong, "⚡ 상위힐", "#58a6ff", var=chk_strong_heal, cmd=_on_strong_heal).pack(side="left", padx=4)
 sv = ctk.IntVar(value=strong_heal_pct)
 ctk.CTkSlider(frame_strong, from_=5, to=50, variable=sv, width=60, height=18, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8").pack(side="left", padx=2)
 s_lbl = ctk.CTkLabel(frame_strong, text=f"{strong_heal_pct}%", text_color="#f38ba8", font=("Malgun Gothic",10,"bold"), width=28)
@@ -2881,8 +2930,12 @@ sv.trace_add("write", lambda *a: update_strong_thr(sv, s_lbl))
 
 frame_atkhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_atkhp.pack(pady=1, padx=2, fill='x')
-chk_attacker_sw = ctk.BooleanVar(value=True)
-RoundedToggle(frame_atkhp, "⚔️ 격수", "#58a6ff", var=chk_attacker_sw, cmd=lambda: log_event(f"⚔️ 격수 {'ON' if chk_attacker_sw.get() else 'OFF'}")).pack(side='left', padx=4)
+chk_attacker_sw = ctk.BooleanVar(value=saved_chk_attacker in ("1", "true", "True"))
+def _on_attacker_sw():
+    log_event(f"⚔️ 격수 {'ON' if chk_attacker_sw.get() else 'OFF'}")
+    try: save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception: pass
+RoundedToggle(frame_atkhp, "⚔️ 격수", "#58a6ff", var=chk_attacker_sw, cmd=_on_attacker_sw).pack(side='left', padx=4)
 atkhp_var = ctk.IntVar(value=int(attacker_hp_threshold))
 atkhp_sld = ctk.CTkSlider(frame_atkhp, from_=10, to=99, variable=atkhp_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#ef4444")
 atkhp_sld.pack(side='left', padx=2)
@@ -2895,10 +2948,14 @@ def update_atkhp_thr(*a):
 atkhp_var.trace_add("write", update_atkhp_thr)
 
 # 마나 물약 (맨 밑)
-chk_mna = ctk.BooleanVar(value=False)
+chk_mna = ctk.BooleanVar(value=saved_chk_mna in ("1", "true", "True"))
 frame_mna = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_mna.pack(pady=1, padx=2, fill='x')
-RoundedToggle(frame_mna, "💙 엠약", "#58a6ff", var=chk_mna, cmd=lambda: log_event(f"💙 엠약 {'ON' if chk_mna.get() else 'OFF'}")).pack(side='left', padx=4)
+def _on_mna_sw():
+    log_event(f"💙 엠약 {'ON' if chk_mna.get() else 'OFF'}")
+    try: save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception: pass
+RoundedToggle(frame_mna, "💙 엠약", "#58a6ff", var=chk_mna, cmd=_on_mna_sw).pack(side='left', padx=4)
 mna_var = ctk.IntVar(value=mna_threshold)
 mna_sld = ctk.CTkSlider(frame_mna, from_=10, to=80, variable=mna_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#89b4fa")
 mna_sld.pack(side='left', padx=2)
