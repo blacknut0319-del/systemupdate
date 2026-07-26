@@ -122,6 +122,7 @@ _reconnect_req = False       # 드롭다운으로 장치 바꾸면 True → 워�
 _hw_ui_ready = False         # UI 초기화 끝나기 전엔 재연결 요청 무시(콤보박스 생성시 command 오발동 방지)
 _hw_lock = Lock()            # connect_hardware 동시호출(시작버튼+워커) 직렬화
 _hw_status_gen = 0           # 장치 라벨 갱신 세대번호 — 예전 after 콜백이 최신 상태를 덮어쓰지 않게
+_toggle_busy = False         # Insert 시작/정지 처리 중 — 연타해도 중복 실행 방지 (키보드 후킹 콜백은 항상 즉시 반환)
 _logo_frames = []            # 뚱박스 LCD 로고 프레임 (BGR flatten)
 _logo_delay = 0.08           # 프레임 간격(초)
 
@@ -1940,8 +1941,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-24 04:20"
+PATCH_UPDATED_AT = "2026-07-26 23:50"
 LATEST_PATCH = [
+    "⌨️ Insert/Home/PageUp 먹통 수정 — Insert(시작)가 아두이노연결·인증확인(네트워크)을 키보드 후킹 콜백 안에서 직접 처리해서, 느릴 때 Windows가 후킹 자체를 끊어버려 세 키가 전부 안 먹히던 문제. 이제 후킹은 즉시 반환하고 실제 처리는 백그라운드로 분리 + 연타해도 중복연결 안 되게 처리중 가드 추가",
     "🛡️ 위기베르 독 오발동 수정 — 위기베르 %계산의 초록(독) 판정 기준이 독 감지 기준보다 빡빡해서, 독 걸리면 피가 가득해도 채움으로 안 잡혀 귀환하던 문제. 두 기준을 동일하게 통일",
     "📋 실시간 로그창 표시 수정 — 위기베르 등으로 정지된 순간 running이 바로 꺼져서 하단 로그창에 안 뜨던 문제, 정지 여부와 무관하게 항상 표시",
     "💾 힐·물약 체크 저장 — 자힐/위기/상위힐/격수/엠약 ON·OFF를 껏다 켜도 유지. 토글 즉시 license.dat에 저장",
@@ -2205,13 +2207,15 @@ def on_f4_toggle(e=None):
     debounce['f4'] = time.time()
     if root and chk_loot: root.after(0, lambda: chk_loot.set(not chk_loot.get()))
 
-def on_main_toggle(e=None):
-    global running, last_buff_seq, debounce, root, lbl_status
+def _start_worker():
+    """Insert(시작) 실제 처리 — 백그라운드 스레드에서 실행.
+    connect_hardware()·check_google_sheet()가 느릴 수 있어서, 키보드 후킹 콜백 안에서
+    직접 돌리면 Windows가 300ms 넘는 후킹을 조용히 끊어버려 Insert/Home/PageUp이
+    전부 안 먹히게 됨. 그래서 후킹 콜백(on_main_toggle)은 이 스레드만 띄우고 바로 반환."""
+    global running, last_buff_seq, root, lbl_status
     global last_loot, loot_interval, buff_next_due, last_buff_global
     global last_self_heal, last_party_heal, last_noparty_heal
-    if time.time() - debounce['main'] < 0.25: return 
-    debounce['main'] = time.time()
-    if not running:
+    try:
         # 워커의 대기중 재연결과 시작버튼 연결이 겹치지 않게 재연결 요청 취소
         globals()['_reconnect_req'] = False
         connect_hardware()
@@ -2243,7 +2247,35 @@ def on_main_toggle(e=None):
         last_party_heal = now
         last_noparty_heal = now
         if root and lbl_status: root.after(0, lambda: lbl_status.configure(text="🟢 시스템 정상 가동 중", text_color="#a6e3a1"))
-    else: stop_everything()
+    except Exception:
+        if root and lbl_status:
+            root.after(0, lambda: lbl_status.configure(text="○ 연결 오류", text_color="#f85149"))
+    finally:
+        globals()['_toggle_busy'] = False
+
+def _stop_worker():
+    """정지 처리도 스레드로 — stop_everything() 안의 짧은 sleep들도 후킹 콜백 밖에서 돌게."""
+    try:
+        stop_everything()
+    finally:
+        globals()['_toggle_busy'] = False
+
+def on_main_toggle(e=None):
+    """키보드 후킹 콜백 — 무조건 즉시 반환. 실제 연결/정지는 스레드에 넘김.
+    _toggle_busy로 연타 시 중복 연결·중복 정지를 막음(무반응처럼 보이는 것도 방지:
+    처리 중엔 상태라벨에 '연결 확인 중...'을 바로 띄워서 눌린 건 확인 가능)."""
+    global running, debounce, root, lbl_status
+    if time.time() - debounce['main'] < 0.25: return 
+    debounce['main'] = time.time()
+    if globals().get('_toggle_busy'):
+        return   # 이미 시작/정지 처리 중 — 끝날 때까지 추가 입력은 무시(중복연결 방지)
+    globals()['_toggle_busy'] = True
+    if not running:
+        if root and lbl_status:
+            root.after(0, lambda: lbl_status.configure(text="🟡 연결 확인 중...", text_color="#f9e2af"))
+        Thread(target=_start_worker, daemon=True).start()
+    else:
+        Thread(target=_stop_worker, daemon=True).start()
 
 def reserve_shutdown_worker():
     global shutdown_time, timer_thread_active, running, root, ser
