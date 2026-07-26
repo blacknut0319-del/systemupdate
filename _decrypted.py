@@ -1954,9 +1954,10 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-27 00:10"
+PATCH_UPDATED_AT = "2026-07-27 00:20"
 LATEST_PATCH = [
-    "💬 채팅 중 자힐 난사 방지 — 타이핑(문자/숫자키) 감지 시 1.5초간 자힐·버프·줍기·해독 등 일반동작 일시정지. focus_lineage_window가 채팅 중 게임으로 포커스를 뺏어가며 힐이 계속 들어가던 문제 해결. 위기베르는 예외 없이 항상 계속 보호됨. 뚱힐러 매크로 키(F1~F12)는 타이핑으로 안 침(오탐 방지)",
+    "💬 채팅 중 일시정지 범위 수정 — 자힐·파티힐은 생명과 직결이라 채팅 중에도 절대 안 멈추게 원복(이전 패치가 이것까지 막아서 위험했음). 버프·줍기·해독·마나물약처럼 안 죽는 동작만 타이핑 중 1.5초 대기. 위기베르는 항상 예외로 계속 보호됨",
+    "💬 채팅 중 자힐 난사 방지 — 타이핑(문자/숫자키) 감지 시 일반동작 일시정지. 뚱힐러 매크로 키(F1~F12)는 타이핑으로 안 침(오탐 방지)",
     "⌨️ Insert/Home/PageUp 먹통 수정 — Insert(시작)가 아두이노연결·인증확인(네트워크)을 키보드 후킹 콜백 안에서 직접 처리해서, 느릴 때 Windows가 후킹 자체를 끊어버려 세 키가 전부 안 먹히던 문제. 이제 후킹은 즉시 반환하고 실제 처리는 백그라운드로 분리 + 연타해도 중복연결 안 되게 처리중 가드 추가",
     "🛡️ 위기베르 독 오발동 수정 — 위기베르 %계산의 초록(독) 판정 기준이 독 감지 기준보다 빡빡해서, 독 걸리면 피가 가득해도 채움으로 안 잡혀 귀환하던 문제. 두 기준을 동일하게 통일",
     "📋 실시간 로그창 표시 수정 — 위기베르 등으로 정지된 순간 running이 바로 꺼져서 하단 로그창에 안 뜨던 문제, 정지 여부와 무관하게 항상 표시",
@@ -2495,19 +2496,17 @@ def expert_logic():
                     focus_lineage_window()
                     ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
-            # 채팅 등 실제 타이핑 중엔 자힐·버프·줍기·해독 등 일반동작 일시정지.
-            # 위기베르는 위에서 이미 처리해서 타이핑 중에도 계속 보호됨.
-            # (타이핑 중 focus_lineage_window()가 게임으로 포커스를 뺏어가면서 힐키가
-            #  채팅창이 아니라 게임으로 계속 들어가 힐 난사처럼 보이던 문제 방지)
-            if time.time() - last_typing_time < TYPING_PAUSE_SEC:
-                time.sleep(0.02); continue
+            # 채팅 등 실제 타이핑 중엔 "생명과 무관한" 동작(버프·줍기·해독·마나물약)만 일시정지.
+            # 자힐·파티힐(A/7)·위기베르는 절대 여기서 안 막음 — 채팅 중이라도 실제로
+            # 힐이 필요하면 그대로 나가야 함(안 그러면 채팅 중 맞아죽을 위험).
+            _typing_now = (time.time() - last_typing_time) < TYPING_PAUSE_SEC
 
             # 줍기
-            if chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
+            if not _typing_now and chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
                 last_loot_sent_time = now; ser.write(b'4'); last_loot = now; loot_interval = random.uniform(4.0, 7.0); log_event('🎒 줍기') 
 
             # 마나 물약
-            if chk_mna and chk_mna.get() and MNA_ROI[0] != 0 and (now - last_mna_potion >= 600):
+            if not _typing_now and chk_mna and chk_mna.get() and MNA_ROI[0] != 0 and (now - last_mna_potion >= 600):
                 mna_pct = roi_mna_pct(frame, MNA_ROI, MNA_100_REF)
                 if mna_pct < mna_threshold:
                     execute_keys(['2', '8', '1'], 0.5); last_mna_potion = now
@@ -2522,16 +2521,17 @@ def expert_logic():
             # 파티 독:   마우스이동 → F2→F10(큐어포이즌)→클릭(대상)→F1
             # 쫄법 석화: F2→F12(리무브커스)→F1 (ROI)
             # 격수 석화: F2→F12(리무브커스)→F1 (UDP)
-            if chk_poison and chk_poison.get() and is_green_bar(frame, SELF_HP_ROI):
+            # (해독도 죽지는 않는 동작이라 타이핑 중엔 대기 — 힐은 아래에서 그대로 계속 작동함)
+            if not _typing_now and chk_poison and chk_poison.get() and is_green_bar(frame, SELF_HP_ROI):
                 fix_mode_keys(['2', '9', '1'], 0.5); log_event('🟢 독해독'); continue
-            if chk_target_poison and chk_target_poison.get() and attacker_poisoned:
+            if not _typing_now and chk_target_poison and chk_target_poison.get() and attacker_poisoned:
                 # 노파티: HP 임계값 미만이면 해독보다 힐 우선 (독이어도 HP%만 본다)
                 udp_fresh = (time.time() - last_udp_time) < 5
                 atk_hp = attacker_hp_udp
                 hp_need_heal = udp_fresh and atk_hp < attacker_hp_threshold
                 if not (m == "노파티" and hp_need_heal):
                     fix_mode_keys(['2', 'X', '1'], 0.45); attacker_poisoned = False; log_event('🟢 격수 독해독'); continue
-            if chk_party_poison and chk_party_poison.get() and (now - last_party_cure >= 0.5):
+            if not _typing_now and chk_party_poison and chk_party_poison.get() and (now - last_party_cure >= 0.5):
                 party_flags = party_mode_flags if m == "파티" else selected_party_flags
                 cure_pi = -1; cure_tx = 0; cure_ty = 0
                 for pi in range(1, 8):
@@ -2558,8 +2558,8 @@ def expert_logic():
                         fix_mode_keys(['2', 'X', '1'], 0.45)
                     last_party_cure = now; log_event(f'🟢 파티해독 P{cure_pi + 1}'); continue
 
-            # 버프 (F1/F2/F3 × F5~F12 그리드)
-            if chk_buff_on and chk_buff_on.get() and (now - last_buff_global >= 1.0) and (now - last_buff_seq >= BUFF_SEQ_GAP):
+            # 버프 (F1/F2/F3 × F5~F12 그리드) — 타이핑 중엔 대기(생명과 무관)
+            if not _typing_now and chk_buff_on and chk_buff_on.get() and (now - last_buff_global >= 1.0) and (now - last_buff_seq >= BUFF_SEQ_GAP):
                 buff_cast = False
                 for hb in BUFF_HOTBARS:
                     for slot, cb, iv in _buff_cfg.get(hb, []):
