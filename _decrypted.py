@@ -472,6 +472,19 @@ last_buff_seq = 0
 last_loot_sent_time = 0
 loot_interval = 5.0
 debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0}
+
+# ── 채팅 타이핑 감지 (자힐 등이 채팅 중 focus_lineage_window로 게임에 힐 난사하는 것 방지) ──
+last_typing_time = 0.0
+TYPING_PAUSE_SEC = 1.5   # 마지막 타이핑 이후 이만큼은 자힐/버프/줍기/해독 등 일반동작 일시정지 (위기베르는 예외, 계속 보호됨)
+_TYPING_IGNORE_KEYS = {f"f{i}" for i in range(1, 13)}   # 뚱힐러 매크로는 F1~F12만 보냄 — 이건 타이핑으로 안 침(오탐 방지)
+def _on_any_keypress(e):
+    global last_typing_time
+    try:
+        name = (getattr(e, "name", "") or "").lower()
+        if name in _TYPING_IGNORE_KEYS: return
+        last_typing_time = time.time()
+    except Exception:
+        pass
 current_f9_prob = 0.3
 last_self_heal = 0
 last_party_heal = 0
@@ -1941,8 +1954,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-26 23:50"
+PATCH_UPDATED_AT = "2026-07-27 00:10"
 LATEST_PATCH = [
+    "💬 채팅 중 자힐 난사 방지 — 타이핑(문자/숫자키) 감지 시 1.5초간 자힐·버프·줍기·해독 등 일반동작 일시정지. focus_lineage_window가 채팅 중 게임으로 포커스를 뺏어가며 힐이 계속 들어가던 문제 해결. 위기베르는 예외 없이 항상 계속 보호됨. 뚱힐러 매크로 키(F1~F12)는 타이핑으로 안 침(오탐 방지)",
     "⌨️ Insert/Home/PageUp 먹통 수정 — Insert(시작)가 아두이노연결·인증확인(네트워크)을 키보드 후킹 콜백 안에서 직접 처리해서, 느릴 때 Windows가 후킹 자체를 끊어버려 세 키가 전부 안 먹히던 문제. 이제 후킹은 즉시 반환하고 실제 처리는 백그라운드로 분리 + 연타해도 중복연결 안 되게 처리중 가드 추가",
     "🛡️ 위기베르 독 오발동 수정 — 위기베르 %계산의 초록(독) 판정 기준이 독 감지 기준보다 빡빡해서, 독 걸리면 피가 가득해도 채움으로 안 잡혀 귀환하던 문제. 두 기준을 동일하게 통일",
     "📋 실시간 로그창 표시 수정 — 위기베르 등으로 정지된 순간 running이 바로 꺼져서 하단 로그창에 안 뜨던 문제, 정지 여부와 무관하게 항상 표시",
@@ -2480,6 +2494,13 @@ def expert_logic():
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
                     focus_lineage_window()
                     ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
+
+            # 채팅 등 실제 타이핑 중엔 자힐·버프·줍기·해독 등 일반동작 일시정지.
+            # 위기베르는 위에서 이미 처리해서 타이핑 중에도 계속 보호됨.
+            # (타이핑 중 focus_lineage_window()가 게임으로 포커스를 뺏어가면서 힐키가
+            #  채팅창이 아니라 게임으로 계속 들어가 힐 난사처럼 보이던 문제 방지)
+            if time.time() - last_typing_time < TYPING_PAUSE_SEC:
+                time.sleep(0.02); continue
 
             # 줍기
             if chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
@@ -3169,6 +3190,7 @@ def toggle_gui(e=None):
     if is_gui_hidden: root.deiconify(); is_gui_hidden = False
     else: root.withdraw(); is_gui_hidden = True
 
+keyboard.on_press(_on_any_keypress)   # 채팅 타이핑 감지용 — F1~F12 제외, 콜백은 시간기록만 하고 즉시 반환(후킹 안전)
 keyboard.on_release_key('delete', toggle_gui) 
 keyboard.on_release_key('space', on_space_save) 
 keyboard.on_release_key('home', on_caps_lock)
