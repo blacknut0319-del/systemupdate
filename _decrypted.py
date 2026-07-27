@@ -218,6 +218,20 @@ def cast_buff(hb_label, slot_label):
         execute_keys([hb, sk, "1"], 0.5)
 
 
+def mna_potion_keys():
+    """엠약 위치(핫바+슬롯)를 UI에서 바꿀 수 있게 — 예전엔 F2+F8로 고정이었는데,
+    F1의 F8 슬롯에 귀환주문서가 있는 경우 핫바전환 타이밍이 어긋나면 그게 눌려서
+    엠약 대신 베르(귀환)가 나가는 사고가 있었음. 엠약을 F1 슬롯이나 다른 자리로
+    옮겨두면 핫바전환 자체가 없어져서(F1) 이 사고가 원천적으로 안 생김."""
+    hb_label = mna_hotbar_var.get() if mna_hotbar_var else MNA_HOTBAR
+    slot_label = mna_slot_var.get() if mna_slot_var else MNA_SLOT
+    hb = hb_label.replace("F", "")
+    sk = BUFF_SLOT_KEYS.get(slot_label, "8")
+    if hb == "1":
+        return [sk]
+    return [hb, sk, "1"]
+
+
 def buff_interval_jitter(base_sec):
     """설정 초 ± 랜덤 (기계적 1200초 고정 방지)."""
     base = max(5, int(base_sec))
@@ -293,6 +307,10 @@ danger_hp_threshold = 20
 MNA_ROI = (0,0,0,0)
 MNA_100_REF = None
 mna_threshold = 30
+MNA_HOTBAR = "F2"   # 엠약이 실제로 있는 핫바(F1/F2/F3) — UI에서 바꿀 수 있음
+MNA_SLOT = "F8"     # 엠약이 실제로 있는 슬롯(F5~F12) — 기본값은 예전 하드코딩(F2+F8)과 동일
+mna_hotbar_var = None
+mna_slot_var = None
 strong_heal_pct = 30
 chk_strong_heal = None
 last_mna_potion = 0
@@ -584,7 +602,7 @@ def load_hidden_config():
     global saved_expire_start, saved_expire_days
     global saved_party_flags, saved_party_mode_flags
     global SELF_HP_ROI, SELF_HP_100_REF, DANGER_HP_ROI, DANGER_HP_100_REF
-    global MNA_ROI, MNA_100_REF, mna_threshold
+    global MNA_ROI, MNA_100_REF, mna_threshold, MNA_HOTBAR, MNA_SLOT
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
     global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna
@@ -674,6 +692,8 @@ def load_hidden_config():
                 if key == "MNA_ROI_Y2": mna_roi_vals[3] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
                 if key == "MNA_100_REF": MNA_100_REF = int(val_str) if val_str.lstrip('-').isdigit() else None; continue
                 if key == "MNA_THRESHOLD": mna_threshold = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
+                if key == "MNA_HOTBAR": MNA_HOTBAR = val_str if val_str in BUFF_HOTBARS else "F2"; continue
+                if key == "MNA_SLOT": MNA_SLOT = val_str if val_str in BUFF_SLOT_LABELS else "F8"; continue
                 if key == "STRONG_HEAL_PCT": strong_heal_pct = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
                 if key == "CHK_SELF_HEAL": saved_chk_self_heal = val_str; continue
                 if key == "CHK_DANGER": saved_chk_danger = val_str; continue
@@ -787,6 +807,9 @@ def save_hidden_config(pwd_to_save):
             f.write(f"MNA_ROI_X1={MNA_ROI[0]}\nMNA_ROI_Y1={MNA_ROI[1]}\nMNA_ROI_X2={MNA_ROI[2]}\nMNA_ROI_Y2={MNA_ROI[3]}\n")
             if MNA_100_REF is not None: f.write(f"MNA_100_REF={MNA_100_REF}\n")
             f.write(f"MNA_THRESHOLD={mna_threshold}\n")
+            cur_mna_hb = mna_hotbar_var.get() if ('mna_hotbar_var' in globals() and mna_hotbar_var) else MNA_HOTBAR
+            cur_mna_slot = mna_slot_var.get() if ('mna_slot_var' in globals() and mna_slot_var) else MNA_SLOT
+            f.write(f"MNA_HOTBAR={cur_mna_hb}\nMNA_SLOT={cur_mna_slot}\n")
             f.write(f"STRONG_HEAL_PCT={strong_heal_pct}\n")
             def _sw01(var, fallback):
                 if var is not None:
@@ -1954,8 +1977,11 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-27 00:20"
+PATCH_UPDATED_AT = "2026-07-27 22:00"
 LATEST_PATCH = [
+    "💙 엠약 위치 커스텀 — 핫바/슬롯을 UI에서 직접 지정 가능(기본 F2+F8 유지). F1 슬롯에 두면 핫바전환 자체가 없어져서, 전환 타이밍이 어긋나 다른 슬롯(예: 귀환주문서)이 잘못 눌리는 사고를 원천 차단",
+    "📡 UDP 원격명령(Insert/Home/PageUp/F4 등) 수신 시 어느 IP에서 왔는지 로그에 남김 — 원인모를 정지/멍때림 추적용",
+    "⏰ 예약종료 자동 베르+정지 시 로그에 표시 — 위험베르와 구분 안 되던 문제",
     "💬 채팅 중 일시정지 범위 수정 — 자힐·파티힐은 생명과 직결이라 채팅 중에도 절대 안 멈추게 원복(이전 패치가 이것까지 막아서 위험했음). 버프·줍기·해독·마나물약처럼 안 죽는 동작만 타이핑 중 1.5초 대기. 위기베르는 항상 예외로 계속 보호됨",
     "💬 채팅 중 자힐 난사 방지 — 타이핑(문자/숫자키) 감지 시 일반동작 일시정지. 뚱힐러 매크로 키(F1~F12)는 타이핑으로 안 침(오탐 방지)",
     "⌨️ Insert/Home/PageUp 먹통 수정 — Insert(시작)가 아두이노연결·인증확인(네트워크)을 키보드 후킹 콜백 안에서 직접 처리해서, 느릴 때 Windows가 후킹 자체를 끊어버려 세 키가 전부 안 먹히던 문제. 이제 후킹은 즉시 반환하고 실제 처리는 백그라운드로 분리 + 연타해도 중복연결 안 되게 처리중 가드 추가",
@@ -2297,6 +2323,7 @@ def reserve_shutdown_worker():
     while timer_thread_active:
         if shutdown_time is not None:
             if time.time() >= shutdown_time:
+                log_event("⏰ 예약종료 시간 도달 — 자동 베르+정지")   # 위험베르와 구분되게 반드시 로그에 남김
                 if ser and ser.is_open:
                     try: ser.write(b'C'); ser.flush()
                     except: pass
@@ -2494,7 +2521,8 @@ def expert_logic():
                 # 발동하는 쪽이 훨씬 중요하므로 즉시발동으로 원복.
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
                     focus_lineage_window()
-                    ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%)"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
+                    _cap = 'dx' if getattr(camera, '_dx_ok', False) else 'mss'   # 다음에 또 오작동하면 캡처백엔드까지 로그로 바로 확인 가능
+                    ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%, cap:{_cap})"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
             # 채팅 등 실제 타이핑 중엔 "생명과 무관한" 동작(버프·줍기·해독·마나물약)만 일시정지.
             # 자힐·파티힐(A/7)·위기베르는 절대 여기서 안 막음 — 채팅 중이라도 실제로
@@ -2509,7 +2537,7 @@ def expert_logic():
             if not _typing_now and chk_mna and chk_mna.get() and MNA_ROI[0] != 0 and (now - last_mna_potion >= 600):
                 mna_pct = roi_mna_pct(frame, MNA_ROI, MNA_100_REF)
                 if mna_pct < mna_threshold:
-                    execute_keys(['2', '8', '1'], 0.5); last_mna_potion = now
+                    execute_keys(mna_potion_keys(), 0.5); last_mna_potion = now
                     log_event(f"💙 마나물약 (MP:{mna_pct:.0f}%)")
                     continue
 
@@ -3025,6 +3053,25 @@ def update_mna_thr(*a):
     if loaded_pwd: save_hidden_config(loaded_pwd)
 mna_var.trace_add("write", update_mna_thr)
 
+# 엠약 위치(핫바+슬롯) — 잘못된 슬롯(예: F1의 F8=귀환주문서)이 실수로 눌리는 사고 방지용.
+# 실제 엠약이 있는 핫바/슬롯으로 맞춰두면 그 자리가 그대로 눌림.
+frame_mna_slot = ctk.CTkFrame(heal_body, fg_color="transparent")
+frame_mna_slot.pack(pady=(0,1), padx=2, fill='x')
+ctk.CTkLabel(frame_mna_slot, text="　위치:", text_color="#89b4fa", font=('Malgun Gothic', 9)).pack(side='left', padx=(4,0))
+mna_hotbar_var = ctk.StringVar(value=MNA_HOTBAR)
+mna_hotbar_combo = ctk.CTkComboBox(frame_mna_slot, values=BUFF_HOTBARS, variable=mna_hotbar_var, width=48, height=18, font=('Malgun Gothic', 9))
+mna_hotbar_combo.pack(side='left', padx=2)
+mna_slot_var = ctk.StringVar(value=MNA_SLOT)
+mna_slot_combo = ctk.CTkComboBox(frame_mna_slot, values=BUFF_SLOT_LABELS, variable=mna_slot_var, width=56, height=18, font=('Malgun Gothic', 9))
+mna_slot_combo.pack(side='left', padx=2)
+def update_mna_slot(*a):
+    global MNA_HOTBAR, MNA_SLOT
+    MNA_HOTBAR = mna_hotbar_var.get(); MNA_SLOT = mna_slot_var.get()
+    log_event(f"💙 엠약 위치 변경 → {MNA_HOTBAR}+{MNA_SLOT}")
+    if loaded_pwd: save_hidden_config(loaded_pwd)
+mna_hotbar_combo.configure(command=update_mna_slot)
+mna_slot_combo.configure(command=update_mna_slot)
+
 
 
 frame_timer_mini = ctk.CTkFrame(root, fg_color="#313244")
@@ -3152,6 +3199,10 @@ def udp_listener():
                 if data in UDP_CMD_MAP:
                     func_name = UDP_CMD_MAP[data]
                     f = globals().get(func_name)
+                    # 원격 토글(특히 'I'=시작/정지)은 어디서 왔는지 몰라 멍때림 버그 원인 추적이 안 됐음 —
+                    # 발신 IP까지 로그에 남겨서 다음에 또 그러면 바로 확인 가능하게
+                    try: log_event(f"📡 UDP원격명령 '{data.decode()}' ({func_name}) from {addr[0] if addr else '?'}")
+                    except Exception: pass
                     if f: root.after(0, f)
                 elif data in (b'1',b'2',b'3',b'4',b'5',b'6',b'7',b'8'):
                     n = int(data.decode())
