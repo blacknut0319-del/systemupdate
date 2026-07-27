@@ -219,9 +219,9 @@ def cast_buff(hb_label, slot_label):
 
 
 def mna_potion_keys():
-    """엠약 위치(핫바+슬롯)를 UI에서 바꿀 수 있게 — 예전엔 F2+F8로 고정이었는데,
+    """파랭이 위치(핫바+슬롯)를 UI에서 바꿀 수 있게 — 예전엔 F2+F8로 고정이었는데,
     F1의 F8 슬롯에 귀환주문서가 있는 경우 핫바전환 타이밍이 어긋나면 그게 눌려서
-    엠약 대신 베르(귀환)가 나가는 사고가 있었음. 엠약을 F1 슬롯이나 다른 자리로
+    파랭이 대신 베르(귀환)가 나가는 사고가 있었음. 파랭이를 F1 슬롯이나 다른 자리로
     옮겨두면 핫바전환 자체가 없어져서(F1) 이 사고가 원천적으로 안 생김."""
     hb_label = mna_hotbar_var.get() if mna_hotbar_var else MNA_HOTBAR
     slot_label = mna_slot_var.get() if mna_slot_var else MNA_SLOT
@@ -307,8 +307,8 @@ danger_hp_threshold = 20
 MNA_ROI = (0,0,0,0)
 MNA_100_REF = None
 mna_threshold = 30
-MNA_HOTBAR = "F2"   # 엠약이 실제로 있는 핫바(F1/F2/F3) — UI에서 바꿀 수 있음
-MNA_SLOT = "F8"     # 엠약이 실제로 있는 슬롯(F5~F12) — 기본값은 예전 하드코딩(F2+F8)과 동일
+MNA_HOTBAR = "F2"   # 파랭이가 실제로 있는 핫바(F1/F2/F3) — UI에서 바꿀 수 있음
+MNA_SLOT = "F8"     # 파랭이가 실제로 있는 슬롯(F5~F12) — 기본값은 예전 하드코딩(F2+F8)과 동일
 mna_hotbar_var = None
 mna_slot_var = None
 strong_heal_pct = 30
@@ -1223,7 +1223,7 @@ def open_guide_panel():
     add_d("독 해독", "본인 독 걸리면 엔줄 자동 섭취 (두번째단축키 F9)")
     add_d("격수 해독", "격수 독 걸리면 큐어포이즌 자동 시전 (두번째단축키 F10)")
     add_d("파티 해독", "파티원 HP바 초록(독)이면 F2→F10→파티창클릭→F1")
-    add_d("파란물약", "두번째단축키 F8 · 엠통% 이하 시 10분마다 자동 복용")
+    add_d("파랭이", "지정한 핫바+슬롯(기본 F2+F8) · 엠통% 이하 시 10분마다 자동 복용")
     add_d("확률(%)", "0%: 물약만 / 100%: 힐만 / 그 외: 섞어서 확률 시전")
     add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐")
     add_d("위기% 슬라이더", "위험한 피통 이하일 때 위험베르 자동 사용")
@@ -1977,17 +1977,18 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-27 22:00"
+PATCH_UPDATED_AT = "2026-07-27 23:30"
 LATEST_PATCH = [
-    "💙 엠약 위치 커스텀 — 핫바/슬롯을 UI에서 직접 지정 가능(기본 F2+F8 유지). F1 슬롯에 두면 핫바전환 자체가 없어져서, 전환 타이밍이 어긋나 다른 슬롯(예: 귀환주문서)이 잘못 눌리는 사고를 원천 차단",
+    "💙 \"엠약\" 명칭 → \"파랭이\"로 변경 (UI 버튼·슬라이더·로그·가이드 전부)",
+    "💙 파랭이 위치 커스텀 — 핫바/슬롯을 UI에서 직접 지정 가능(기본 F2+F8 유지). F1 슬롯에 두면 핫바전환 자체가 없어져서, 전환 타이밍이 어긋나 다른 슬롯(예: 귀환주문서)이 잘못 눌리는 사고를 원천 차단",
     "📡 UDP 원격명령(Insert/Home/PageUp/F4 등) 수신 시 어느 IP에서 왔는지 로그에 남김 — 원인모를 정지/멍때림 추적용",
     "⏰ 예약종료 자동 베르+정지 시 로그에 표시 — 위험베르와 구분 안 되던 문제",
-    "💬 채팅 중 일시정지 범위 수정 — 자힐·파티힐은 생명과 직결이라 채팅 중에도 절대 안 멈추게 원복(이전 패치가 이것까지 막아서 위험했음). 버프·줍기·해독·마나물약처럼 안 죽는 동작만 타이핑 중 1.5초 대기. 위기베르는 항상 예외로 계속 보호됨",
+    "💬 채팅 중 일시정지 범위 수정 — 자힐·파티힐은 생명과 직결이라 채팅 중에도 절대 안 멈추게 원복(이전 패치가 이것까지 막아서 위험했음). 버프·줍기·해독·파랭이처럼 안 죽는 동작만 타이핑 중 1.5초 대기. 위기베르는 항상 예외로 계속 보호됨",
     "💬 채팅 중 자힐 난사 방지 — 타이핑(문자/숫자키) 감지 시 일반동작 일시정지. 뚱힐러 매크로 키(F1~F12)는 타이핑으로 안 침(오탐 방지)",
     "⌨️ Insert/Home/PageUp 먹통 수정 — Insert(시작)가 아두이노연결·인증확인(네트워크)을 키보드 후킹 콜백 안에서 직접 처리해서, 느릴 때 Windows가 후킹 자체를 끊어버려 세 키가 전부 안 먹히던 문제. 이제 후킹은 즉시 반환하고 실제 처리는 백그라운드로 분리 + 연타해도 중복연결 안 되게 처리중 가드 추가",
     "🛡️ 위기베르 독 오발동 수정 — 위기베르 %계산의 초록(독) 판정 기준이 독 감지 기준보다 빡빡해서, 독 걸리면 피가 가득해도 채움으로 안 잡혀 귀환하던 문제. 두 기준을 동일하게 통일",
     "📋 실시간 로그창 표시 수정 — 위기베르 등으로 정지된 순간 running이 바로 꺼져서 하단 로그창에 안 뜨던 문제, 정지 여부와 무관하게 항상 표시",
-    "💾 힐·물약 체크 저장 — 자힐/위기/상위힐/격수/엠약 ON·OFF를 껏다 켜도 유지. 토글 즉시 license.dat에 저장",
+    "💾 힐·물약 체크 저장 — 자힐/위기/상위힐/격수/파랭이 ON·OFF를 껏다 켜도 유지. 토글 즉시 license.dat에 저장",
     "🟢 파티 독해독 — F2→F10→클릭→F1 순서로 수정 (큐어포이즌 후 파티원 클릭으로 대상지정)",
     "🎮 리니지클래식 창 자동 포커스 — 힐/키 전에 'Lineage Classic' 창만 앞으로. 뚱힐러 폼은 topmost로 위에 유지(뒤로 안 넘어감). 포커스 빠져서 키가 안 먹히던 문제 완화",
     "🩹 파티창 깜빡임 무시 — 한 명 죽는 직전 창이 깜빡여도 직전 HP값을 2초간 유지해서, 그 때문에 나머지 파티원 힐까지 같이 멈추던 문제 완화. 2초 넘게 바 없으면 사망/빈칸으로 처리",
@@ -2524,7 +2525,7 @@ def expert_logic():
                     _cap = 'dx' if getattr(camera, '_dx_ok', False) else 'mss'   # 다음에 또 오작동하면 캡처백엔드까지 로그로 바로 확인 가능
                     ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%, cap:{_cap})"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
-            # 채팅 등 실제 타이핑 중엔 "생명과 무관한" 동작(버프·줍기·해독·마나물약)만 일시정지.
+            # 채팅 등 실제 타이핑 중엔 "생명과 무관한" 동작(버프·줍기·해독·파랭이)만 일시정지.
             # 자힐·파티힐(A/7)·위기베르는 절대 여기서 안 막음 — 채팅 중이라도 실제로
             # 힐이 필요하면 그대로 나가야 함(안 그러면 채팅 중 맞아죽을 위험).
             _typing_now = (time.time() - last_typing_time) < TYPING_PAUSE_SEC
@@ -2533,12 +2534,12 @@ def expert_logic():
             if not _typing_now and chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
                 last_loot_sent_time = now; ser.write(b'4'); last_loot = now; loot_interval = random.uniform(4.0, 7.0); log_event('🎒 줍기') 
 
-            # 마나 물약
+            # 파랭이 (마나 물약)
             if not _typing_now and chk_mna and chk_mna.get() and MNA_ROI[0] != 0 and (now - last_mna_potion >= 600):
                 mna_pct = roi_mna_pct(frame, MNA_ROI, MNA_100_REF)
                 if mna_pct < mna_threshold:
                     execute_keys(mna_potion_keys(), 0.5); last_mna_potion = now
-                    log_event(f"💙 마나물약 (MP:{mna_pct:.0f}%)")
+                    log_event(f"💙 파랭이 (MP:{mna_pct:.0f}%)")
                     continue
 
             m = mode_var.get() if mode_var else "파티"
@@ -3038,10 +3039,10 @@ chk_mna = ctk.BooleanVar(value=saved_chk_mna in ("1", "true", "True"))
 frame_mna = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_mna.pack(pady=1, padx=2, fill='x')
 def _on_mna_sw():
-    log_event(f"💙 엠약 {'ON' if chk_mna.get() else 'OFF'}")
+    log_event(f"💙 파랭이 {'ON' if chk_mna.get() else 'OFF'}")
     try: save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception: pass
-RoundedToggle(frame_mna, "💙 엠약", "#58a6ff", var=chk_mna, cmd=_on_mna_sw).pack(side='left', padx=4)
+RoundedToggle(frame_mna, "💙 파랭이", "#58a6ff", var=chk_mna, cmd=_on_mna_sw).pack(side='left', padx=4)
 mna_var = ctk.IntVar(value=mna_threshold)
 mna_sld = ctk.CTkSlider(frame_mna, from_=10, to=80, variable=mna_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#89b4fa")
 mna_sld.pack(side='left', padx=2)
@@ -3053,8 +3054,8 @@ def update_mna_thr(*a):
     if loaded_pwd: save_hidden_config(loaded_pwd)
 mna_var.trace_add("write", update_mna_thr)
 
-# 엠약 위치(핫바+슬롯) — 잘못된 슬롯(예: F1의 F8=귀환주문서)이 실수로 눌리는 사고 방지용.
-# 실제 엠약이 있는 핫바/슬롯으로 맞춰두면 그 자리가 그대로 눌림.
+# 파랭이 위치(핫바+슬롯) — 잘못된 슬롯(예: F1의 F8=귀환주문서)이 실수로 눌리는 사고 방지용.
+# 실제 파랭이가 있는 핫바/슬롯으로 맞춰두면 그 자리가 그대로 눌림.
 frame_mna_slot = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_mna_slot.pack(pady=(0,1), padx=2, fill='x')
 ctk.CTkLabel(frame_mna_slot, text="　위치:", text_color="#89b4fa", font=('Malgun Gothic', 9)).pack(side='left', padx=(4,0))
@@ -3067,7 +3068,7 @@ mna_slot_combo.pack(side='left', padx=2)
 def update_mna_slot(*a):
     global MNA_HOTBAR, MNA_SLOT
     MNA_HOTBAR = mna_hotbar_var.get(); MNA_SLOT = mna_slot_var.get()
-    log_event(f"💙 엠약 위치 변경 → {MNA_HOTBAR}+{MNA_SLOT}")
+    log_event(f"💙 파랭이 위치 변경 → {MNA_HOTBAR}+{MNA_SLOT}")
     if loaded_pwd: save_hidden_config(loaded_pwd)
 mna_hotbar_combo.configure(command=update_mna_slot)
 mna_slot_combo.configure(command=update_mna_slot)
