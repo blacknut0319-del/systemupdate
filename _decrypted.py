@@ -1988,8 +1988,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-28 18:15"
+PATCH_UPDATED_AT = "2026-07-28 18:20"
 LATEST_PATCH = [
+    "🔌 펌업 모듈 강제갱신 — 옛 flash_arduino 캐시 때문에 ask_manual_reset 오류나던 문제 수정",
     "🔌 펌업 수정 — 로그상 자동리셋이 부트로더(2341:0036)로 안 들어감. 리셋버튼 2번 수동진입 후 업로드로 변경",
     "🔌 펌업 실패 시 바탕화면 '뚱힐러_펌업로그.txt'에 COM/명령/avrdude 전체 출력 저장 — 원인 진단용",
     "✨ 버프 자동 OFF 저장 수정 — 체크 풀어도 껏다 키면 다시 켜지던 버그(OFF인데 예전 ON값을 다시 저장하던 문제)",
@@ -2464,45 +2465,89 @@ def _set_hw_label(text, color, gen):
         except Exception: pass
 
 def _load_flash_module():
-    """flash_arduino.py 로드 — 로컬(개발폴더) 우선, 없으면 GitHub에서 TEMP로 받아 import.
-    TEMP 캐시가 옛 버전이면 펌업 포트검색이 계속 실패할 수 있어, TEMP는 매번 GitHub에서 갱신."""
+    """flash_arduino.py 로드.
+    끝 사용자 PC에 옛 TEMP/Desktop 파일이 남아 ask_manual_reset 없는
+    구버전을 쓰던 문제가 있어서, GitHub에서 캐시무효화로 받은 뒤 로드.
+    개발용 Desktop 폴더는 'ask_manual_reset' 있는 최신일 때만 우선."""
     import importlib.util
     import tempfile
-    cands = []
-    try:
-        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py"))
-    except Exception:
-        pass
-    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py"))
-    for path in cands:
-        if os.path.isfile(path):
-            try:
-                spec = importlib.util.spec_from_file_location("ddong_flash_arduino", path)
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                if hasattr(mod, "flash"):
-                    return mod
-            except Exception:
-                continue
-    # GitHub에서 받아 TEMP에 저장 (항상 덮어써서 옛 캐시 방지)
-    tmp = os.path.join(tempfile.gettempdir(), "ddong_firmware", "flash_arduino.py")
+    import inspect
+
+    def _load_path(path):
+        try:
+            spec = importlib.util.spec_from_file_location("ddong_flash_arduino", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            if hasattr(mod, "flash"):
+                return mod
+        except Exception:
+            return None
+        return None
+
+    def _is_new_enough(mod):
+        try:
+            return "ask_manual_reset" in inspect.signature(mod.flash).parameters
+        except Exception:
+            return False
+
+    tmp_dir = os.path.join(tempfile.gettempdir(), "ddong_firmware")
+    tmp = os.path.join(tmp_dir, "flash_arduino.py")
+    desk = os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py")
+
+    # GitHub 강제 갱신 (CDN/로컬 캐시 무효)
     try:
         import ssl
         ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
-        url = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/flash_arduino.py"
-        req = urllib.request.Request(url, headers={"User-Agent": "ddong"})
+        url = (
+            "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/flash_arduino.py"
+            f"?t={int(time.time())}"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "ddong", "Cache-Control": "no-cache"})
         data = urllib.request.urlopen(req, timeout=30, context=ctx).read()
-        os.makedirs(os.path.dirname(tmp), exist_ok=True)
-        with open(tmp, "wb") as f:
-            f.write(data)
-        spec = importlib.util.spec_from_file_location("ddong_flash_arduino", tmp)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        if hasattr(mod, "flash"):
+        if len(data) > 500 and b"def flash" in data:
+            os.makedirs(tmp_dir, exist_ok=True)
+            with open(tmp, "wb") as f:
+                f.write(data)
+    except Exception:
+        pass
+
+    # Desktop이 최신(수동리셋 지원)이면 개발용으로 우선
+    if os.path.isfile(desk):
+        mod = _load_path(desk)
+        if mod and _is_new_enough(mod):
             return mod
+
+    if os.path.isfile(tmp):
+        mod = _load_path(tmp)
+        if mod:
+            return mod
+
+    # 최후: __file__ 옆
+    try:
+        local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py")
+        if os.path.isfile(local):
+            mod = _load_path(local)
+            if mod:
+                return mod
     except Exception:
         pass
     return None
+
+def _call_flash(mod, callback, port, ask_manual_reset=None):
+    """flash() 시그니처에 맞게 인자 전달 — 구버전 모듈이어도 TypeError 안 나게."""
+    import inspect
+    kwargs = {}
+    try:
+        params = inspect.signature(mod.flash).parameters
+    except Exception:
+        params = {}
+    if "callback" in params:
+        kwargs["callback"] = callback
+    if "port" in params:
+        kwargs["port"] = port
+    if "ask_manual_reset" in params and ask_manual_reset is not None:
+        kwargs["ask_manual_reset"] = ask_manual_reset
+    return mod.flash(**kwargs)
 
 def probe_arduino_fw(ser_obj=None, timeout=2.5):
     """시리얼로 'V'를 보내 펌웨어 식별 문자열을 읽음.
@@ -2700,7 +2745,8 @@ def on_fw_flash_click():
                     ev.wait(timeout=120)
                     return box["ok"]
 
-                ret = mod.flash(
+                ret = _call_flash(
+                    mod,
                     callback=_progress,
                     port=use_port or None,
                     ask_manual_reset=_ask_manual_reset,
