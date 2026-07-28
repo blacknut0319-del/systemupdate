@@ -779,7 +779,15 @@ def save_hidden_config(pwd_to_save):
                 f.write(f"{key}={value}\n")
             for key, value in [("V_BL", cur_v_bl), ("V_SH", cur_v_sh), ("V_BLU", cur_v_blu), ("V_F10", cur_v_f10), ("V_F11", cur_v_f11)]:
                 f.write(f"{key}={value}\n")
-            cur_buff_on = "1" if (chk_buff_on and chk_buff_on.get()) else saved_buff_on
+            # 버프 자동 — OFF일 때 saved_buff_on으로 폴백하면 꺼도 계속 1로 저장되던 버그 수정
+            if chk_buff_on is not None:
+                try:
+                    cur_buff_on = "1" if chk_buff_on.get() else "0"
+                except Exception:
+                    cur_buff_on = "1" if str(saved_buff_on).strip() in ("1", "true", "True") else "0"
+            else:
+                cur_buff_on = "1" if str(saved_buff_on).strip() in ("1", "true", "True") else "0"
+            globals()["saved_buff_on"] = cur_buff_on
             f.write(f"BUFF_ON={cur_buff_on}\n")
             for hb in BUFF_HOTBARS:
                 for slot in BUFF_SLOT_LABELS:
@@ -1980,8 +1988,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-28 17:50"
+PATCH_UPDATED_AT = "2026-07-28 18:05"
 LATEST_PATCH = [
+    "✨ 버프 자동 OFF 저장 수정 — 체크 풀어도 껏다 키면 다시 켜지던 버그(OFF인데 예전 ON값을 다시 저장하던 문제)",
     "🔌 펌업 [확인] — 뚱USB에 'V' 조회 → DDONG-WDT 응답이면 워치독 펌 확인. 펌업 직후에도 자동 확인",
     "🔌 펌업 COM 자동인식 수정 — 연결에 쓰는 포트/검색방식과 통일. '연결은 되는데 펌업만 포트 못찾음' 해결",
     "🔌 제어판 [펌업] 버튼 — 뚱USB(아두이노)에 최신 펌웨어를 한 번에 업로드. 멈춤(hang) 시 키 눌린 채 고정되던 문제용 워치독(4초 자동재부팅) 포함",
@@ -3197,7 +3206,14 @@ RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_
 coll_buff = Collapsible(root, "버프", start_open=False)
 coll_buff.pack(pady=1, padx=2, fill="x")
 buff_body = coll_buff.body
-RoundedToggle(buff_body, "버프 자동", "#a371f7", var=chk_buff_on, cmd=lambda: log_event(f"✨ 버프 {'ON' if chk_buff_on.get() else 'OFF'}")).pack(anchor="w", padx=4, pady=(4, 2))
+def _on_buff_on():
+    log_event(f"✨ 버프 {'ON' if chk_buff_on.get() else 'OFF'}")
+    try:
+        globals()["saved_buff_on"] = "1" if chk_buff_on.get() else "0"
+        save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception:
+        pass
+RoundedToggle(buff_body, "버프 자동", "#a371f7", var=chk_buff_on, cmd=_on_buff_on).pack(anchor="w", padx=4, pady=(4, 2))
 
 buff_hotbar_var = tk.StringVar(value="F1")
 buff_bar_row = ctk.CTkFrame(buff_body, fg_color="transparent")
