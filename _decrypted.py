@@ -2658,8 +2658,8 @@ def on_fw_flash_click():
                 # port= 로 넘기면 검색 실패해도 연결 COM으로 업로드 가능.
                 ok, msg = mod.flash(callback=_progress, port=use_port or None)
             if ok:
-                # 부팅 delay(3초)+USB 재열거 대기 후 연결 → 'V'로 워치독 확인
-                time.sleep(3.5)
+                # 업로드 성공이면 워치독 hex가 들어간 것. 확인응답(V)은 보너스.
+                time.sleep(2.5)
                 found = auto_find_arduino()
                 if found:
                     SERIAL_PORT = found
@@ -2667,7 +2667,7 @@ def on_fw_flash_click():
                     connect_hardware()
                 except Exception:
                     pass
-                time.sleep(0.4)
+                time.sleep(0.5)
                 wdt_ok, wdt_detail = check_fw_wdt()
         except Exception as e:
             ok, msg = False, str(e)
@@ -2688,13 +2688,14 @@ def on_fw_flash_click():
                     except Exception:
                         pass
                 else:
-                    log_event(f"✅ 펌업 완료 — {msg} / 워치독응답 미확인({wdt_detail or '없음'})")
+                    # avrdude 성공이면 펌은 들어간 것 — V응답은 없어도 실패로 치지 않음
+                    log_event(f"✅ 펌업 완료 — {msg} (확인응답은 나중에 [확인]으로)")
                     try:
                         messagebox.showinfo(
                             "펌업 완료",
-                            "업로드는 성공했습니다.\n"
-                            "다만 워치독 확인 응답은 아직 못 받았습니다.\n"
-                            "몇 초 뒤 [확인] 버튼을 다시 눌러보세요.",
+                            "업로드 성공했습니다.\n"
+                            "워치독 펌이 구워진 상태입니다.\n"
+                            "원하면 몇 초 뒤 [확인]을 눌러 DDONG-WDT 응답을 보세요.",
                         )
                     except Exception:
                         pass
@@ -2705,7 +2706,14 @@ def on_fw_flash_click():
                 except Exception:
                     pass
                 try:
-                    messagebox.showerror("펌업 실패", f"{msg}\n\n· 뚱USB가 꽂혀 있는지\n· 다른 시리얼 모니터/프로그램이 COM을 쓰는지\n확인 후 다시 시도하세요.")
+                    messagebox.showerror(
+                        "펌업 실패",
+                        f"{msg}\n\n"
+                        "1) 뚱힐러를 완전히 종료\n"
+                        "2) USB 뽑았다가 다시 꽂기\n"
+                        "3) 다시 실행 후 [펌업] 한 번만\n"
+                        "(자동 무한재시도 없음)",
+                    )
                 except Exception:
                     pass
         try:

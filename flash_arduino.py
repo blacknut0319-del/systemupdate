@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """아두이노 펌웨어 업로드 — Leonardo(ATmega32u4) + 번들 avrdude.
-COM 자동감지, 1200bps 부트로더 진입, GitHub에서 hex/avrdude 자동확보."""
+처음에 잘 되던 방식(짧게 대기 후 바로 업로드) + 타임아웃만 추가.
+확인(V) 기능과 무관 — hex만 구우면 됨."""
 from __future__ import annotations
 
 import os
@@ -8,6 +9,7 @@ import ssl
 import sys
 import time
 import tempfile
+import threading
 import subprocess
 import urllib.request
 
@@ -37,12 +39,11 @@ def _ssl_ctx():
 
 
 def firmware_candidates():
-    cands = [
+    return [
         os.path.join(HERE, "firmware"),
         os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "firmware"),
         os.path.join(tempfile.gettempdir(), "ddong_firmware"),
     ]
-    return cands
 
 
 def _has_tools(root):
@@ -54,7 +55,6 @@ def _has_tools(root):
 
 
 def ensure_firmware(callback=None):
-    """로컬 firmware 폴더 확보. 없으면 GitHub에서 TEMP로 받음."""
     for root in firmware_candidates():
         if _has_tools(root):
             return root
@@ -67,14 +67,12 @@ def ensure_firmware(callback=None):
             continue
         if callback:
             callback(5, f"다운로드: {os.path.basename(local)}")
-        url = f"{GH_RAW}/{urllib.request.quote(remote)}"
-        # quote breaks path slashes — build manually
-        url = f"{GH_RAW}/{remote}"
+        from urllib.parse import quote
+        parts = remote.split("/")
+        url = GH_RAW + "/" + "/".join(
+            quote(p, safe="") if any(ord(c) > 127 for c in p) else p for p in parts
+        )
         try:
-            # 한글 파일명 인코딩
-            from urllib.parse import quote
-            parts = remote.split("/")
-            url = GH_RAW + "/" + "/".join(quote(p, safe="") if any(ord(c) > 127 for c in p) else p for p in parts)
             req = urllib.request.Request(url, headers={"User-Agent": "ddong"})
             data = urllib.request.urlopen(req, timeout=60, context=ctx).read()
             if len(data) < 1000:
@@ -87,9 +85,7 @@ def ensure_firmware(callback=None):
 
 
 def find_arduino_ports():
-    """아두이노로 보이는 COM 포트 목록.
-    뚱힐러 auto_find_arduino()와 같은 판정(USB/직렬/VID)을 써서
-    '연결은 되는데 펌업만 포트 못 찾음'이 안 나오게 함."""
+    """뚱힐러 auto_find_arduino()와 같은 판정."""
     if list_ports is None:
         return []
     ports = list(list_ports.comports())
@@ -99,20 +95,17 @@ def find_arduino_ports():
         if dev and dev not in found:
             found.append(dev)
 
-    # 1) 우선순위: 알려진 VID (Logitech→Arduino 등 기존 로직과 동일)
     for p in ports:
         h = (p.hwid or "").upper()
         if "046D" in h and "C08B" in h:
             _add(p.device)
     for p in ports:
         h = (p.hwid or "").upper()
-        if "2341" in h or "2A03" in h or "1B4F" in h:  # Arduino / official / SparkFun
+        if "2341" in h or "2A03" in h or "1B4F" in h:
             _add(p.device)
-    # 2) 설명/제조사 — 연결에 쓰는 것과 동일하게 USB·직렬 포함
     for p in ports:
         d = f"{p.description or ''} {p.manufacturer or ''}"
         du = d.upper()
-        dl = d.lower()
         h = (p.hwid or "").lower()
         if (
             "CH340" in du
@@ -131,13 +124,10 @@ def find_arduino_ports():
 
 
 def find_arduino(preferred=None):
-    """preferred(이미 연결된 COM)가 살아있으면 그걸 최우선."""
     ports_now = {p.device for p in list_ports.comports()} if list_ports else set()
     if preferred and preferred in ports_now:
         return preferred
     ports = find_arduino_ports()
-    if preferred and preferred in ports:
-        return preferred
     return ports[0] if ports else None
 
 
@@ -148,69 +138,37 @@ def _ports_set():
 
 
 def trigger_leonardo_bootloader(port):
-    """Leonardo: 1200bps로 열었다 닫으면 부트로더 진입."""
+    """Leonardo: 1200bps open/close → 부트로더."""
     if serial is None:
         return
     try:
         s = serial.Serial(port, 1200)
-        s.dtr = False
-        s.close()
-    except Exception:
         try:
-            s = serial.Serial()
-            s.port = port
-            s.baudrate = 1200
             s.dtr = False
-            s.open()
-            s.close()
         except Exception:
             pass
-    time.sleep(0.5)
+        s.close()
+    except Exception:
+        pass
+    # 부트로더 창은 짧음 — 너무 오래 기다리면 이미 끝나서 업로드가 영원히 대기함
+    time.sleep(1.2)
 
 
-def wait_bootloader_port(old_port, old_ports, timeout=12.0, callback=None):
-    """부트로더 진입 후 COM 대기.
+def pick_upload_port(preferred, old_ports):
+    """새 COM이 떴으면 그걸, 아니면 원래 포트(처음에 성공하던 방식)."""
+    now = _ports_set()
+    added = [p for p in (now - old_ports) if p]
+    if added:
+        return added[0]
+    if preferred and preferred in now:
+        return preferred
+    return find_arduino(preferred=preferred) or preferred
 
-    중요: 리셋 직후에도 old_port가 잠깐 남아있을 수 있음.
-    그 상태에서 바로 리턴하면 앱 포트에 avrdude가 붙어서 35%에서 영원히 대기함.
-    → 포트가 한번 사라졌다가 다시 뜨거나, 새 COM이 생길 때까지 기다림.
-    """
-    t0 = time.time()
-    saw_disconnect = old_port not in _ports_set()
-    last_report = -1
-    while time.time() - t0 < timeout:
-        now = _ports_set()
-        elapsed = int(time.time() - t0)
-        if callback and elapsed != last_report:
-            last_report = elapsed
-            callback(28, f"부트로더 대기 중... {elapsed}s")
 
-        if old_port not in now:
-            saw_disconnect = True
-
-        added = [p for p in (now - old_ports) if p]
-        if added:
-            time.sleep(0.4)  # 부트로더 준비
-            return added[0]
-
-        # 같은 COM으로 다시 열거된 경우 — 반드시 한번 끊긴 뒤에만 인정
-        if saw_disconnect and old_port in now:
-            time.sleep(0.5)
-            return old_port
-
-        time.sleep(0.12)
-
-    # 타임아웃: 현재 잡히는 포트라도 반환 (재시도용)
+def _run_avrdude(cmd, callback=None, timeout_sec=25, pct_write=55, pct_verify=80):
+    """avrdude 1회. 응답 없으면 timeout_sec 후 강제 종료(무한대기 방지)."""
     if callback:
-        callback(30, "부트로더 대기 시간초과 — 현재 포트로 시도")
-    return find_arduino(preferred=old_port) or old_port
-
-
-def _run_avrdude(cmd, callback=None, timeout_sec=45, pct_write=55, pct_verify=80):
-    """avrdude 실행. 출력 없으면 멈춘 것처럼 보이므로 진행로그+강제 타임아웃."""
-    import threading
-    if callback:
-        callback(max(36, pct_write - 15), "avrdude 실행 중...")
+        callback(40, "avrdude 업로드 시작...")
     try:
         proc = subprocess.Popen(
             cmd,
@@ -238,13 +196,14 @@ def _run_avrdude(cmd, callback=None, timeout_sec=45, pct_write=55, pct_verify=80
                     continue
                 out_lines.append(line)
                 low = line.lower()
-                if callback:
-                    if "writing" in low or "reading" in low:
-                        callback(pct_write, line[:70])
-                    elif "verifying" in low:
-                        callback(pct_verify, "검증 중...")
-                    elif "error" in low or "not in sync" in low or "can't open" in low:
-                        callback(pct_write, line[:70])
+                if not callback:
+                    continue
+                if "writing" in low or "reading" in low:
+                    callback(pct_write, line[:70])
+                elif "verifying" in low:
+                    callback(pct_verify, "검증 중...")
+                elif "error" in low or "not in sync" in low:
+                    callback(50, line[:70])
         finally:
             done["v"] = True
 
@@ -259,18 +218,18 @@ def _run_avrdude(cmd, callback=None, timeout_sec=45, pct_write=55, pct_verify=80
                 except Exception:
                     pass
                 th.join(timeout=2)
-                return False, f"avrdude 응답없음({timeout_sec}초 타임아웃) — USB뽑았다가 다시 꽂고 재시도", out_lines
+                return False, f"{timeout_sec}초 타임아웃(부트로더 응답없음)", out_lines
             sec = int(elapsed)
             if callback and sec != last_beat and sec >= 1:
                 last_beat = sec
                 if not any("writing" in x.lower() for x in out_lines):
-                    callback(max(36, pct_write - 10), f"업로드 대기 중... {sec}s / {timeout_sec}s")
+                    callback(45, f"업로드 중... {sec}s")
             if proc.poll() is not None:
                 th.join(timeout=3)
                 break
-            time.sleep(0.2)
+            time.sleep(0.15)
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=3)
         except Exception:
             try:
                 proc.kill()
@@ -287,8 +246,20 @@ def _run_avrdude(cmd, callback=None, timeout_sec=45, pct_write=55, pct_verify=80
         return False, str(e), out_lines
 
 
+def _avrdude_cmd(avrdude, conf, hex_path, port):
+    return [
+        avrdude, "-C", conf,
+        "-c", "avr109",
+        "-p", "atmega32u4",
+        "-P", port,
+        "-b", "57600",
+        "-D",
+        "-U", f"flash:w:{hex_path}:i",
+    ]
+
+
 def flash(callback=None, port=None):
-    """아두이노에 펌웨어 업로드. callback(pct, msg). return (ok, msg)."""
+    """아두이노에 펌웨어 업로드. 성공하던 짧은 리셋+1~2회 시도만."""
     if serial is None or list_ports is None:
         return False, "pyserial 없음"
 
@@ -311,67 +282,33 @@ def flash(callback=None, port=None):
     if callback:
         callback(10, f"아두이노 발견: {com}")
 
-    old_ports = _ports_set()
-    if callback:
-        callback(20, "부트로더 진입 중(1200bps 리셋)...")
-    trigger_leonardo_bootloader(com)
-    boot_com = wait_bootloader_port(com, old_ports, callback=callback)
-    if callback:
-        callback(35, f"업로드 포트: {boot_com}")
-
-    # Leonardo / Micro: avr109 + atmega32u4 (-v 로 진행출력이 안 막히게)
-    cmd = [
-        avrdude, "-C", conf, "-v",
-        "-c", "avr109",
-        "-p", "atmega32u4",
-        "-P", boot_com,
-        "-b", "57600",
-        "-D",
-        "-U", f"flash:w:{hex_path}:i",
-    ]
-
-    ok1, detail1, lines1 = _run_avrdude(cmd, callback=callback, timeout_sec=45)
-    if ok1:
+    last_err = ""
+    for attempt in (1, 2):
         if callback:
-            callback(100, "업로드 완료!")
-        return True, "완료"
-
-    # 한 번 더: 포트 재탐색 후 Leonardo 재시도
-    if callback:
-        callback(38, "재시도: 부트로더 다시 진입...")
-    time.sleep(1.5)
-    com_retry = find_arduino(preferred=port) or com
-    old_ports = _ports_set()
-    trigger_leonardo_bootloader(com_retry)
-    boot_com2 = wait_bootloader_port(com_retry, old_ports, callback=callback)
-    cmd[cmd.index("-P") + 1] = boot_com2
-    ok1b, detail1b, lines1b = _run_avrdude(cmd, callback=callback, timeout_sec=45)
-    if ok1b:
+            callback(20, f"부트로더 진입 ({attempt}/2)...")
+        old_ports = _ports_set()
+        trigger_leonardo_bootloader(com)
+        boot_com = pick_upload_port(com, old_ports)
         if callback:
-            callback(100, "업로드 완료!")
-        return True, "완료(재시도)"
+            callback(35, f"업로드 포트: {boot_com}")
 
-    # 구형/호환보드 폴백: Uno 프로토콜 (일부 CH340 클론)
-    if callback:
-        callback(40, "Leonardo 실패 → 호환모드 재시도...")
-    time.sleep(1.0)
-    com2 = find_arduino(preferred=port) or com
-    cmd2 = [
-        avrdude, "-C", conf, "-v",
-        "-c", "arduino",
-        "-p", "atmega328p",
-        "-P", com2,
-        "-b", "115200",
-        "-U", f"flash:w:{hex_path}:i",
-    ]
-    ok2, detail2, lines2 = _run_avrdude(cmd2, callback=callback, timeout_sec=40, pct_write=70, pct_verify=90)
-    if ok2:
+        ok, detail, _ = _run_avrdude(
+            _avrdude_cmd(avrdude, conf, hex_path, boot_com),
+            callback=callback,
+            timeout_sec=25,
+        )
+        if ok:
+            if callback:
+                callback(100, "업로드 완료!")
+            return True, "완료" if attempt == 1 else "완료(재시도)"
+        last_err = detail
         if callback:
-            callback(100, "업로드 완료!(호환)")
-        return True, "완료(호환모드)"
+            callback(30, f"실패 → 재시도 준비 ({detail[:40]})")
+        # 다음 시도 전 보드 안정화
+        time.sleep(2.0)
+        com = find_arduino(preferred=port) or boot_com or com
 
-    detail = detail1b or detail1 or detail2 or "알 수 없음"
-    return False, f"avrdude 실패: {detail}"
+    return False, f"avrdude 실패: {last_err}"
 
 
 if __name__ == "__main__":
