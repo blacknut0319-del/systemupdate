@@ -1242,6 +1242,7 @@ def open_guide_panel():
     add_w("상단 [장치]에서 뚱USB(기존) 또는 뚱박스 중 선택합니다")
     add_w("뚱USB: 꽂으면 자동 인식, 설정 필요 없음 (기존 사용자는 그대로)")
     add_w("펌업 버튼: 뚱USB(아두이노)에 최신 펌웨어를 한 번에 구워 넣음 (워치독 포함). 작업 중엔 정지 상태여야 함")
+    add_w("확인 버튼: 연결된 뚱USB가 워치독 펌인지 조회 (응답 DDONG-WDT 이면 OK)")
     add_w("뚱박스: 박스 화면에 뜬 IP·포트·UUID를 입력칸에 넣고 [설정저장] 후 시작")
     add_w("뚱박스 처음 쓸 때 필요한 파일은 자동으로 받아집니다 (인터넷 연결 필요)")
     add_w("뚱박스 화면에 로고가 뜹니다 — 사냥 중엔 움직이고, 멈추면 박스 정보가 다시 보입니다")
@@ -1979,8 +1980,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-28 17:45"
+PATCH_UPDATED_AT = "2026-07-28 17:50"
 LATEST_PATCH = [
+    "🔌 펌업 [확인] — 뚱USB에 'V' 조회 → DDONG-WDT 응답이면 워치독 펌 확인. 펌업 직후에도 자동 확인",
     "🔌 펌업 COM 자동인식 수정 — 연결에 쓰는 포트/검색방식과 통일. '연결은 되는데 펌업만 포트 못찾음' 해결",
     "🔌 제어판 [펌업] 버튼 — 뚱USB(아두이노)에 최신 펌웨어를 한 번에 업로드. 멈춤(hang) 시 키 눌린 채 고정되던 문제용 워치독(4초 자동재부팅) 포함",
     "💙 \"엠약\" 명칭 → \"파랭이\"로 변경 (UI 버튼·슬라이더·로그·가이드 전부)",
@@ -2491,6 +2493,95 @@ def _load_flash_module():
         pass
     return None
 
+def probe_arduino_fw(ser_obj=None, timeout=2.5):
+    """시리얼로 'V'를 보내 펌웨어 식별 문자열을 읽음.
+    워치독 펌이면 'DDONG-WDT' 응답. 옛 펌/무응답이면 ''."""
+    s = ser_obj if ser_obj is not None else ser
+    if not s or not getattr(s, "is_open", False):
+        return ""
+    # 뚱박스는 시리얼 프로토콜 다름
+    if s.__class__.__name__ == "KmBox":
+        return ""
+    try:
+        try:
+            s.reset_input_buffer()
+        except Exception:
+            while getattr(s, "in_waiting", 0):
+                s.read(s.in_waiting)
+        s.write(b"V")
+        try:
+            s.flush()
+        except Exception:
+            pass
+        buf = b""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            n = getattr(s, "in_waiting", 0) or 0
+            if n:
+                buf += s.read(n)
+                if b"DDONG" in buf or b"\n" in buf:
+                    break
+            time.sleep(0.05)
+        return buf.decode("ascii", errors="ignore").strip()
+    except Exception:
+        return ""
+
+def check_fw_wdt(ser_obj=None):
+    """(ok, detail) — ok=True 이면 워치독 펌 확인됨."""
+    ver = probe_arduino_fw(ser_obj)
+    if ver and "DDONG-WDT" in ver.upper().replace(" ", ""):
+        return True, ver
+    if ver:
+        return False, ver
+    return False, ""
+
+def on_fw_check_click():
+    """제어판 [확인] — 연결된 뚱USB가 워치독 펌인지 조회."""
+    if hw_var.get() in ("뚱박스", "KMBox"):
+        log_event("⚠️ 펌 확인은 뚱USB 전용")
+        try:
+            messagebox.showinfo("펌 확인", "뚱USB(아두이노) 연결 상태에서만 확인할 수 있습니다.")
+        except Exception:
+            pass
+        return
+    if not ser or not getattr(ser, "is_open", False):
+        # 연결 안 되어 있으면 한번 시도
+        try:
+            connect_hardware()
+        except Exception:
+            pass
+    if not ser or not getattr(ser, "is_open", False):
+        log_event("❌ 펌 확인 실패 — 장치 미연결")
+        try:
+            messagebox.showerror("펌 확인", "뚱USB가 연결되지 않았습니다.")
+        except Exception:
+            pass
+        return
+    ok, detail = check_fw_wdt()
+    if ok:
+        log_event(f"✅ 펌 확인 OK — {detail} (워치독 포함)")
+        try:
+            lbl_ard.configure(text=f"● WDT OK", text_color="#3fb950")
+        except Exception:
+            pass
+        try:
+            messagebox.showinfo("펌 확인", f"워치독 펌웨어 확인됨.\n응답: {detail}")
+        except Exception:
+            pass
+    else:
+        msg = detail if detail else "(응답 없음 — 옛 펌이거나 아직 확인기능 없는 펌)"
+        log_event(f"⚠️ 펌 확인 — 워치독 미확인: {msg}")
+        try:
+            messagebox.showwarning(
+                "펌 확인",
+                "워치독 응답이 없습니다.\n\n"
+                "· 방금 펌업만 했고 [확인]이 안 되면 → 최신 hex로 한 번 더 [펌업] 하세요.\n"
+                "  (확인용 응답은 이번 펌부터 들어갑니다)\n"
+                "· 그래도 없으면 옛 펌일 수 있습니다.",
+            )
+        except Exception:
+            pass
+
 def on_fw_flash_click():
     """제어판 [펌업] — 시리얼 닫고 아두이노에 최신 hex 업로드."""
     global ser, running, SERIAL_PORT, _fw_flash_busy
@@ -2541,6 +2632,7 @@ def on_fw_flash_click():
     def _worker():
         global ser, SERIAL_PORT
         ok, msg = False, "실패"
+        wdt_ok, wdt_detail = False, ""
         try:
             # 연결에 이미 쓰던 COM을 펌업에도 그대로 사용 (검색 조건 불일치 방지)
             preferred = SERIAL_PORT
@@ -2566,8 +2658,8 @@ def on_fw_flash_click():
                 # port= 로 넘기면 검색 실패해도 연결 COM으로 업로드 가능.
                 ok, msg = mod.flash(callback=_progress, port=use_port or None)
             if ok:
-                # COM 재탐지 (부트로더 후 포트가 바뀔 수 있음)
-                time.sleep(2.0)
+                # 부팅 delay(3초)+USB 재열거 대기 후 연결 → 'V'로 워치독 확인
+                time.sleep(3.5)
                 found = auto_find_arduino()
                 if found:
                     SERIAL_PORT = found
@@ -2575,16 +2667,37 @@ def on_fw_flash_click():
                     connect_hardware()
                 except Exception:
                     pass
+                time.sleep(0.4)
+                wdt_ok, wdt_detail = check_fw_wdt()
         except Exception as e:
             ok, msg = False, str(e)
         def _done():
             globals()['_fw_flash_busy'] = False
             if ok:
-                log_event(f"✅ 펌업 완료 — {msg}")
-                try:
-                    messagebox.showinfo("펌업", "펌웨어 업로드 완료!\n아두이노가 자동 재시작됩니다.")
-                except Exception:
-                    pass
+                if wdt_ok:
+                    log_event(f"✅ 펌업+확인 OK — {wdt_detail}")
+                    try:
+                        lbl_ard.configure(text="● WDT OK", text_color="#3fb950")
+                    except Exception:
+                        pass
+                    try:
+                        messagebox.showinfo(
+                            "펌업 완료",
+                            f"업로드 성공 + 워치독 확인됨.\n응답: {wdt_detail}",
+                        )
+                    except Exception:
+                        pass
+                else:
+                    log_event(f"✅ 펌업 완료 — {msg} / 워치독응답 미확인({wdt_detail or '없음'})")
+                    try:
+                        messagebox.showinfo(
+                            "펌업 완료",
+                            "업로드는 성공했습니다.\n"
+                            "다만 워치독 확인 응답은 아직 못 받았습니다.\n"
+                            "몇 초 뒤 [확인] 버튼을 다시 눌러보세요.",
+                        )
+                    except Exception:
+                        pass
             else:
                 log_event(f"❌ 펌업 실패 — {msg}")
                 try:
@@ -3003,6 +3116,13 @@ btn_fw_flash = ctk.CTkButton(
     command=on_fw_flash_click,
 )
 btn_fw_flash.pack(side="left", padx=(6, 2))
+btn_fw_check = ctk.CTkButton(
+    frame_hw, text="확인", width=52, height=22,
+    font=("Malgun Gothic", 9, "bold"),
+    fg_color="#238636", hover_color="#2ea043",
+    command=on_fw_check_click,
+)
+btn_fw_check.pack(side="left", padx=(2, 2))
 ctk.CTkLabel(frame_hw, text="뚱USB 펌웨어", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(side="left", padx=(0, 4))
 
 frame_kmfields = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=6)

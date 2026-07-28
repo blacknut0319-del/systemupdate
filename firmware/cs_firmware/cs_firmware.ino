@@ -77,7 +77,13 @@ void loop() {
 
     if (cmd == 'H') { Keyboard.press(KEY_LEFT_SHIFT); autoClick = true; continue; } 
     if (cmd == 'R') { Keyboard.release(KEY_LEFT_SHIFT); autoClick = false; continue; } 
-    if (cmd == 'T') { autoClick = !autoClick; continue; } 
+    if (cmd == 'T') { autoClick = !autoClick; continue; }
+
+    // 펌웨어 확인용 — PC에서 'V' 보내면 워치독 포함 펌인지 응답
+    if (cmd == 'V') {
+      Serial.println(F("DDONG-WDT"));
+      continue;
+    }
 
     switch(cmd) {
       case 'A': 
