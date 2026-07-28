@@ -4,78 +4,100 @@
 #include <avr/interrupt.h>
 
 // 무한 클릭 상태 저장 변수
-bool autoClick = false; 
+bool autoClick = false;
 unsigned long lastClickTime = 0;
 unsigned long nextInterval = 100;
 
-// Caterina 부트로더 매직키 (Leonardo 소프트 진입용)
+// Caterina 부트로더 매직키
 #define CATERINA_MAGIC_ADDR ((uint16_t*)0x0800)
 #define CATERINA_MAGIC_KEY  0x7777
 
-// 🛡️ 펌업용 — 시리얼 '!' 수신 시 부트로더로 점프.
-// 워치독(WDT)을 켜면 Leonardo 기본 1200bps 자동리셋이 깨지므로,
-// 리셋버튼 없는 보드는 이 명령으로만 자동 펌업 가능.
+/*
+ * 중요: wdt_enable()으로 '시스템 리셋 WDT'를 켜면 Leonardo 1200bps 자동리셋이 깨짐.
+ * → 평소엔 인터럽트-only WDT (키 떼고 재부팅). CDC 1200 soft-reset는 그대로 동작.
+ * 펌업용 '!' 도 유지 (백업).
+ */
+ISR(WDT_vect) {
+  autoClick = false;
+  Keyboard.releaseAll();
+  Mouse.release(MOUSE_LEFT);
+  // 멈춤 복구: 짧게 시스템 리셋 (부트로더 아님)
+  *CATERINA_MAGIC_ADDR = 0;
+  wdt_enable(WDTO_15MS);
+  while (true) {}
+}
+
+void enableHangWdt() {
+  cli();
+  wdt_reset();
+  MCUSR &= ~(1 << WDRF);
+  // 변경 허용 시퀀스 후: WDIE만 (WDE=0) + ~4초
+  WDTCSR |= (1 << WDCE) | (1 << WDE);
+  WDTCSR = (1 << WDIE) | (1 << WDP3);  // WDP3=1 → 4.0s, 인터럽트만
+  sei();
+}
+
 void enterBootloader() {
   autoClick = false;
   Keyboard.releaseAll();
   Mouse.release(MOUSE_LEFT);
   Serial.flush();
   Serial.end();
-  delay(50);
+  delay(20);
   cli();
   *CATERINA_MAGIC_ADDR = CATERINA_MAGIC_KEY;
   wdt_enable(WDTO_15MS);
   while (true) {}
 }
 
-// 🛡️ [보안] 키보드 입력 시 사람이 누르는 것처럼 랜덤 시간 적용 (백업 원본 유지)
 void humanPress(uint8_t k) {
   Keyboard.press(k);
-  delay(random(80, 150)); 
+  delay(random(80, 150));
   Keyboard.release(k);
-  wdt_reset();  // 연속 키입력 중에도 워치독 만료 방지
+  wdt_reset();
 }
 
 void setup() {
-  wdt_disable();  // 워치독 리셋 직후 상태가 남아있으면 부팅루프에 빠질 수 있어 가장 먼저 꺼둠
-  Serial.begin(9600); 
-  Serial.setTimeout(10); 
+  cli();
+  MCUSR &= ~(1 << WDRF);
+  wdt_disable();
+  sei();
+
+  Serial.begin(9600);
+  Serial.setTimeout(10);
   Keyboard.begin();
   Mouse.begin();
-  Keyboard.releaseAll();       // 🔧 리셋 직전에 키가 눌린 채로 멈췄어도 부팅 시 무조건 초기화
+  Keyboard.releaseAll();
   Mouse.release(MOUSE_LEFT);
-  
-  // 완벽한 난수 생성을 위해 연결되지 않은 A0 핀의 노이즈 값을 시드로 사용
+
   randomSeed(analogRead(A0));
-  
-  delay(3000); // 업로드 후 준비 시간
-  wdt_enable(WDTO_4S);  // 🔧 loop()가 4초 안에 안 돌면(=멈추면) 자동 재부팅 — 힐키 눌린 채 멈추는 버그 자동복구
+
+  delay(3000);
+  enableHangWdt();  // 인터럽트 WDT — 1200bps 자동펌업 유지
 }
 
 void loop() {
-  wdt_reset();  // 🔧 정상적으로 돌고 있다는 신호(pet). 4초 넘게 안 오면 워치독이 강제 리셋
-  // 🛡️ [보안] 무한 클릭 로직의 인간화 (백업 원본 유지)
+  wdt_reset();
+
   if (autoClick) {
     unsigned long currentTime = millis();
     if (currentTime - lastClickTime >= nextInterval) {
       Mouse.press(MOUSE_LEFT);
-      delay(random(30, 75)); 
+      delay(random(30, 75));
       Mouse.release(MOUSE_LEFT);
       wdt_reset();
-      
+
       lastClickTime = currentTime;
-      nextInterval = random(85, 180); 
+      nextInterval = random(85, 180);
     }
   }
 
-  // 시리얼 명령 수신부
   while (Serial.available() > 0) {
     wdt_reset();
     char cmd = Serial.read();
 
-    // 펌업: PC가 '!' 보내면 부트로더 진입 (리셋버튼/1200bps 불필요)
     if (cmd == '!') {
-      enterBootloader();  // 돌아오지 않음
+      enterBootloader();
     }
 
     if (cmd == '<') {
@@ -94,44 +116,43 @@ void loop() {
       continue;
     }
 
-    if (cmd == 'U') { 
+    if (cmd == 'U') {
       autoClick = false;
-      Keyboard.releaseAll(); 
-      delay(5); 
-      continue;
-    } 
-
-    if (cmd == 'H') { Keyboard.press(KEY_LEFT_SHIFT); autoClick = true; continue; } 
-    if (cmd == 'R') { Keyboard.release(KEY_LEFT_SHIFT); autoClick = false; continue; } 
-    if (cmd == 'T') { autoClick = !autoClick; continue; }
-
-    // 펌웨어 확인용 — DDONG-WDT2 = 워치독+시리얼부트로더진입('!') 지원
-    if (cmd == 'V') {
-      Serial.println(F("DDONG-WDT2"));
+      Keyboard.releaseAll();
+      delay(5);
       continue;
     }
 
-    switch(cmd) {
-      case 'A': 
-        humanPress(KEY_F9); 
+    if (cmd == 'H') { Keyboard.press(KEY_LEFT_SHIFT); autoClick = true; continue; }
+    if (cmd == 'R') { Keyboard.release(KEY_LEFT_SHIFT); autoClick = false; continue; }
+    if (cmd == 'T') { autoClick = !autoClick; continue; }
+
+    // DDONG-WDT3 = 워치독(인터럽트) + 1200 자동펌업 유지 + '!'
+    if (cmd == 'V') {
+      Serial.println(F("DDONG-WDT3"));
+      continue;
+    }
+
+    switch (cmd) {
+      case 'A':
+        humanPress(KEY_F9);
         break;
-        
-      case 'B': 
+
+      case 'B':
         humanPress(KEY_F9);
         delay(random(70, 130));
         humanPress(KEY_F9);
         break;
-        
-      case 'E': 
-        humanPress(KEY_F5); 
+
+      case 'E':
+        humanPress(KEY_F5);
         break;
-        
-      case 'C': 
+
+      case 'C':
         autoClick = false;
-        Keyboard.releaseAll(); 
+        Keyboard.releaseAll();
         delay(10);
         Keyboard.press(KEY_F8);
-        // 귀환 길게누름(~1.1~1.4초) 중에도 워치독 만료되지 않게 중간 reset
         {
           unsigned long hold = random(1100, 1400);
           unsigned long t0 = millis();
@@ -142,24 +163,19 @@ void loop() {
         }
         Keyboard.releaseAll();
         break;
-        
-      
-      // ==========================================
-      // 💡 [신규] 줍기(F4) & 타이머 & 독 해독
-      // ==========================================
-      case '1': humanPress(KEY_F1); break;   
-      case '2': humanPress(KEY_F2); break;   
-      case '3': humanPress(KEY_F3); break;   // F3 단축키창 이동 (UDP 매크로)
-      case '4': humanPress(KEY_F4); break;   // 💡 F4 (자동 줍기) 추가!
-      case '5': humanPress(KEY_F5); break;   
-      case '6': humanPress(KEY_F6); break;   
-      case '7': humanPress(KEY_F7); break;   // F7 (UDP 매크로)
+
+      case '1': humanPress(KEY_F1); break;
+      case '2': humanPress(KEY_F2); break;
+      case '3': humanPress(KEY_F3); break;
+      case '4': humanPress(KEY_F4); break;
+      case '5': humanPress(KEY_F5); break;
+      case '6': humanPress(KEY_F6); break;
+      case '7': humanPress(KEY_F7); break;
       case '8': humanPress(KEY_F8); break;
       case '9': humanPress(KEY_F9); break;
       case 'X': humanPress(KEY_F10); break;
       case 'Y': humanPress(KEY_F11); break;
       case 'Z': humanPress(KEY_F12); break;
-
     }
   }
 }
