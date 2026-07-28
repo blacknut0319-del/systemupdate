@@ -1,16 +1,22 @@
 # -*- coding: utf-8 -*-
-"""아두이노(Leonardo) 펌웨어 업로드 + 진단 로그.
+"""Leonardo 펌업 — 리셋버튼 없이 자동 1200bps 진입.
 
-로그 근거(2341:8036 유지 = 스케치 모드):
-  1200bps 자동리셋이 안 먹으면 부트로더(2341:0036)로 절대 안 들어감.
-  → 수동 더블리셋 대기 후 avr109 업로드가 정석.
+실패 로그에서 확인된 것:
+  - 보드는 진짜 Leonardo (2341:8036)
+  - 짧은 open/close 1200은 close OK 찍혀도 PID가 0036으로 안 바뀜
+  - 수동 더블리셋(0036) 후 업로드는 성공
+
+→ 1200을 '오래 열어두고' 여러 방식으로 재시도 + arduino-cli 자동설치 업로드.
+수동 리셋은 최후 수단(버튼 있는 보드만).
 """
 from __future__ import annotations
 
 import os
+import re
 import ssl
 import sys
 import time
+import zipfile
 import traceback
 import tempfile
 import threading
@@ -30,9 +36,12 @@ GH_RAW = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main"
 HEX_NAME = "뚱힐러.hex"
 DESKTOP = os.path.join(os.path.expanduser("~"), "Desktop")
 FLASH_LOG = os.path.join(DESKTOP, "뚱힐러_펌업로그.txt")
-# Leonardo: 스케치 8036 / 부트로더 0036
-LEONARDO_SKETCH_PID = "8036"
+TMP_ROOT = os.path.join(tempfile.gettempdir(), "ddong_firmware")
+CLI_DIR = os.path.join(TMP_ROOT, "arduino-cli")
+CLI_ZIP_URL = "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Windows_64bit.zip"
+FQBN = "arduino:avr:leonardo"
 LEONARDO_BOOT_PID = "0036"
+LEONARDO_SKETCH_PID = "8036"
 LEONARDO_VID = "2341"
 NEEDED = [
     ("firmware/뚱힐러.hex", HEX_NAME),
@@ -40,7 +49,6 @@ NEEDED = [
     ("firmware/avrdude/avrdude.conf", os.path.join("avrdude", "avrdude.conf")),
     ("firmware/avrdude/libusb0.dll", os.path.join("avrdude", "libusb0.dll")),
 ]
-
 LAST_FLASH_LOG = ""
 
 
@@ -52,8 +60,7 @@ class FlashLogger:
 
     def log(self, msg):
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        line = f"[{ts}] {msg}"
-        self.lines.append(line)
+        self.lines.append(f"[{ts}] {msg}")
 
     def section(self, title):
         self.log("=" * 60)
@@ -70,22 +77,17 @@ class FlashLogger:
             self.log("(COM 0개)")
             return
         for p in ports:
-            mode = _port_mode(p)
             self.log(
-                f"  {p.device} [{mode}] desc={p.description!r} "
-                f"mfg={p.manufacturer!r} hwid={p.hwid!r}"
+                f"  {p.device} [{_port_mode(p)}] desc={p.description!r} hwid={p.hwid!r}"
             )
 
     def save(self, ok, summary):
         global LAST_FLASH_LOG
         body = "\n".join(self.lines)
         text = (
-            f"뚱힐러 펌업 로그\n"
-            f"시작: {self.started}\n"
+            f"뚱힐러 펌업 로그\n시작: {self.started}\n"
             f"결과: {'성공' if ok else '실패'} — {summary}\n"
-            f"{'=' * 60}\n"
-            f"{body}\n"
-            f"{'=' * 60}\n"
+            f"{'=' * 60}\n{body}\n{'=' * 60}\n"
             f"끝: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
         try:
@@ -93,22 +95,18 @@ class FlashLogger:
             with open(self.path, "w", encoding="utf-8") as f:
                 f.write(text)
             if not ok:
-                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                bak = os.path.join(DESKTOP, f"뚱힐러_펌업로그_{stamp}.txt")
+                bak = os.path.join(
+                    DESKTOP, f"뚱힐러_펌업로그_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                )
                 with open(bak, "w", encoding="utf-8") as f:
                     f.write(text)
-                with open(self.path, "a", encoding="utf-8") as f:
-                    f.write(f"백업: {bak}\n")
             LAST_FLASH_LOG = self.path
-        except Exception as e:
+        except Exception:
             LAST_FLASH_LOG = ""
-            self.log(f"로그 저장 실패: {e}")
         return self.path
 
 
 def _port_mode(p):
-    h = (p.hwid or "").upper().replace(":", "")
-    # USB VID:PID=2341:8036 → 23418036 after removing colons in "VID:PID=2341:8036"
     hu = (p.hwid or "").upper()
     if LEONARDO_VID in hu and LEONARDO_BOOT_PID in hu:
         return "BOOTLOADER"
@@ -122,8 +120,7 @@ def _is_bootloader_port(p):
 
 
 def _is_leonardo_any(p):
-    hu = (p.hwid or "").upper()
-    return LEONARDO_VID in hu
+    return LEONARDO_VID in (p.hwid or "").upper()
 
 
 def _ssl_ctx():
@@ -137,7 +134,7 @@ def firmware_candidates():
     return [
         os.path.join(HERE, "firmware"),
         os.path.join(DESKTOP, "뚱힐러_github", "firmware"),
-        os.path.join(tempfile.gettempdir(), "ddong_firmware"),
+        TMP_ROOT,
     ]
 
 
@@ -154,9 +151,8 @@ def ensure_firmware(flog=None, callback=None):
         if _has_tools(root):
             flog and flog.log(f"펌웨어 폴더: {root}")
             return root
-    root = os.path.join(tempfile.gettempdir(), "ddong_firmware")
+    root = TMP_ROOT
     os.makedirs(os.path.join(root, "avrdude"), exist_ok=True)
-    flog and flog.log(f"TEMP 다운로드: {root}")
     ctx = _ssl_ctx()
     for remote, local in NEEDED:
         dest = os.path.join(root, local)
@@ -182,33 +178,23 @@ def ensure_firmware(flog=None, callback=None):
     return root if _has_tools(root) else None
 
 
-def find_arduino_ports():
-    if list_ports is None:
-        return []
-    found = []
-    for p in list_ports.comports():
-        if _is_leonardo_any(p) or _is_bootloader_port(p):
-            if p.device not in found:
-                found.append(p.device)
-            continue
-        d = f"{p.description or ''} {p.manufacturer or ''}"
-        du = d.upper()
-        if any(k in du for k in ("CH340", "ARDUINO", "LEONARDO", "USB", "SERIAL", "CP210")) or "직렬" in d:
-            if p.device not in found:
-                found.append(p.device)
-    return found
-
-
 def find_arduino(preferred=None):
-    ports_now = {p.device for p in list_ports.comports()} if list_ports else set()
+    if list_ports is None:
+        return None
+    ports_now = {p.device for p in list_ports.comports()}
     if preferred and preferred in ports_now:
         return preferred
-    ports = find_arduino_ports()
-    return ports[0] if ports else None
+    for p in list_ports.comports():
+        if _is_leonardo_any(p) or _is_bootloader_port(p):
+            return p.device
+    for p in list_ports.comports():
+        d = f"{p.description or ''} {p.manufacturer or ''}".upper()
+        if any(k in d for k in ("CH340", "ARDUINO", "LEONARDO", "USB", "SERIAL", "CP210")) or "직렬" in (p.description or ""):
+            return p.device
+    return None
 
 
 def find_bootloader_port():
-    """부트로더 모드(PID 0036) COM 찾기."""
     if list_ports is None:
         return None
     for p in list_ports.comports():
@@ -217,98 +203,290 @@ def find_bootloader_port():
     return None
 
 
-def _ports_snapshot():
-    if list_ports is None:
-        return []
-    out = []
-    for p in list_ports.comports():
-        out.append({
-            "device": p.device,
-            "hwid": p.hwid or "",
-            "desc": p.description or "",
-            "mode": _port_mode(p),
-        })
-    return out
-
-
 def _kill_stray_avrdude(flog=None):
     try:
-        r = subprocess.run(
+        subprocess.run(
             ["taskkill", "/F", "/IM", "avrdude.exe"],
             capture_output=True,
-            text=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
         )
-        flog and flog.log(f"taskkill avrdude rc={r.returncode}")
-    except Exception as e:
-        flog and flog.log(f"taskkill: {e}")
+    except Exception:
+        pass
 
 
-def trigger_1200_touch(port, flog=None):
-    """시도는 하되, 성공 여부는 PID가 BOOTLOADER로 바뀌는지로만 판단."""
-    if serial is None or not port:
-        return False
-    try:
-        flog and flog.log(f"1200bps touch: {port}")
-        s = serial.Serial()
-        s.port = port
-        s.baudrate = 1200
-        s.timeout = 0.1
-        try:
-            s.setDTR(False)
-        except Exception:
-            pass
-        s.open()
-        time.sleep(0.05)
-        s.close()
-        flog and flog.log("1200bps touch close OK")
-        return True
-    except Exception as e:
-        flog and flog.log(f"1200bps touch 실패: {e!r}")
-        return False
-
-
-def wait_bootloader(timeout=10.0, callback=None, flog=None, hint=""):
-    """PID 0036(BOOTLOADER) 포트가 나타날 때까지 대기."""
+def wait_bootloader(timeout=10.0, callback=None, flog=None, hint="부트로더 대기"):
     t0 = time.time()
     last = -1
     while time.time() - t0 < timeout:
         sec = int(time.time() - t0)
         boot = find_bootloader_port()
-        snap = _ports_snapshot()
         if sec != last:
             last = sec
-            flog and flog.log(f"부트로더대기 {sec}s boot={boot} ports={snap}")
+            flog and flog.dump_ports(f"{hint} {sec}s boot={boot}")
             if callback:
-                msg = f"부트로더 대기 {sec}s"
-                if hint:
-                    msg = f"{hint} ({sec}s)"
-                callback(30, msg)
+                callback(30, f"{hint} {sec}s")
         if boot:
-            time.sleep(0.3)
-            flog and flog.log(f"부트로더 포트 확정: {boot}")
+            time.sleep(0.4)
             return boot
-        time.sleep(0.12)
-    flog and flog.log("부트로더(PID 0036) 미검출")
+        time.sleep(0.15)
     return None
 
 
-def _run_avrdude(root, hex_path, boot_port, callback=None, flog=None, timeout_sec=25):
-    avrdude = os.path.join(root, "avrdude", "avrdude.exe")
-    conf = os.path.join(root, "avrdude", "avrdude.conf")
+# ─── 자동 1200bps 리셋 (여러 방식) ─────────────────────────
+
+def _touch_pyserial_hold(port, flog=None):
+    """포트를 1200으로 0.5초 이상 열어 Windows가 SET_LINE_CODING을 보내게 함."""
+    s = serial.Serial()
+    s.port = port
+    s.baudrate = 1200
+    s.timeout = 0.1
+    s.dsrdtr = False
+    s.rtscts = False
+    s.open()
+    try:
+        s.dtr = False
+    except Exception:
+        pass
+    time.sleep(0.6)  # 핵심: 바로 닫지 말 것
+    s.close()
+    flog and flog.log("touch: pyserial hold-1200 OK")
+
+
+def _touch_pyserial_reopen(port, flog=None):
+    """9600으로 연 뒤 1200으로 재설정."""
+    s = serial.Serial(port, 9600, timeout=0.1)
+    time.sleep(0.15)
+    s.close()
+    time.sleep(0.15)
+    s = serial.Serial()
+    s.port = port
+    s.baudrate = 1200
+    s.dsrdtr = False
+    s.open()
+    try:
+        s.dtr = False
+    except Exception:
+        pass
+    time.sleep(0.5)
+    s.close()
+    flog and flog.log("touch: pyserial reopen 9600→1200 OK")
+
+
+def _touch_powershell(port, flog=None):
+    """System.IO.Ports.SerialPort — pyserial이 안 먹을 때 Windows 네이티브."""
+    # COM10 이상은 \\.\COM10 형식 필요하지만 .NET SerialPort는 COM5 OK
+    ps = f"""
+$port = New-Object System.IO.Ports.SerialPort '{port}',1200,None,8,One
+$port.DtrEnable = $false
+$port.RtsEnable = $false
+$port.ReadTimeout = 100
+$port.WriteTimeout = 100
+$port.Open()
+Start-Sleep -Milliseconds 600
+$port.Close()
+$port.Dispose()
+"""
+    r = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+    )
+    flog and flog.log(f"touch: powershell rc={r.returncode} err={(r.stderr or '')[:200]!r}")
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr or "powershell touch fail")
+
+
+def _touch_win32(port, flog=None):
+    """CreateFile + SetCommState(1200)."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    GENERIC_READ = 0x80000000
+    GENERIC_WRITE = 0x40000000
+    OPEN_EXISTING = 3
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    class DCB(ctypes.Structure):
+        _fields_ = [
+            ("DCBlength", wintypes.DWORD),
+            ("BaudRate", wintypes.DWORD),
+            ("fBinary", wintypes.DWORD, 1),
+            ("fParity", wintypes.DWORD, 1),
+            ("fOutxCtsFlow", wintypes.DWORD, 1),
+            ("fOutxDsrFlow", wintypes.DWORD, 1),
+            ("fDtrControl", wintypes.DWORD, 2),
+            ("fDsrSensitivity", wintypes.DWORD, 1),
+            ("fTXContinueOnXoff", wintypes.DWORD, 1),
+            ("fOutX", wintypes.DWORD, 1),
+            ("fInX", wintypes.DWORD, 1),
+            ("fErrorChar", wintypes.DWORD, 1),
+            ("fNull", wintypes.DWORD, 1),
+            ("fRtsControl", wintypes.DWORD, 2),
+            ("fAbortOnError", wintypes.DWORD, 1),
+            ("fDummy2", wintypes.DWORD, 17),
+            ("wReserved", wintypes.WORD),
+            ("XonLim", wintypes.WORD),
+            ("XoffLim", wintypes.WORD),
+            ("ByteSize", ctypes.c_byte),
+            ("Parity", ctypes.c_byte),
+            ("StopBits", ctypes.c_byte),
+            ("XonChar", ctypes.c_char),
+            ("XoffChar", ctypes.c_char),
+            ("ErrorChar", ctypes.c_char),
+            ("EofChar", ctypes.c_char),
+            ("EvtChar", ctypes.c_char),
+            ("wReserved1", wintypes.WORD),
+        ]
+
+    path = f"\\\\.\\{port}"
+    handle = kernel32.CreateFileW(
+        path, GENERIC_READ | GENERIC_WRITE, 0, None, OPEN_EXISTING, 0, None
+    )
+    if handle == INVALID_HANDLE_VALUE or handle == -1:
+        raise OSError(f"CreateFile failed for {path} err={ctypes.get_last_error()}")
+    try:
+        dcb = DCB()
+        dcb.DCBlength = ctypes.sizeof(DCB)
+        if not kernel32.GetCommState(handle, ctypes.byref(dcb)):
+            raise OSError("GetCommState failed")
+        dcb.BaudRate = 1200
+        dcb.ByteSize = 8
+        dcb.Parity = 0
+        dcb.StopBits = 0
+        dcb.fDtrControl = 0  # DTR_CONTROL_DISABLE
+        if not kernel32.SetCommState(handle, ctypes.byref(dcb)):
+            raise OSError("SetCommState 1200 failed")
+        time.sleep(0.6)
+    finally:
+        kernel32.CloseHandle(handle)
+    flog and flog.log("touch: win32 SetCommState 1200 OK")
+
+
+def auto_enter_bootloader(port, callback=None, flog=None):
+    """리셋버튼 없이 부트로더(PID 0036) 진입 시도. 성공 시 boot COM 반환."""
+    methods = [
+        ("pyserial-hold", _touch_pyserial_hold),
+        ("powershell", _touch_powershell),
+        ("win32", _touch_win32),
+        ("pyserial-reopen", _touch_pyserial_reopen),
+    ]
+    for name, fn in methods:
+        # 이미 부트로더면 바로 성공
+        boot = find_bootloader_port()
+        if boot:
+            flog and flog.log(f"이미 부트로더: {boot}")
+            return boot
+        flog and flog.section(f"자동리셋 시도: {name}")
+        if callback:
+            callback(20, f"자동리셋: {name}")
+        try:
+            fn(port, flog=flog)
+        except Exception as e:
+            flog and flog.log(f"{name} 예외: {e!r}")
+            continue
+        boot = wait_bootloader(timeout=8.0, callback=callback, flog=flog, hint=f"{name} 후")
+        if boot:
+            flog and flog.log(f"성공: {name} → {boot}")
+            return boot
+        # 포트 번호가 바뀌었을 수 있음 — 스케치 COM 재탐색
+        newport = find_arduino(preferred=port)
+        if newport and newport != port:
+            flog and flog.log(f"COM 변경 {port} → {newport}, 재시도 준비")
+            port = newport
+    return None
+
+
+# ─── arduino-cli 자동 설치/업로드 ─────────────────────────
+
+def ensure_arduino_cli(flog=None, callback=None):
+    exe = os.path.join(CLI_DIR, "arduino-cli.exe")
+    if os.path.isfile(exe):
+        flog and flog.log(f"arduino-cli 있음: {exe}")
+        return exe
+    os.makedirs(CLI_DIR, exist_ok=True)
+    zip_path = os.path.join(TMP_ROOT, "arduino-cli.zip")
+    if callback:
+        callback(12, "arduino-cli 다운로드 중...")
+    flog and flog.log(f"arduino-cli 다운로드: {CLI_ZIP_URL}")
+    try:
+        req = urllib.request.Request(CLI_ZIP_URL, headers={"User-Agent": "ddong"})
+        with urllib.request.urlopen(req, timeout=180, context=_ssl_ctx()) as r:
+            data = r.read()
+        with open(zip_path, "wb") as f:
+            f.write(data)
+        flog and flog.log(f"zip size={len(data)}")
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(CLI_DIR)
+        # zip 안에 바로 exe 또는 하위폴더
+        if not os.path.isfile(exe):
+            for root, _, files in os.walk(CLI_DIR):
+                if "arduino-cli.exe" in files:
+                    src = os.path.join(root, "arduino-cli.exe")
+                    if src != exe:
+                        import shutil
+                        shutil.copy2(src, exe)
+                    break
+        if os.path.isfile(exe):
+            return exe
+    except Exception as e:
+        flog and flog.log(f"arduino-cli 설치 실패: {e!r}")
+    return None
+
+
+def ensure_avr_core(cli, flog=None, callback=None):
+    try:
+        if callback:
+            callback(15, "Arduino AVR 코어 확인...")
+        r = subprocess.run(
+            [cli, "core", "list"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+        flog and flog.log(f"core list rc={r.returncode} out={(r.stdout or '')[:300]!r}")
+        if "arduino:avr" in (r.stdout or ""):
+            return True
+        if callback:
+            callback(16, "AVR 코어 설치 중(최초 1회)...")
+        subprocess.run(
+            [cli, "core", "update-index"],
+            capture_output=True,
+            timeout=120,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+        r2 = subprocess.run(
+            [cli, "core", "install", "arduino:avr"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+        flog and flog.log(f"core install rc={r2.returncode} {(r2.stdout or r2.stderr or '')[:400]!r}")
+        return r2.returncode == 0
+    except Exception as e:
+        flog and flog.log(f"core 설치 예외: {e!r}")
+        return False
+
+
+def flash_via_arduino_cli(hex_path, port, flog=None, callback=None):
+    cli = ensure_arduino_cli(flog=flog, callback=callback)
+    if not cli:
+        return False, "arduino-cli 확보 실패"
+    ensure_avr_core(cli, flog=flog, callback=callback)
+    if callback:
+        callback(40, "arduino-cli 업로드...")
     cmd = [
-        avrdude, "-C", conf,
-        "-c", "avr109",
-        "-p", "atmega32u4",
-        "-P", boot_port,
-        "-b", "57600",
-        "-D",
-        "-U", f"flash:w:{hex_path}:i",
+        cli, "upload",
+        "-p", port,
+        "--fqbn", FQBN,
+        "--input-file", hex_path,
+        "-v",
     ]
     flog and flog.log("CMD: " + " ".join(cmd))
-    if callback:
-        callback(50, f"avrdude 업로드 ({boot_port})...")
-
     try:
         proc = subprocess.Popen(
             cmd,
@@ -317,72 +495,91 @@ def _run_avrdude(root, hex_path, boot_port, callback=None, flog=None, timeout_se
             text=True,
             encoding="utf-8",
             errors="replace",
-            bufsize=1,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
         )
     except Exception as e:
         return False, str(e)
-
-    out_lines = []
+    lines = []
     t0 = time.time()
-    done = {"v": False}
-
-    def _reader():
-        try:
-            for line in proc.stdout or []:
-                line = (line or "").rstrip("\r\n")
-                if not line.strip():
-                    continue
-                out_lines.append(line)
-                flog and flog.log(f"  [avrdude] {line}")
-                low = line.lower()
-                if callback:
-                    if "writing" in low:
-                        callback(70, line[:70])
-                    elif "verifying" in low:
-                        callback(90, "검증 중...")
-        finally:
-            done["v"] = True
-
-    th = threading.Thread(target=_reader, daemon=True)
-    th.start()
     while True:
-        if time.time() - t0 > timeout_sec:
+        if time.time() - t0 > 90:
             try:
                 proc.kill()
             except Exception:
                 pass
-            th.join(timeout=2)
-            return False, f"{timeout_sec}초 타임아웃"
-        if proc.poll() is not None:
-            th.join(timeout=3)
+            return False, "arduino-cli 90초 타임아웃"
+        line = proc.stdout.readline() if proc.stdout else ""
+        if line:
+            line = line.rstrip()
+            lines.append(line)
+            flog and flog.log(f"  [cli] {line}")
+            if callback and ("writing" in line.lower() or "upload" in line.lower()):
+                callback(70, line[:70])
+        elif proc.poll() is not None:
             break
-        time.sleep(0.1)
-    try:
-        proc.wait(timeout=3)
-    except Exception:
-        pass
+        else:
+            time.sleep(0.05)
     ok = proc.returncode == 0
-    detail = out_lines[-1] if out_lines else f"code {proc.returncode}"
-    flog and flog.log(f"avrdude rc={proc.returncode} detail={detail!r}")
+    detail = lines[-1] if lines else f"code {proc.returncode}"
     return ok, detail
 
 
+def _run_avrdude(root, hex_path, boot_port, callback=None, flog=None):
+    avrdude = os.path.join(root, "avrdude", "avrdude.exe")
+    conf = os.path.join(root, "avrdude", "avrdude.conf")
+    cmd = [
+        avrdude, "-C", conf,
+        "-c", "avr109", "-p", "atmega32u4",
+        "-P", boot_port, "-b", "57600", "-D",
+        "-U", f"flash:w:{hex_path}:i",
+    ]
+    flog and flog.log("CMD: " + " ".join(cmd))
+    if callback:
+        callback(55, f"avrdude ({boot_port})")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+    )
+    lines = []
+    t0 = time.time()
+    while True:
+        if time.time() - t0 > 30:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            return False, "avrdude 30초 타임아웃"
+        line = proc.stdout.readline() if proc.stdout else ""
+        if line:
+            line = line.rstrip()
+            lines.append(line)
+            flog and flog.log(f"  [avrdude] {line}")
+            if callback and "writing" in line.lower():
+                callback(75, line[:70])
+        elif proc.poll() is not None:
+            break
+        else:
+            time.sleep(0.05)
+    return proc.returncode == 0, (lines[-1] if lines else f"code {proc.returncode}")
+
+
 def flash(callback=None, port=None, ask_manual_reset=None):
-    """업로드. ask_manual_reset: UI에서 더블리셋 안내 후 True/False 반환하는 callable.
-    return (ok, msg, log_path)
+    """자동 펌업 우선. return (ok, msg, log_path).
+    ask_manual_reset은 최후 수단(리셋버튼 있는 보드)용 — 기본 경로는 자동만.
     """
     flog = FlashLogger()
-    flog.section("펌업 진단 시작")
+    flog.section("펌업 시작 (자동리셋 우선)")
     flog.log(f"python={sys.version}")
-    flog.log(f"cwd={os.getcwd()}")
-    flog.log(f"HERE={HERE}")
-    flog.log(f"preferred_port={port!r}")
-    flog.log("참고: Leonardo 스케치=2341:8036 / 부트로더=2341:0036")
+    flog.log(f"preferred={port!r}")
     flog.dump_ports("시작")
 
     try:
-        if serial is None or list_ports is None:
+        if serial is None:
             msg = "pyserial 없음"
             return False, msg, flog.save(False, msg)
 
@@ -391,86 +588,71 @@ def flash(callback=None, port=None, ask_manual_reset=None):
         if not root:
             msg = "펌웨어 확보 실패"
             return False, msg, flog.save(False, msg)
-
         hex_path = os.path.join(root, HEX_NAME)
         flog.log(f"hex={hex_path} size={os.path.getsize(hex_path)}")
 
         com = find_arduino(preferred=port)
-        flog.log(f"스케치 COM={com!r}")
         if not com:
             msg = "아두이노 COM 없음"
             return False, msg, flog.save(False, msg)
-
         if callback:
             callback(10, f"장치: {com}")
 
-        # --- 1) 자동 1200bps 시도 (짧게) ---
-        flog.section("자동 1200bps 리셋 시도")
-        time.sleep(1.0)
-        trigger_1200_touch(com, flog)
-        boot = wait_bootloader(timeout=3.0, callback=callback, flog=flog, hint="자동리셋 확인")
-        flog.dump_ports("1200 이후")
+        # 시리얼 핸들 완전 해제
+        time.sleep(1.5)
 
-        # --- 2) 실패 시 수동 더블리셋 ---
-        if not boot:
-            flog.log("자동리셋 실패(PID가 8036에 머무름) → 수동 더블리셋 필요")
+        # 1) 자동 1200 → 부트로더 잡히면 avrdude
+        boot = auto_enter_bootloader(com, callback=callback, flog=flog)
+        if boot:
+            ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
+            if ok:
+                if callback:
+                    callback(100, "업로드 완료!")
+                return True, f"완료(자동/{boot})", flog.save(True, f"완료(자동/{boot})")
+            flog.log(f"avrdude 실패: {detail}")
+
+        # 2) arduino-cli (IDE와 동일한 자동리셋 포함)
+        flog.section("arduino-cli 자동 업로드")
+        com2 = find_arduino(preferred=port) or com
+        ok2, detail2 = flash_via_arduino_cli(hex_path, com2, flog=flog, callback=callback)
+        if ok2:
             if callback:
-                callback(20, "수동 리셋 필요")
-            go = True
-            if callable(ask_manual_reset):
-                try:
-                    go = bool(ask_manual_reset())
-                except Exception as e:
-                    flog.log(f"ask_manual_reset 예외: {e}")
-                    go = True
-            if not go:
-                msg = "사용자가 수동 리셋 취소"
-                return False, msg, flog.save(False, msg)
+                callback(100, "업로드 완료!(cli)")
+            return True, "완료(arduino-cli)", flog.save(True, "완료(arduino-cli)")
+        flog.log(f"arduino-cli 실패: {detail2}")
 
-            flog.section("수동 더블리셋 대기 (최대 15초)")
+        # 3) 최후: 리셋버튼 있는 보드만 수동 (없으면 취소하면 됨)
+        if callable(ask_manual_reset):
+            flog.section("최후: 수동 더블리셋 (버튼 있는 보드만)")
             if callback:
-                callback(25, "리셋 2번 누른 뒤 대기중...")
-            # 안내 직후 바로 대기 — 사용자가 이미 눌렀거나 곧 누름
-            boot = wait_bootloader(
-                timeout=15.0,
-                callback=callback,
-                flog=flog,
-                hint="리셋버튼 2번 후 대기",
-            )
-            flog.dump_ports("수동리셋 이후")
+                callback(25, "자동 실패 → 수동 안내")
+            try:
+                go = bool(ask_manual_reset())
+            except Exception:
+                go = False
+            if go:
+                boot = wait_bootloader(timeout=15.0, callback=callback, flog=flog, hint="수동리셋 대기")
+                if boot:
+                    ok3, detail3 = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
+                    if ok3:
+                        if callback:
+                            callback(100, "업로드 완료!")
+                        return True, f"완료(수동/{boot})", flog.save(True, f"완료(수동/{boot})")
 
-        if not boot:
-            msg = (
-                "부트로더 진입 실패 (PID 0036 안 보임).\n"
-                "보드 리셋 버튼을 빠르게 두 번 누르고 바로 다시 [펌업] 하세요.\n"
-                f"로그: {FLASH_LOG}"
-            )
-            return False, msg, flog.save(False, msg)
-
-        # --- 3) 부트로더 포트에만 업로드 ---
-        flog.section(f"avrdude 업로드 port={boot}")
-        if callback:
-            callback(40, f"부트로더 확인: {boot}")
-        ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
-        if ok:
-            if callback:
-                callback(100, "업로드 완료!")
-            return True, f"완료 ({boot})", flog.save(True, f"완료 ({boot})")
-
-        msg = f"avrdude 실패: {detail}\n로그: {FLASH_LOG}"
-        return False, msg, flog.save(False, msg)
+        msg = (
+            "자동 펌업 실패 (리셋버튼 없는 보드도 자동으로 되게 재시도했음).\n"
+            f"· 자동1200/avrdude 및 arduino-cli 모두 실패\n"
+            f"· cli: {detail2}\n"
+            f"로그: {FLASH_LOG}"
+        )
+        return False, msg, flog.save(False, msg.replace("\n", " / "))
     except Exception as e:
         flog.log(traceback.format_exc())
         return False, str(e), flog.save(False, str(e))
 
 
 if __name__ == "__main__":
-    def _ask():
-        print("보드 리셋 버튼을 빠르게 2번 누르세요. 엔터...")
-        input()
-        return True
-
-    ok, msg, path = flash(lambda p, m: print(f"{p}% {m}"), ask_manual_reset=_ask)
+    ok, msg, path = flash(lambda p, m: print(f"{p}% {m}"))
     print(("OK" if ok else "FAIL"), msg)
     print("LOG", path)
     sys.exit(0 if ok else 1)
