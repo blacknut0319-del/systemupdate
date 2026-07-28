@@ -87,19 +87,57 @@ def ensure_firmware(callback=None):
 
 
 def find_arduino_ports():
-    """아두이노로 보이는 COM 포트 목록."""
+    """아두이노로 보이는 COM 포트 목록.
+    뚱힐러 auto_find_arduino()와 같은 판정(USB/직렬/VID)을 써서
+    '연결은 되는데 펌업만 포트 못 찾음'이 안 나오게 함."""
     if list_ports is None:
         return []
+    ports = list(list_ports.comports())
     found = []
-    for p in list_ports.comports():
-        d = f"{p.description} {p.manufacturer or ''} {p.hwid or ''}".lower()
-        if any(k in d for k in ("arduino", "ch340", "cp210", "usb serial", "usb-serial", "leonardo", "vid:2341", "vid_2341", "vid:2a03", "vid_1b4f", "sparkfun")):
-            found.append(p.device)
+
+    def _add(dev):
+        if dev and dev not in found:
+            found.append(dev)
+
+    # 1) 우선순위: 알려진 VID (Logitech→Arduino 등 기존 로직과 동일)
+    for p in ports:
+        h = (p.hwid or "").upper()
+        if "046D" in h and "C08B" in h:
+            _add(p.device)
+    for p in ports:
+        h = (p.hwid or "").upper()
+        if "2341" in h or "2A03" in h or "1B4F" in h:  # Arduino / official / SparkFun
+            _add(p.device)
+    # 2) 설명/제조사 — 연결에 쓰는 것과 동일하게 USB·직렬 포함
+    for p in ports:
+        d = f"{p.description or ''} {p.manufacturer or ''}"
+        du = d.upper()
+        dl = d.lower()
+        h = (p.hwid or "").lower()
+        if (
+            "CH340" in du
+            or "ARDUINO" in du
+            or "LEONARDO" in du
+            or "USB" in du
+            or "직렬" in d
+            or "SERIAL" in du
+            or "CP210" in du
+            or "vid_2341" in h
+            or "vid_2a03" in h
+            or "vid_1b4f" in h
+        ):
+            _add(p.device)
     return found
 
 
-def find_arduino():
+def find_arduino(preferred=None):
+    """preferred(이미 연결된 COM)가 살아있으면 그걸 최우선."""
+    ports_now = {p.device for p in list_ports.comports()} if list_ports else set()
+    if preferred and preferred in ports_now:
+        return preferred
     ports = find_arduino_ports()
+    if preferred and preferred in ports:
+        return preferred
     return ports[0] if ports else None
 
 
@@ -162,7 +200,7 @@ def flash(callback=None, port=None):
     if not os.path.isfile(hex_path):
         return False, f"{HEX_NAME} 없음"
 
-    com = port or find_arduino()
+    com = find_arduino(preferred=port)
     if not com:
         return False, "아두이노 COM 포트 못찾음 (뚱USB 연결 확인)"
 

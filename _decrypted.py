@@ -1979,8 +1979,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-28 15:35"
+PATCH_UPDATED_AT = "2026-07-28 17:45"
 LATEST_PATCH = [
+    "🔌 펌업 COM 자동인식 수정 — 연결에 쓰는 포트/검색방식과 통일. '연결은 되는데 펌업만 포트 못찾음' 해결",
     "🔌 제어판 [펌업] 버튼 — 뚱USB(아두이노)에 최신 펌웨어를 한 번에 업로드. 멈춤(hang) 시 키 눌린 채 고정되던 문제용 워치독(4초 자동재부팅) 포함",
     "💙 \"엠약\" 명칭 → \"파랭이\"로 변경 (UI 버튼·슬라이더·로그·가이드 전부)",
     "💙 파랭이 위치 커스텀 — 핫바/슬롯을 UI에서 직접 지정 가능(기본 F2+F8 유지). F1 슬롯에 두면 핫바전환 자체가 없어져서, 전환 타이밍이 어긋나 다른 슬롯(예: 귀환주문서)이 잘못 눌리는 사고를 원천 차단",
@@ -2450,7 +2451,8 @@ def _set_hw_label(text, color, gen):
         except Exception: pass
 
 def _load_flash_module():
-    """flash_arduino.py 로드 — 로컬(개발폴더) 우선, 없으면 GitHub에서 TEMP로 받아 import."""
+    """flash_arduino.py 로드 — 로컬(개발폴더) 우선, 없으면 GitHub에서 TEMP로 받아 import.
+    TEMP 캐시가 옛 버전이면 펌업 포트검색이 계속 실패할 수 있어, TEMP는 매번 GitHub에서 갱신."""
     import importlib.util
     import tempfile
     cands = []
@@ -2459,8 +2461,6 @@ def _load_flash_module():
     except Exception:
         pass
     cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py"))
-    tmp = os.path.join(tempfile.gettempdir(), "ddong_firmware", "flash_arduino.py")
-    cands.append(tmp)
     for path in cands:
         if os.path.isfile(path):
             try:
@@ -2471,7 +2471,8 @@ def _load_flash_module():
                     return mod
             except Exception:
                 continue
-    # GitHub에서 받아 TEMP에 저장
+    # GitHub에서 받아 TEMP에 저장 (항상 덮어써서 옛 캐시 방지)
+    tmp = os.path.join(tempfile.gettempdir(), "ddong_firmware", "flash_arduino.py")
     try:
         import ssl
         ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
@@ -2541,6 +2542,8 @@ def on_fw_flash_click():
         global ser, SERIAL_PORT
         ok, msg = False, "실패"
         try:
+            # 연결에 이미 쓰던 COM을 펌업에도 그대로 사용 (검색 조건 불일치 방지)
+            preferred = SERIAL_PORT
             with _hw_lock:
                 try:
                     if ser:
@@ -2548,12 +2551,20 @@ def on_fw_flash_click():
                 except Exception:
                     pass
                 ser = None
-            time.sleep(0.4)
+            time.sleep(0.5)
+            # 닫은 뒤에도 포트가 남아있는지 재확인 + auto_find로 보강
+            alive = {p.device for p in serial.tools.list_ports.comports()}
+            found = auto_find_arduino()
+            use_port = preferred if preferred in alive else (found or preferred)
+            if use_port:
+                log_event(f"🔌 펌업 포트: {use_port}")
             mod = _load_flash_module()
             if mod is None:
                 ok, msg = False, "flash_arduino 로드 실패 (인터넷/파일 확인)"
             else:
-                ok, msg = mod.flash(callback=_progress)
+                # TEMP에 캐시된 옛 flash_arduino.py 쓰지 않도록 로컬 최신 우선은 _load가 처리.
+                # port= 로 넘기면 검색 실패해도 연결 COM으로 업로드 가능.
+                ok, msg = mod.flash(callback=_progress, port=use_port or None)
             if ok:
                 # COM 재탐지 (부트로더 후 포트가 바뀔 수 있음)
                 time.sleep(2.0)
