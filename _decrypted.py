@@ -1988,8 +1988,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-28 18:10"
+PATCH_UPDATED_AT = "2026-07-28 18:15"
 LATEST_PATCH = [
+    "🔌 펌업 수정 — 로그상 자동리셋이 부트로더(2341:0036)로 안 들어감. 리셋버튼 2번 수동진입 후 업로드로 변경",
     "🔌 펌업 실패 시 바탕화면 '뚱힐러_펌업로그.txt'에 COM/명령/avrdude 전체 출력 저장 — 원인 진단용",
     "✨ 버프 자동 OFF 저장 수정 — 체크 풀어도 껏다 키면 다시 켜지던 버그(OFF인데 예전 ON값을 다시 저장하던 문제)",
     "🔌 펌업 [확인] — 뚱USB에 'V' 조회 → DDONG-WDT 응답이면 워치독 펌 확인. 펌업 직후에도 자동 확인",
@@ -2670,7 +2671,40 @@ def on_fw_flash_click():
                         mod._kill_stray_avrdude()
                 except Exception:
                     pass
-                ret = mod.flash(callback=_progress, port=use_port or None)
+
+                # 워커 스레드에서 UI 확인창 — 메인스레드로 물어보고 기다림
+                def _ask_manual_reset():
+                    box = {"ok": False}
+                    ev = _threading.Event()
+
+                    def _ask():
+                        try:
+                            box["ok"] = bool(messagebox.askokcancel(
+                                "수동 리셋 필요",
+                                "이 PC는 자동 부트로더 진입이 안 됩니다.\n"
+                                "(로그: COM이 스케치모드 2341:8036에 그대로 머묾)\n\n"
+                                "1) 뚱USB 보드의 【리셋 버튼】을 빠르게 두 번 누르세요\n"
+                                "2) 누른 직후 이 창에서 【확인】을 누르세요\n\n"
+                                "확인 후 약 15초 안에 업로드합니다.\n"
+                                "취소하면 펌업을 중단합니다.",
+                            ))
+                        except Exception:
+                            box["ok"] = True
+                        ev.set()
+
+                    try:
+                        root.after(0, _ask)
+                    except Exception:
+                        box["ok"] = True
+                        ev.set()
+                    ev.wait(timeout=120)
+                    return box["ok"]
+
+                ret = mod.flash(
+                    callback=_progress,
+                    port=use_port or None,
+                    ask_manual_reset=_ask_manual_reset,
+                )
                 if isinstance(ret, tuple) and len(ret) >= 2:
                     ok, msg = ret[0], ret[1]
                     log_path = ret[2] if len(ret) >= 3 else ""
