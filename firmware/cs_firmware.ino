@@ -1,11 +1,32 @@
 #include <Keyboard.h>
 #include <Mouse.h>
 #include <avr/wdt.h>
+#include <avr/interrupt.h>
 
 // 무한 클릭 상태 저장 변수
 bool autoClick = false; 
 unsigned long lastClickTime = 0;
 unsigned long nextInterval = 100;
+
+// Caterina 부트로더 매직키 (Leonardo 소프트 진입용)
+#define CATERINA_MAGIC_ADDR ((uint16_t*)0x0800)
+#define CATERINA_MAGIC_KEY  0x7777
+
+// 🛡️ 펌업용 — 시리얼 '!' 수신 시 부트로더로 점프.
+// 워치독(WDT)을 켜면 Leonardo 기본 1200bps 자동리셋이 깨지므로,
+// 리셋버튼 없는 보드는 이 명령으로만 자동 펌업 가능.
+void enterBootloader() {
+  autoClick = false;
+  Keyboard.releaseAll();
+  Mouse.release(MOUSE_LEFT);
+  Serial.flush();
+  Serial.end();
+  delay(50);
+  cli();
+  *CATERINA_MAGIC_ADDR = CATERINA_MAGIC_KEY;
+  wdt_enable(WDTO_15MS);
+  while (true) {}
+}
 
 // 🛡️ [보안] 키보드 입력 시 사람이 누르는 것처럼 랜덤 시간 적용 (백업 원본 유지)
 void humanPress(uint8_t k) {
@@ -52,6 +73,11 @@ void loop() {
     wdt_reset();
     char cmd = Serial.read();
 
+    // 펌업: PC가 '!' 보내면 부트로더 진입 (리셋버튼/1200bps 불필요)
+    if (cmd == '!') {
+      enterBootloader();  // 돌아오지 않음
+    }
+
     if (cmd == '<') {
       int dx = Serial.parseInt();
       int dy = Serial.parseInt();
@@ -79,9 +105,9 @@ void loop() {
     if (cmd == 'R') { Keyboard.release(KEY_LEFT_SHIFT); autoClick = false; continue; } 
     if (cmd == 'T') { autoClick = !autoClick; continue; }
 
-    // 펌웨어 확인용 — PC에서 'V' 보내면 워치독 포함 펌인지 응답
+    // 펌웨어 확인용 — DDONG-WDT2 = 워치독+시리얼부트로더진입('!') 지원
     if (cmd == 'V') {
-      Serial.println(F("DDONG-WDT"));
+      Serial.println(F("DDONG-WDT2"));
       continue;
     }
 

@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Leonardo 펌업 — 리셋버튼 없이 자동 1200bps 진입.
+"""Leonardo 펌업 — 리셋버튼 없이 자동 진입.
 
-실패 로그에서 확인된 것:
-  - 보드는 진짜 Leonardo (2341:8036)
-  - 짧은 open/close 1200은 close OK 찍혀도 PID가 0036으로 안 바뀜
-  - 수동 더블리셋(0036) 후 업로드는 성공
+원인(로그로 확정):
+  - WDT 켠 스케치는 Leonardo 1200bps soft-reset가 깨짐 (PID 8036→0036 안 됨)
+  - arduino-cli도 동일: Performing 1200-bps touch → No upload port → butterfly_recv fail
+  - 수동 더블리셋은 부트로더 진입 OK
 
-→ 1200을 '오래 열어두고' 여러 방식으로 재시도 + arduino-cli 자동설치 업로드.
-수동 리셋은 최후 수단(버튼 있는 보드만).
+해결:
+  1) 우선 시리얼 '!' 명령 → 펌웨어가 Caterina 매직키+WDT로 부트로더 점프 (리셋버튼 불필요)
+  2) 옛 WDT 펌(명령 없음)이면 1200/cli 재시도 후, 버튼 있는 보드만 1회 수동
+  3) 새 펌(DDONG-WDT2) 올린 뒤부터는 '!' 만으로 자동 펌업
 """
 from __future__ import annotations
 
@@ -232,7 +234,40 @@ def wait_bootloader(timeout=10.0, callback=None, flog=None, hint="부트로더 �
     return None
 
 
-# ─── 자동 1200bps 리셋 (여러 방식) ─────────────────────────
+# ─── 시리얼 '!' 부트로더 진입 (WDT 펌 정상 경로) ───────────
+
+def _enter_bootloader_serial_cmd(port, flog=None):
+    """9600으로 열어 '!' 전송 → 펌웨어 enterBootloader().
+    DDONG-WDT2 이상에서만 동작. 옛 펌이면 무시되고 부트로더 안 뜸."""
+    s = serial.Serial()
+    s.port = port
+    s.baudrate = 9600
+    s.timeout = 0.2
+    s.write_timeout = 1.0
+    s.dsrdtr = False
+    s.rtscts = False
+    s.open()
+    try:
+        try:
+            s.reset_input_buffer()
+        except Exception:
+            pass
+        time.sleep(0.15)
+        s.write(b"!")
+        try:
+            s.flush()
+        except Exception:
+            pass
+        time.sleep(0.05)
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+    flog and flog.log("touch: serial '!' bootloader cmd OK")
+
+
+# ─── 자동 1200bps 리셋 (옛 펌/비WDT 폴백) ─────────────────
 
 def _touch_pyserial_hold(port, flog=None):
     """포트를 1200으로 0.5초 이상 열어 Windows가 SET_LINE_CODING을 보내게 함."""
@@ -366,15 +401,16 @@ def _touch_win32(port, flog=None):
 
 
 def auto_enter_bootloader(port, callback=None, flog=None):
-    """리셋버튼 없이 부트로더(PID 0036) 진입 시도. 성공 시 boot COM 반환."""
+    """리셋버튼 없이 부트로더(PID 0036) 진입 시도. 성공 시 boot COM 반환.
+    1순위: 시리얼 '!' (WDT2). 이후 1200bps 폴백(비WDT/옛 펌)."""
     methods = [
+        ("serial-bang", _enter_bootloader_serial_cmd),
         ("pyserial-hold", _touch_pyserial_hold),
         ("powershell", _touch_powershell),
         ("win32", _touch_win32),
         ("pyserial-reopen", _touch_pyserial_reopen),
     ]
     for name, fn in methods:
-        # 이미 부트로더면 바로 성공
         boot = find_bootloader_port()
         if boot:
             flog and flog.log(f"이미 부트로더: {boot}")
@@ -387,15 +423,22 @@ def auto_enter_bootloader(port, callback=None, flog=None):
         except Exception as e:
             flog and flog.log(f"{name} 예외: {e!r}")
             continue
-        boot = wait_bootloader(timeout=8.0, callback=callback, flog=flog, hint=f"{name} 후")
+        # '!' 는 USB 재열거가 빨라 짧게, 1200은 조금 더
+        wait_s = 6.0 if name == "serial-bang" else 8.0
+        boot = wait_bootloader(timeout=wait_s, callback=callback, flog=flog, hint=f"{name} 후")
         if boot:
             flog and flog.log(f"성공: {name} → {boot}")
             return boot
-        # 포트 번호가 바뀌었을 수 있음 — 스케치 COM 재탐색
         newport = find_arduino(preferred=port)
         if newport and newport != port:
             flog and flog.log(f"COM 변경 {port} → {newport}, 재시도 준비")
             port = newport
+        # '!' 직후 COM이 잠깐 사라졌다가 스케치로 돌아올 수 있음
+        if name == "serial-bang":
+            time.sleep(0.5)
+            newport = find_arduino(preferred=port)
+            if newport:
+                port = newport
     return None
 
 
@@ -570,10 +613,10 @@ def _run_avrdude(root, hex_path, boot_port, callback=None, flog=None):
 
 def flash(callback=None, port=None, ask_manual_reset=None):
     """자동 펌업 우선. return (ok, msg, log_path).
-    ask_manual_reset은 최후 수단(리셋버튼 있는 보드)용 — 기본 경로는 자동만.
+    1) 시리얼 '!' → avrdude  2) 1200/cli 폴백  3) 수동 더블리셋(최후, 1회 업그레이드용)
     """
     flog = FlashLogger()
-    flog.section("펌업 시작 (자동리셋 우선)")
+    flog.section("펌업 시작 (시리얼'!' 우선, 1200은 폴백)")
     flog.log(f"python={sys.version}")
     flog.log(f"preferred={port!r}")
     flog.dump_ports("시작")
@@ -598,10 +641,10 @@ def flash(callback=None, port=None, ask_manual_reset=None):
         if callback:
             callback(10, f"장치: {com}")
 
-        # 시리얼 핸들 완전 해제
+        # 시리얼 핸들 완전 해제 (제어판이 포트 닫은 뒤)
         time.sleep(1.5)
 
-        # 1) 자동 1200 → 부트로더 잡히면 avrdude
+        # 1) '!' / 1200 → 부트로더면 avrdude
         boot = auto_enter_bootloader(com, callback=callback, flog=flog)
         if boot:
             ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
@@ -611,7 +654,7 @@ def flash(callback=None, port=None, ask_manual_reset=None):
                 return True, f"완료(자동/{boot})", flog.save(True, f"완료(자동/{boot})")
             flog.log(f"avrdude 실패: {detail}")
 
-        # 2) arduino-cli (IDE와 동일한 자동리셋 포함)
+        # 2) arduino-cli (비WDT/옛 펌 폴백 — WDT 펌에선 보통 실패)
         flog.section("arduino-cli 자동 업로드")
         com2 = find_arduino(preferred=port) or com
         ok2, detail2 = flash_via_arduino_cli(hex_path, com2, flog=flog, callback=callback)
@@ -621,9 +664,9 @@ def flash(callback=None, port=None, ask_manual_reset=None):
             return True, "완료(arduino-cli)", flog.save(True, "완료(arduino-cli)")
         flog.log(f"arduino-cli 실패: {detail2}")
 
-        # 3) 최후: 리셋버튼 있는 보드만 수동 (없으면 취소하면 됨)
+        # 3) 최후: 옛 WDT 펌→WDT2 1회 업그레이드용 수동 (버튼 있는 보드)
         if callable(ask_manual_reset):
-            flog.section("최후: 수동 더블리셋 (버튼 있는 보드만)")
+            flog.section("최후: 수동 더블리셋 (옛펌→WDT2 1회 / 버튼 있는 보드)")
             if callback:
                 callback(25, "자동 실패 → 수동 안내")
             try:
@@ -640,8 +683,10 @@ def flash(callback=None, port=None, ask_manual_reset=None):
                         return True, f"완료(수동/{boot})", flog.save(True, f"완료(수동/{boot})")
 
         msg = (
-            "자동 펌업 실패 (리셋버튼 없는 보드도 자동으로 되게 재시도했음).\n"
-            f"· 자동1200/avrdude 및 arduino-cli 모두 실패\n"
+            "자동 펌업 실패.\n"
+            "· WDT 펌은 1200bps 자동리셋이 안 됩니다.\n"
+            "· 새 펌(DDONG-WDT2)이면 '!' 로 들어가야 하는데 부트로더가 안 떴습니다.\n"
+            "· 옛 WDT 펌이면 리셋버튼 있는 보드에서 1회 수동 더블리셋으로 WDT2를 올려야 이후 자동됩니다.\n"
             f"· cli: {detail2}\n"
             f"로그: {FLASH_LOG}"
         )
