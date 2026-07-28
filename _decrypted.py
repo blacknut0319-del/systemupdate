@@ -1988,8 +1988,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-28 18:05"
+PATCH_UPDATED_AT = "2026-07-28 18:10"
 LATEST_PATCH = [
+    "🔌 펌업 실패 시 바탕화면 '뚱힐러_펌업로그.txt'에 COM/명령/avrdude 전체 출력 저장 — 원인 진단용",
     "✨ 버프 자동 OFF 저장 수정 — 체크 풀어도 껏다 키면 다시 켜지던 버그(OFF인데 예전 ON값을 다시 저장하던 문제)",
     "🔌 펌업 [확인] — 뚱USB에 'V' 조회 → DDONG-WDT 응답이면 워치독 펌 확인. 펌업 직후에도 자동 확인",
     "🔌 펌업 COM 자동인식 수정 — 연결에 쓰는 포트/검색방식과 통일. '연결은 되는데 펌업만 포트 못찾음' 해결",
@@ -2642,6 +2643,7 @@ def on_fw_flash_click():
         global ser, SERIAL_PORT
         ok, msg = False, "실패"
         wdt_ok, wdt_detail = False, ""
+        log_path = ""
         try:
             # 연결에 이미 쓰던 COM을 펌업에도 그대로 사용 (검색 조건 불일치 방지)
             preferred = SERIAL_PORT
@@ -2668,7 +2670,18 @@ def on_fw_flash_click():
                         mod._kill_stray_avrdude()
                 except Exception:
                     pass
-                ok, msg = mod.flash(callback=_progress, port=use_port or None)
+                ret = mod.flash(callback=_progress, port=use_port or None)
+                if isinstance(ret, tuple) and len(ret) >= 2:
+                    ok, msg = ret[0], ret[1]
+                    log_path = ret[2] if len(ret) >= 3 else ""
+                else:
+                    ok, msg = bool(ret), str(ret)
+                if not log_path:
+                    cand = os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_펌업로그.txt")
+                    if os.path.isfile(cand):
+                        log_path = cand
+                if log_path:
+                    log_event(f"🔌 펌업로그: {log_path}")
             if ok:
                 # 업로드 성공이면 워치독 hex가 들어간 것. 확인응답(V)은 보너스.
                 time.sleep(2.5)
@@ -2713,19 +2726,27 @@ def on_fw_flash_click():
                         pass
             else:
                 log_event(f"❌ 펌업 실패 — {msg}")
+                if log_path:
+                    log_event(f"❌ 상세로그: {log_path}")
                 try:
                     lbl_ard.configure(text="○ 펌업실패", text_color="#f85149")
                 except Exception:
                     pass
                 try:
-                    messagebox.showerror(
-                        "펌업 실패",
+                    tip = (
                         f"{msg}\n\n"
-                        "1) 뚱힐러를 완전히 종료\n"
-                        "2) USB 뽑았다가 다시 꽂기\n"
-                        "3) 다시 실행 후 [펌업] 한 번만\n"
-                        "(자동 무한재시도 없음)",
+                        f"상세 로그:\n{log_path or '(없음)'}\n\n"
+                        "로그 파일을 메모장으로 열어둘까요?\n"
+                        "(그 내용을 주시면 원인 짚을 수 있습니다)"
                     )
+                    if log_path and os.path.isfile(log_path):
+                        if messagebox.askyesno("펌업 실패", tip):
+                            try:
+                                os.startfile(log_path)
+                            except Exception:
+                                subprocess.Popen(["notepad.exe", log_path])
+                    else:
+                        messagebox.showerror("펌업 실패", tip)
                 except Exception:
                     pass
         try:
