@@ -122,6 +122,7 @@ _reconnect_req = False       # 드롭다운으로 장치 바꾸면 True → 워�
 _hw_ui_ready = False         # UI 초기화 끝나기 전엔 재연결 요청 무시(콤보박스 생성시 command 오발동 방지)
 _hw_lock = Lock()            # connect_hardware 동시호출(시작버튼+워커) 직렬화
 _hw_status_gen = 0           # 장치 라벨 갱신 세대번호 — 예전 after 콜백이 최신 상태를 덮어쓰지 않게
+_fw_flash_busy = False       # 아두이노 펌업 진행 중 (연타 방지)
 _toggle_busy = False         # Insert 시작/정지 처리 중 — 연타해도 중복 실행 방지 (키보드 후킹 콜백은 항상 즉시 반환)
 _logo_frames = []            # 뚱박스 LCD 로고 프레임 (BGR flatten)
 _logo_delay = 0.08           # 프레임 간격(초)
@@ -1240,6 +1241,7 @@ def open_guide_panel():
     add_t("🕹️ 장치 (뚱USB / 뚱박스)")
     add_w("상단 [장치]에서 뚱USB(기존) 또는 뚱박스 중 선택합니다")
     add_w("뚱USB: 꽂으면 자동 인식, 설정 필요 없음 (기존 사용자는 그대로)")
+    add_w("펌업 버튼: 뚱USB(아두이노)에 최신 펌웨어를 한 번에 구워 넣음 (워치독 포함). 작업 중엔 정지 상태여야 함")
     add_w("뚱박스: 박스 화면에 뜬 IP·포트·UUID를 입력칸에 넣고 [설정저장] 후 시작")
     add_w("뚱박스 처음 쓸 때 필요한 파일은 자동으로 받아집니다 (인터넷 연결 필요)")
     add_w("뚱박스 화면에 로고가 뜹니다 — 사냥 중엔 움직이고, 멈추면 박스 정보가 다시 보입니다")
@@ -1977,8 +1979,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-27 23:30"
+PATCH_UPDATED_AT = "2026-07-28 15:35"
 LATEST_PATCH = [
+    "🔌 제어판 [펌업] 버튼 — 뚱USB(아두이노)에 최신 펌웨어를 한 번에 업로드. 멈춤(hang) 시 키 눌린 채 고정되던 문제용 워치독(4초 자동재부팅) 포함",
     "💙 \"엠약\" 명칭 → \"파랭이\"로 변경 (UI 버튼·슬라이더·로그·가이드 전부)",
     "💙 파랭이 위치 커스텀 — 핫바/슬롯을 UI에서 직접 지정 가능(기본 F2+F8 유지). F1 슬롯에 두면 핫바전환 자체가 없어져서, 전환 타이밍이 어긋나 다른 슬롯(예: 귀환주문서)이 잘못 눌리는 사고를 원천 차단",
     "📡 UDP 원격명령(Insert/Home/PageUp/F4 등) 수신 시 어느 IP에서 왔는지 로그에 남김 — 원인모를 정지/멍때림 추적용",
@@ -2446,6 +2449,148 @@ def _set_hw_label(text, color, gen):
         try: root.after(0, _apply)
         except Exception: pass
 
+def _load_flash_module():
+    """flash_arduino.py 로드 — 로컬(개발폴더) 우선, 없으면 GitHub에서 TEMP로 받아 import."""
+    import importlib.util
+    import tempfile
+    cands = []
+    try:
+        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py"))
+    except Exception:
+        pass
+    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py"))
+    tmp = os.path.join(tempfile.gettempdir(), "ddong_firmware", "flash_arduino.py")
+    cands.append(tmp)
+    for path in cands:
+        if os.path.isfile(path):
+            try:
+                spec = importlib.util.spec_from_file_location("ddong_flash_arduino", path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                if hasattr(mod, "flash"):
+                    return mod
+            except Exception:
+                continue
+    # GitHub에서 받아 TEMP에 저장
+    try:
+        import ssl
+        ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+        url = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/flash_arduino.py"
+        req = urllib.request.Request(url, headers={"User-Agent": "ddong"})
+        data = urllib.request.urlopen(req, timeout=30, context=ctx).read()
+        os.makedirs(os.path.dirname(tmp), exist_ok=True)
+        with open(tmp, "wb") as f:
+            f.write(data)
+        spec = importlib.util.spec_from_file_location("ddong_flash_arduino", tmp)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if hasattr(mod, "flash"):
+            return mod
+    except Exception:
+        pass
+    return None
+
+def on_fw_flash_click():
+    """제어판 [펌업] — 시리얼 닫고 아두이노에 최신 hex 업로드."""
+    global ser, running, SERIAL_PORT, _fw_flash_busy
+    if _fw_flash_busy:
+        log_event("⏳ 펌업 진행 중…")
+        return
+    if hw_var.get() in ("뚱박스", "KMBox"):
+        log_event("⚠️ 펌업은 뚱USB(아두이노) 전용입니다")
+        try:
+            messagebox.showinfo("펌업", "펌업은 뚱USB(아두이노) 전용입니다.\n장치를 뚱USB로 바꾼 뒤 다시 눌러주세요.")
+        except Exception:
+            pass
+        return
+    if running:
+        try:
+            if messagebox.askyesno("펌업", "사냥 중입니다.\n정지한 뒤 펌웨어를 업로드할까요?"):
+                stop_everything("펌업 전 정지")
+            else:
+                return
+        except Exception:
+            stop_everything("펌업 전 정지")
+    else:
+        try:
+            if not messagebox.askyesno("펌업", "뚱USB(아두이노)에 최신 펌웨어(워치독 포함)를 구워 넣을까요?\n업로드 중엔 USB를 뽑지 마세요."):
+                return
+        except Exception:
+            pass
+
+    globals()['_fw_flash_busy'] = True
+    try:
+        lbl_ard.configure(text="⏳ 펌업 준비…", text_color="#f9e2af")
+    except Exception:
+        pass
+    log_event("🔌 펌업 시작 — 장치 연결 해제 중")
+
+    def _progress(pct, msg):
+        def _ui():
+            try:
+                lbl_ard.configure(text=f"⏳ 펌업 {pct}%", text_color="#f9e2af")
+            except Exception:
+                pass
+            log_event(f"🔌 {msg}")
+        try:
+            root.after(0, _ui)
+        except Exception:
+            pass
+
+    def _worker():
+        global ser, SERIAL_PORT
+        ok, msg = False, "실패"
+        try:
+            with _hw_lock:
+                try:
+                    if ser:
+                        ser.close()
+                except Exception:
+                    pass
+                ser = None
+            time.sleep(0.4)
+            mod = _load_flash_module()
+            if mod is None:
+                ok, msg = False, "flash_arduino 로드 실패 (인터넷/파일 확인)"
+            else:
+                ok, msg = mod.flash(callback=_progress)
+            if ok:
+                # COM 재탐지 (부트로더 후 포트가 바뀔 수 있음)
+                time.sleep(2.0)
+                found = auto_find_arduino()
+                if found:
+                    SERIAL_PORT = found
+                try:
+                    connect_hardware()
+                except Exception:
+                    pass
+        except Exception as e:
+            ok, msg = False, str(e)
+        def _done():
+            globals()['_fw_flash_busy'] = False
+            if ok:
+                log_event(f"✅ 펌업 완료 — {msg}")
+                try:
+                    messagebox.showinfo("펌업", "펌웨어 업로드 완료!\n아두이노가 자동 재시작됩니다.")
+                except Exception:
+                    pass
+            else:
+                log_event(f"❌ 펌업 실패 — {msg}")
+                try:
+                    lbl_ard.configure(text="○ 펌업실패", text_color="#f85149")
+                except Exception:
+                    pass
+                try:
+                    messagebox.showerror("펌업 실패", f"{msg}\n\n· 뚱USB가 꽂혀 있는지\n· 다른 시리얼 모니터/프로그램이 COM을 쓰는지\n확인 후 다시 시도하세요.")
+                except Exception:
+                    pass
+        try:
+            root.after(0, _done)
+        except Exception:
+            globals()['_fw_flash_busy'] = False
+
+    Thread(target=_worker, daemon=True).start()
+
 def connect_hardware():
     """하드웨어 연결 (드롭다운 선택에 따라 아두이노/KMBox). 재연결에도 재사용.
     시작버튼과 워커가 동시에 부르면 COM포트 충돌로 한쪽만 실패→라벨만 실패로 남는
@@ -2840,6 +2985,14 @@ hw_combo = ctk.CTkComboBox(frame_hw, values=["뚱USB", "뚱박스"], variable=hw
                            fg_color="#1e1e2e", button_color="#800020", border_width=1, border_color="#45475a",
                            command=lambda v: _on_hw_mode_change(v))
 hw_combo.pack(side="left", padx=2)
+btn_fw_flash = ctk.CTkButton(
+    frame_hw, text="펌업", width=52, height=22,
+    font=("Malgun Gothic", 9, "bold"),
+    fg_color="#1f6feb", hover_color="#388bfd",
+    command=on_fw_flash_click,
+)
+btn_fw_flash.pack(side="left", padx=(6, 2))
+ctk.CTkLabel(frame_hw, text="뚱USB 펌웨어", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(side="left", padx=(0, 4))
 
 frame_kmfields = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=6)
 _kmr1 = ctk.CTkFrame(frame_kmfields, fg_color="transparent"); _kmr1.pack(fill='x', pady=1)
