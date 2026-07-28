@@ -2643,8 +2643,8 @@ def on_fw_flash_click():
                 except Exception:
                     pass
                 ser = None
-            time.sleep(0.5)
-            # 닫은 뒤에도 포트가 남아있는지 재확인 + auto_find로 보강
+            # Windows 시리얼 핸들 완전 해제 + 좀비 avrdude 정리 시간
+            time.sleep(2.0)
             alive = {p.device for p in serial.tools.list_ports.comports()}
             found = auto_find_arduino()
             use_port = preferred if preferred in alive else (found or preferred)
@@ -2654,8 +2654,11 @@ def on_fw_flash_click():
             if mod is None:
                 ok, msg = False, "flash_arduino 로드 실패 (인터넷/파일 확인)"
             else:
-                # TEMP에 캐시된 옛 flash_arduino.py 쓰지 않도록 로컬 최신 우선은 _load가 처리.
-                # port= 로 넘기면 검색 실패해도 연결 COM으로 업로드 가능.
+                try:
+                    if hasattr(mod, "_kill_stray_avrdude"):
+                        mod._kill_stray_avrdude()
+                except Exception:
+                    pass
                 ok, msg = mod.flash(callback=_progress, port=use_port or None)
             if ok:
                 # 업로드 성공이면 워치독 hex가 들어간 것. 확인응답(V)은 보너스.
@@ -2728,6 +2731,9 @@ def connect_hardware():
     시작버튼과 워커가 동시에 부르면 COM포트 충돌로 한쪽만 실패→라벨만 실패로 남는
     문제가 있어서 Lock으로 직렬화하고, 라벨은 세대번호로 최신 결과만 반영."""
     global ser
+    # 펌업 중엔 COM을 절대 다시 열지 않음 (부트로더 가로채기 방지)
+    if globals().get('_fw_flash_busy'):
+        return False
     with _hw_lock:
         globals()['_hw_status_gen'] = int(globals().get('_hw_status_gen', 0)) + 1
         gen = globals()['_hw_status_gen']
@@ -2780,7 +2786,7 @@ def expert_logic():
 
     while True:
         now = time.time()
-        if _reconnect_req and not running:
+        if _reconnect_req and not running and not globals().get('_fw_flash_busy'):
             globals()['_reconnect_req'] = False
             connect_hardware()
         if running and ser and getattr(ser, 'is_open', False):
