@@ -492,16 +492,31 @@ last_loot_sent_time = 0
 loot_interval = 5.0
 debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0}
 
-# ── 채팅 타이핑 감지 (자힐 등이 채팅 중 focus_lineage_window로 게임에 힐 난사하는 것 방지) ──
+# ── 채팅 타이핑 감지 ──
+# 주의: 클릭/고정(PgUp)은 아두이노가 Shift를 누른 채로 둠.
+# Windows가 Shift 키다운을 반복 발생시키면 '채팅 중'으로 오인되어
+# 파랭이·버프·줍기·해독이 영구 정지됨(힐은 예외라 혼자만 동작). → 수정자/매크로키는 무시.
 last_typing_time = 0.0
-TYPING_PAUSE_SEC = 1.5   # 마지막 타이핑 이후 이만큼은 자힐/버프/줍기/해독 등 일반동작 일시정지 (위기베르는 예외, 계속 보호됨)
-_TYPING_IGNORE_KEYS = {f"f{i}" for i in range(1, 13)}   # 뚱힐러 매크로는 F1~F12만 보냄 — 이건 타이핑으로 안 침(오탐 방지)
+TYPING_PAUSE_SEC = 1.5
+_TYPING_IGNORE_KEYS = {f"f{i}" for i in range(1, 13)} | {
+    "shift", "left shift", "right shift",
+    "ctrl", "control", "left ctrl", "right ctrl", "left control", "right control",
+    "alt", "left alt", "right alt",
+    "cmd", "windows", "left windows", "right windows",
+    "caps lock", "num lock", "scroll lock",
+    "esc", "escape", "up", "down", "left", "right",
+    "home", "end", "page up", "page down", "insert", "delete",
+    "print screen", "pause", "menu", "tab",
+}
 def _on_any_keypress(e):
     global last_typing_time
     try:
         name = (getattr(e, "name", "") or "").lower()
-        if name in _TYPING_IGNORE_KEYS: return
-        last_typing_time = time.time()
+        if not name or name in _TYPING_IGNORE_KEYS:
+            return
+        # 채팅에 들어가는 키만 (문자/숫자/공백/엔터/백스페이스)
+        if len(name) == 1 or name in ("space", "enter", "backspace"):
+            last_typing_time = time.time()
     except Exception:
         pass
 current_f9_prob = 0.3
@@ -1232,7 +1247,7 @@ def open_guide_panel():
     add_d("독 해독", "본인 독 걸리면 엔줄 자동 섭취 (두번째단축키 F9)")
     add_d("격수 해독", "격수 독 걸리면 큐어포이즌 자동 시전 (두번째단축키 F10)")
     add_d("파티 해독", "파티원 HP바 초록(독)이면 F2→F10→파티창클릭→F1")
-    add_d("파랭이", "지정한 핫바+슬롯(기본 F2+F8) · 엠통% 이하 시 10분마다 자동 복용")
+    add_d("파랭이", "지정한 핫바+슬롯(기본 F2+F8) · 엠통% 이하이면 자동 복용 (수초마다 재시도)")
     add_d("확률(%)", "0%: 물약만 / 100%: 힐만 / 그 외: 섞어서 확률 시전")
     add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐")
     add_d("위기% 슬라이더", "위험한 피통 이하일 때 위험베르 자동 사용")
@@ -1950,6 +1965,32 @@ def human_mouse_move(tx, ty):
             except: break
             time.sleep(human_delay(0.002, 0.004))
 
+def _pause_attack_click():
+    """고정(Shift+클릭) / 따라다니기(클릭) 잠시 해제. 복구용 상태 반환."""
+    was_fixed = bool(chk_fix and chk_fix.get())
+    was_follow = bool(chk_follow and chk_follow.get()) and not was_fixed
+    if not ser or not getattr(ser, "is_open", False):
+        return False, False
+    try:
+        if was_fixed:
+            ser.write(b'U'); time.sleep(0.05)   # Shift 뗌 + 클릭OFF (키 잔류 방지)
+        elif was_follow:
+            ser.write(b'T'); time.sleep(0.06)
+    except Exception:
+        return False, False
+    return was_fixed, was_follow
+
+def _resume_attack_click(was_fixed, was_follow):
+    if not ser or not getattr(ser, "is_open", False):
+        return
+    try:
+        if was_fixed and chk_fix and chk_fix.get():
+            ser.write(b'H'); time.sleep(0.04)   # 고정 복구
+        elif was_follow and chk_follow and chk_follow.get():
+            ser.write(b'T'); time.sleep(0.04)
+    except Exception:
+        pass
+
 def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
     global ser, running
     if not running: return
@@ -1957,10 +1998,10 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
     # 키/클릭이 게임에 먹히려면 리니지 포커스 필요. 폼은 topmost로 위에 유지.
     focus_lineage_window()
     time.sleep(0.02)
-    was_auto = chk_follow.get() if chk_follow else False
-    if was_auto:
-        try: ser.write(b'T'); time.sleep(0.06)
-        except: return
+    # skip_follow_toggle=True → 호출측에서 이미 _pause/_resume 함 (중복 U/H 금지)
+    was_fixed, was_follow = (False, False)
+    if not skip_follow_toggle:
+        was_fixed, was_follow = _pause_attack_click()
     try:
         for k in keys:
             if not running: break
@@ -1968,28 +2009,21 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
         if running: time.sleep(random.uniform(max(0.15, end_delay*0.7), max(0.5, end_delay*1.8)))
     finally:
         if not ser or not getattr(ser, "is_open", False): return
-        if was_auto:
-            try: ser.write(b'T'); time.sleep(0.04)
-            except: pass
-        # 키가 끝난 뒤에도 폼이 뒤로 안 가게
+        if not skip_follow_toggle:
+            _resume_attack_click(was_fixed, was_follow)
         try:
             if root: root.attributes("-topmost", True)
         except Exception:
             pass
 
 def fix_mode_keys(keys, delay=0.5):
-    if not ser or not getattr(ser, "is_open", False): return
-    if chk_fix and chk_fix.get():
-        try: ser.write(b'U'); time.sleep(0.02)
-        except: return
+    # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
-    if not ser or not getattr(ser, "is_open", False): return
-    if chk_fix and chk_fix.get():
-        try: ser.write(b'H'); time.sleep(0.02)
-        except: pass
 
-PATCH_UPDATED_AT = "2026-07-29 10:40"
+PATCH_UPDATED_AT = "2026-07-29 14:00"
 LATEST_PATCH = [
+    "💙 파랭이(엠약) 복구 — 채팅대기에 막히던 것 제거 + 10분 쿨 때문에 한 번 빗나가면 안 먹히던 문제→ROI% 이하면 수초마다 재시도. 로그에 누른 키도 표시",
+    "🩹 파랭이(엠약)·버프 안 먹히던 버그 — 클릭/고정 시 Shift 키반복이 '채팅 중'으로 오인되어 파랭이·줍기·버프·해독이 영구정지되던 문제. 수정자키는 타이핑으로 안 침. 고정 중 힐 후 클릭 안 되던 복구도 같이 수정",
     "🔌 펌업 로그 txt 제거 — 바탕화면 '뚱힐러_펌업로그.txt' 더 이상 안 만듦",
     "🔌 펌업 WDT3 — 시스템WDT가 1200자동리셋을 깨서 인터럽트WDT로 교체(멈춤시 키해제+재부팅 유지). hex TEMP고착(20312) 강제갱신. 확인응답 DDONG-WDT3",
     "🔌 펌업 WDT2 — WDT 때문에 1200bps 자동리셋이 깨짐(로그확정). 시리얼 '!'로 부트로더 진입. 확인응답 DDONG-WDT2. 옛WDT는 버튼보드에서 1회 수동만",
@@ -2907,12 +2941,16 @@ def expert_logic():
             if not _typing_now and chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
                 last_loot_sent_time = now; ser.write(b'4'); last_loot = now; loot_interval = random.uniform(4.0, 7.0); log_event('🎒 줍기') 
 
-            # 파랭이 (마나 물약)
-            if not _typing_now and chk_mna and chk_mna.get() and MNA_ROI[0] != 0 and (now - last_mna_potion >= 600):
+            # 파랭이 (마나 물약) — 힐과 같이 생명/유지에 필요해서 타이핑 대기에 안 막음.
+            # 예전 600초(10분) 쿨은 키 한 번 빗나가면 10분을 통째로 쉬어서 '설정했는데 안 먹음'처럼 보였음.
+            # 게임 물약 쿨이 따로 있으므로, ROI% 미만이면 짧게 재시도.
+            if chk_mna and chk_mna.get() and MNA_ROI[0] != 0 and (now - last_mna_potion >= 5.0):
                 mna_pct = roi_mna_pct(frame, MNA_ROI, MNA_100_REF)
                 if mna_pct < mna_threshold:
-                    execute_keys(mna_potion_keys(), 0.5); last_mna_potion = now
-                    log_event(f"💙 파랭이 (MP:{mna_pct:.0f}%)")
+                    keys = mna_potion_keys()
+                    execute_keys(keys, 0.5)
+                    last_mna_potion = now
+                    log_event(f"💙 파랭이 (MP:{mna_pct:.0f}%≤{mna_threshold}% / {'+'.join(keys)})")
                     continue
 
             m = mode_var.get() if mode_var else "파티"
@@ -2948,14 +2986,13 @@ def expert_logic():
                     if m == "파티":
                         pt_orig = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt_orig))
                         orig_x, orig_y = pt_orig.x, pt_orig.y
-                        was_auto = chk_follow.get() if chk_follow else False
-                        if was_auto: ser.write(b'T'); time.sleep(0.03)
+                        was_fixed, was_follow = _pause_attack_click()
                         focus_lineage_window()
                         human_mouse_move(cure_tx + random.randint(-3, 3), cure_ty + random.randint(-2, 2)); time.sleep(0.02)
-                        # F2→F10(큐어포이즌)→클릭(대상지정)→F1
-                        fix_mode_keys(['2', 'X', 'K', '1'], 0.45)
+                        # F2→F10(큐어포이즌)→클릭(대상지정)→F1 — 이미 pause됨, 키만 전송
+                        execute_keys(['2', 'X', 'K', '1'], 0.45, skip_follow_toggle=True)
                         human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
-                        if was_auto: ser.write(b'T'); time.sleep(0.03)
+                        _resume_attack_click(was_fixed, was_follow)
                     else:
                         fix_mode_keys(['2', 'X', '1'], 0.45)
                     last_party_cure = now; log_event(f'🟢 파티해독 P{cure_pi + 1}'); continue
@@ -2996,20 +3033,20 @@ def expert_logic():
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
-                        if prob == 0: execute_keys(['E'], 1.0, skip_follow_toggle=True)
-                        elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                        if prob == 0: execute_keys(['E'], 1.0)
+                        elif prob >= 100: execute_keys(['B'], 0.5)
                         else:
-                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                            else: execute_keys(['E'], 1.0, skip_follow_toggle=True)
+                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                            else: execute_keys(['E'], 1.0)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
-                    if prob == 0: execute_keys(['E'], 1.0, skip_follow_toggle=True)
-                    elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                    if prob == 0: execute_keys(['E'], 1.0)
+                    elif prob >= 100: execute_keys(['B'], 0.5)
                     else:
-                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                        else: execute_keys(['E'], 1.0, skip_follow_toggle=True)
+                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                        else: execute_keys(['E'], 1.0)
                     last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
 
                 if not healed:
@@ -3022,11 +3059,15 @@ def expert_logic():
                                     best_hp = hp_pct; best_i = i
                     if best_i >= 0:
                         focus_lineage_window()
-                        if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
-                            ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
-                        else:
-                            ser.write(b'A')
-                        time.sleep(human_delay(1.2, 1.6)); healed = True
+                        was_fixed, was_follow = _pause_attack_click()
+                        try:
+                            if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
+                                ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
+                            else:
+                                ser.write(b'A')
+                            time.sleep(human_delay(1.2, 1.6)); healed = True
+                        finally:
+                            _resume_attack_click(was_fixed, was_follow)
                     if healed: continue
 
             # 파티
@@ -3037,20 +3078,20 @@ def expert_logic():
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
-                        if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
-                        elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                        if prob == 0: execute_keys(['E'], 0.8)
+                        elif prob >= 100: execute_keys(['B'], 0.5)
                         else:
-                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                            else: execute_keys(['E'], 0.8, skip_follow_toggle=True)
+                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                            else: execute_keys(['E'], 0.8)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
-                    if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
-                    elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                    if prob == 0: execute_keys(['E'], 0.8)
+                    elif prob >= 100: execute_keys(['B'], 0.5)
                     else:
-                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                        else: execute_keys(['E'], 0.8, skip_follow_toggle=True)
+                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                        else: execute_keys(['E'], 0.8)
                     last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
 
                 if not healed:
@@ -3067,15 +3108,14 @@ def expert_logic():
                                     x1,y1,x2,y2 = PARTY_ROIS[pi]
                                     best_tx, best_ty = (x1+x2)//2, (y1+y2)//2
                     if best_pi >= 0:
-                        was_auto = chk_follow.get() if chk_follow else False
-                        if was_auto: ser.write(b'T'); time.sleep(0.03)
+                        was_fixed, was_follow = _pause_attack_click()
                         focus_lineage_window()
                         human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
                         use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                         heal_key = '7' if use_strong else 'A'
                         execute_keys(['K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
                         human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
-                        if was_auto: ser.write(b'T'); time.sleep(0.03)
+                        _resume_attack_click(was_fixed, was_follow)
                         last_party_heal = now; healed = True
                         if use_strong:
                             log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
@@ -3088,20 +3128,20 @@ def expert_logic():
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
-                        if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
-                        elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                        if prob == 0: execute_keys(['E'], 0.8)
+                        elif prob >= 100: execute_keys(['B'], 0.5)
                         else:
-                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                            else: execute_keys(['E'], 0.8, skip_follow_toggle=True)
+                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                            else: execute_keys(['E'], 0.8)
                         last_self_heal = now; action_taken = True
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 20) and (now - last_self_heal >= 0.2):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
-                    if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
-                    elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                    if prob == 0: execute_keys(['E'], 0.8)
+                    elif prob >= 100: execute_keys(['B'], 0.5)
                     else:
-                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                        else: execute_keys(['E'], 0.8, skip_follow_toggle=True)
+                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                        else: execute_keys(['E'], 0.8)
                     last_self_heal = now; action_taken = True
                 
                 if not action_taken and (now - last_noparty_heal >= 0.2):
@@ -3109,13 +3149,17 @@ def expert_logic():
                     atk_hp = attacker_hp_udp
                     if chk_attacker_sw.get() and udp_ok and atk_hp < attacker_hp_threshold:
                         focus_lineage_window()
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
-                        if use_strong:
-                            ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
-                        elif random.randint(1, 100) <= 85:
-                            ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
-                        else:
-                            time.sleep(human_delay(0.2, 0.3))
+                        was_fixed, was_follow = _pause_attack_click()
+                        try:
+                            use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
+                            if use_strong:
+                                ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
+                            elif random.randint(1, 100) <= 85:
+                                ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(1.2, 1.6))
+                            else:
+                                time.sleep(human_delay(0.2, 0.3))
+                        finally:
+                            _resume_attack_click(was_fixed, was_follow)
                         last_noparty_heal = now
 
                 
