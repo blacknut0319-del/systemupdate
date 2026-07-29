@@ -118,7 +118,7 @@ BAUD_RATE = 9600
 
 # ── 하드웨어 선택 (아두이노 / KMBox) ──
 HW_MODE = "뚱USB"          # license.dat에서 로드됨. 드롭다운으로 변경 (뚱USB=아두이노 / 뚱박스=KMBox)
-_reconnect_req = False       # 드롭다운으로 장치 바꾸면 True → 워커가 재연결
+_reconnect_req = False       # Insert 시작 등에서만 True. 드롭다운 변경으로는 안 켬(없는 뚱박스 init → UI 응답없음)
 _hw_ui_ready = False         # UI 초기화 끝나기 전엔 재연결 요청 무시(콤보박스 생성시 command 오발동 방지)
 _hw_lock = Lock()            # connect_hardware 동시호출(시작버튼+워커) 직렬화
 _hw_status_gen = 0           # 장치 라벨 갱신 세대번호 — 예전 after 콜백이 최신 상태를 덮어쓰지 않게
@@ -126,6 +126,8 @@ _fw_flash_busy = False       # 아두이노 펌업 진행 중 (연타 방지)
 _toggle_busy = False         # Insert 시작/정지 처리 중 — 연타해도 중복 실행 방지 (키보드 후킹 콜백은 항상 즉시 반환)
 _logo_frames = []            # 뚱박스 LCD 로고 프레임 (BGR flatten)
 _logo_delay = 0.08           # 프레임 간격(초)
+_party_alive_streak = 0      # 파티창 연속 감지 카운트 (배경 오탐 유령힐 방지)
+PARTY_ALIVE_NEED = 15        # 연속 N프레임 바가 보여야 파티창으로 인정
 
 # ── KMBox Net 접속 설정 (아두이노 대체 하드웨어) ──
 KM_IP = '192.168.2.188'
@@ -361,9 +363,25 @@ class KmBox:
     def __init__(self, ip, port, mac):
         if kmNet is None:
             raise RuntimeError("kmNet 모듈(pyd) 없음")
-        r = kmNet.init(ip, port, mac)
-        if r != 0:
-            raise RuntimeError("뚱박스 연결 실패(%s)" % r)
+        # kmNet.init 이 잘못된 IP에서 수십 초~무한 블로킹 + GIL 점유 → 폼 '응답 없음'.
+        # 별도 스레드 + 2초 타임아웃으로 막음 (예전 a64cab2 복구).
+        box = {"r": None, "err": None}
+
+        def _do_init():
+            try:
+                box["r"] = kmNet.init(str(ip), str(port), str(mac))
+            except Exception as e:
+                box["err"] = e
+
+        t = Thread(target=_do_init, daemon=True)
+        t.start()
+        t.join(2.0)
+        if t.is_alive():
+            raise RuntimeError("뚱박스 연결 타임아웃(2초) — IP/전원/케이블 확인")
+        if box["err"] is not None:
+            raise box["err"]
+        if box["r"] != 0:
+            raise RuntimeError("뚱박스 연결 실패(%s)" % box["r"])
         self.is_open = True
         self._buf = b""
         self._auto = False
@@ -1608,10 +1626,10 @@ def _hp_bar_band_cols(arr):
     # 빈칸 오힐 방지: 구조판정(좌측시작·세로꽉참)은 그대로 유지.
     # 초록은 floor를 더 크게 해서, 게임 뒷배경의 흩어진 초록 잡픽셀은 바로 안 보고
     # 진짜 독 HP바처럼 넓게 이어진 초록만 인정.
-    red_cols, red_ok = _measure(red, max(3, w // 25))
+    red_cols, red_ok = _measure(red, max(8, w // 10))   # 배경 잡픽셀 오탐 더 강하게 차단
     if red_ok:
         return red_cols, w, True
-    grn_cols, grn_ok = _measure(grn, max(8, w // 5))
+    grn_cols, grn_ok = _measure(grn, max(10, w // 4))
     if grn_ok:
         return grn_cols, w, True
     return 0, w, False        # 빈칸·사망·게임배경(바 없음)
@@ -1809,11 +1827,16 @@ def count_live_party_bars(frame, flags):
 
 def party_window_alive(frame, flags):
     """파티창이 실제로 떠 있는지.
-    활성 슬롯에 바가 1개도 없으면 파티 미참여/창 닫힘으로 보고
-    HP 홀드를 비워 유령 힐(마우스만 이동)을 막는다."""
+    한 프레임 배경 오탐으로 유령힐이 나가지 않게, 연속 N프레임 바가 보여야 인정.
+    바가 사라지면 즉시 홀드 폐기 + 스트릭 리셋."""
+    global _party_alive_streak
     n = count_live_party_bars(frame, flags)
     if n <= 0:
+        _party_alive_streak = 0
         _party_hp_hold.clear()
+        return False
+    _party_alive_streak += 1
+    if _party_alive_streak < PARTY_ALIVE_NEED:
         return False
     return True
 
@@ -2046,8 +2069,10 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-07-29 14:05"
+PATCH_UPDATED_AT = "2026-07-29 14:20"
 LATEST_PATCH = [
+    "🚫 파티 유령힐 재차단 — HP바 오탐 기준 강화 + 연속 15프레임 확인 후에만 파티힐. 미파티/창없음에 마우스 이동 방지",
+    "🕹️ 뚱박스 드롭다운 응답없음 복구 — 장치만 바꿔도 kmNet.init 하던 퇴화 제거(연결은 Insert때만). init 2초 타임아웃 복구",
     "🚫 파티창 없을 때 파티힐 차단 — 미파티/창닫힘인데 ROI 배경·직전홀드값으로 마우스만 이동하던 유령힐 방지. 이번 프레임에 HP바가 보이는 슬롯만 타겟",
     "💙 파랭이(엠약) 복구 — 채팅대기에 막히던 것 제거 + 10분 쿨 때문에 한 번 빗나가면 안 먹히던 문제→ROI% 이하면 수초마다 재시도. 로그에 누른 키도 표시",
     "🩹 파랭이(엠약)·버프 안 먹히던 버그 — 클릭/고정 시 Shift 키반복이 '채팅 중'으로 오인되어 파랭이·줍기·버프·해독이 영구정지되던 문제. 수정자키는 타이핑으로 안 침. 고정 중 힐 후 클릭 안 되던 복구도 같이 수정",
@@ -3328,10 +3353,13 @@ def _toggle_km_fields():
         frame_kmfields.pack_forget()
 
 def _on_hw_mode_change(v=None):
-    """사용자가 장치 드롭다운을 바꿀 때만 재연결 요청.
-    UI 초기화 중 콤보박스가 command를 자동 호출해도 _hw_ui_ready 전에는 무시."""
-    if globals().get('_hw_ui_ready'):
-        globals()['_reconnect_req'] = True
+    """장치 드롭다운 변경 — 입력칸만 토글. 여기서 재연결하지 않음.
+    (없는 뚱박스로 잘못 고르면 kmNet.init 이 GIL을 잡고 폼이 '응답 없음'이 됨.
+     실제 연결은 Insert 시작 시에만.)"""
+    try:
+        globals()['HW_MODE'] = hw_var.get() if hw_var else HW_MODE
+    except Exception:
+        pass
     _toggle_km_fields()
 
 _toggle_km_fields()
