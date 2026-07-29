@@ -1265,7 +1265,7 @@ def open_guide_panel():
     add_d("독 해독", "본인 독 걸리면 엔줄 자동 섭취 (두번째단축키 F9)")
     add_d("격수 해독", "격수 독 걸리면 큐어포이즌 자동 시전 (두번째단축키 F10)")
     add_d("파티 해독", "파티원 HP바 초록(독)이면 F2→F10→파티창클릭→F1")
-    add_d("파랭이", "지정한 핫바+슬롯(기본 F2+F8) · 엠통% 이하이면 자동 복용 (수초마다 재시도)")
+    add_d("파랭이", "지정한 핫바+슬롯(기본 F2+F8) · 엠통% 이하 시 10분마다 자동 복용")
     add_d("확률(%)", "0%: 물약만 / 100%: 힐만 / 그 외: 섞어서 확률 시전")
     add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐")
     add_d("위기% 슬라이더", "위험한 피통 이하일 때 위험베르 자동 사용")
@@ -2069,12 +2069,12 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-07-29 14:20"
+PATCH_UPDATED_AT = "2026-07-29 22:50"
 LATEST_PATCH = [
+    "💙 파랭이(엠약) 10분 쿨 원복 — 직전 패치에서 5초 재시도로 잘못 바꿔서 계속 처묵처묵하던 버그. 원래 설계대로 10분마다 체크 + 채팅 중 대기로 원복",
     "🚫 파티 유령힐 재차단 — HP바 오탐 기준 강화 + 연속 15프레임 확인 후에만 파티힐. 미파티/창없음에 마우스 이동 방지",
     "🕹️ 뚱박스 드롭다운 응답없음 복구 — 장치만 바꿔도 kmNet.init 하던 퇴화 제거(연결은 Insert때만). init 2초 타임아웃 복구",
     "🚫 파티창 없을 때 파티힐 차단 — 미파티/창닫힘인데 ROI 배경·직전홀드값으로 마우스만 이동하던 유령힐 방지. 이번 프레임에 HP바가 보이는 슬롯만 타겟",
-    "💙 파랭이(엠약) 복구 — 채팅대기에 막히던 것 제거 + 10분 쿨 때문에 한 번 빗나가면 안 먹히던 문제→ROI% 이하면 수초마다 재시도. 로그에 누른 키도 표시",
     "🩹 파랭이(엠약)·버프 안 먹히던 버그 — 클릭/고정 시 Shift 키반복이 '채팅 중'으로 오인되어 파랭이·줍기·버프·해독이 영구정지되던 문제. 수정자키는 타이핑으로 안 침. 고정 중 힐 후 클릭 안 되던 복구도 같이 수정",
     "🔌 펌업 로그 txt 제거 — 바탕화면 '뚱힐러_펌업로그.txt' 더 이상 안 만듦",
     "🔌 펌업 WDT3 — 시스템WDT가 1200자동리셋을 깨서 인터럽트WDT로 교체(멈춤시 키해제+재부팅 유지). hex TEMP고착(20312) 강제갱신. 확인응답 DDONG-WDT3",
@@ -2993,16 +2993,12 @@ def expert_logic():
             if not _typing_now and chk_loot and chk_loot.get() and (now - last_loot >= loot_interval):
                 last_loot_sent_time = now; ser.write(b'4'); last_loot = now; loot_interval = random.uniform(4.0, 7.0); log_event('🎒 줍기') 
 
-            # 파랭이 (마나 물약) — 힐과 같이 생명/유지에 필요해서 타이핑 대기에 안 막음.
-            # 예전 600초(10분) 쿨은 키 한 번 빗나가면 10분을 통째로 쉬어서 '설정했는데 안 먹음'처럼 보였음.
-            # 게임 물약 쿨이 따로 있으므로, ROI% 미만이면 짧게 재시도.
-            if chk_mna and chk_mna.get() and MNA_ROI[0] != 0 and (now - last_mna_potion >= 5.0):
+            # 파랭이 (마나 물약)
+            if not _typing_now and chk_mna and chk_mna.get() and MNA_ROI[0] != 0 and (now - last_mna_potion >= 600):
                 mna_pct = roi_mna_pct(frame, MNA_ROI, MNA_100_REF)
                 if mna_pct < mna_threshold:
-                    keys = mna_potion_keys()
-                    execute_keys(keys, 0.5)
-                    last_mna_potion = now
-                    log_event(f"💙 파랭이 (MP:{mna_pct:.0f}%≤{mna_threshold}% / {'+'.join(keys)})")
+                    execute_keys(mna_potion_keys(), 0.5); last_mna_potion = now
+                    log_event(f"💙 파랭이 (MP:{mna_pct:.0f}%)")
                     continue
 
             m = mode_var.get() if mode_var else "파티"
