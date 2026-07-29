@@ -1,9 +1,9 @@
 {
-  "version": "0.1.8",
-  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v0.1.8/ddungmage.exe",
-  "url_kr": "https://github.com/blacknut0319-del/systemupdate/releases/download/v0.1.8/ddungmage.exe",
+  "version": "0.1.9",
+  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v0.1.9/ddungmage.exe",
+  "url_kr": "https://github.com/blacknut0319-del/systemupdate/releases/download/v0.1.9/ddungmage.exe",
   "app": "ddungmage",
-  "size": 95414053,
+  "size": 95412259,
   "builder": "pyinstaller-onefile",
   "kind": "exe"
 }
