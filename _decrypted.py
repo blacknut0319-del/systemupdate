@@ -1988,8 +1988,9 @@ def fix_mode_keys(keys, delay=0.5):
         try: ser.write(b'H'); time.sleep(0.02)
         except: pass
 
-PATCH_UPDATED_AT = "2026-07-28 18:50"
+PATCH_UPDATED_AT = "2026-07-29 10:40"
 LATEST_PATCH = [
+    "🔌 펌업 로그 txt 제거 — 바탕화면 '뚱힐러_펌업로그.txt' 더 이상 안 만듦",
     "🔌 펌업 WDT3 — 시스템WDT가 1200자동리셋을 깨서 인터럽트WDT로 교체(멈춤시 키해제+재부팅 유지). hex TEMP고착(20312) 강제갱신. 확인응답 DDONG-WDT3",
     "🔌 펌업 WDT2 — WDT 때문에 1200bps 자동리셋이 깨짐(로그확정). 시리얼 '!'로 부트로더 진입. 확인응답 DDONG-WDT2. 옛WDT는 버튼보드에서 1회 수동만",
     "🔌 펌업 자동리셋 강화 — 리셋버튼 없이 1200bps 다중방식+arduino-cli 자동설치 업로드. 수동리셋은 최후수단",
@@ -2692,7 +2693,6 @@ def on_fw_flash_click():
         global ser, SERIAL_PORT
         ok, msg = False, "실패"
         wdt_ok, wdt_detail = False, ""
-        log_path = ""
         try:
             # 연결에 이미 쓰던 COM을 펌업에도 그대로 사용 (검색 조건 불일치 방지)
             preferred = SERIAL_PORT
@@ -2755,15 +2755,8 @@ def on_fw_flash_click():
                 )
                 if isinstance(ret, tuple) and len(ret) >= 2:
                     ok, msg = ret[0], ret[1]
-                    log_path = ret[2] if len(ret) >= 3 else ""
                 else:
                     ok, msg = bool(ret), str(ret)
-                if not log_path:
-                    cand = os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_펌업로그.txt")
-                    if os.path.isfile(cand):
-                        log_path = cand
-                if log_path:
-                    log_event(f"🔌 펌업로그: {log_path}")
             if ok:
                 # 업로드 성공이면 워치독 hex가 들어간 것. 확인응답(V)은 보너스.
                 time.sleep(2.5)
@@ -2808,27 +2801,12 @@ def on_fw_flash_click():
                         pass
             else:
                 log_event(f"❌ 펌업 실패 — {msg}")
-                if log_path:
-                    log_event(f"❌ 상세로그: {log_path}")
                 try:
                     lbl_ard.configure(text="○ 펌업실패", text_color="#f85149")
                 except Exception:
                     pass
                 try:
-                    tip = (
-                        f"{msg}\n\n"
-                        f"상세 로그:\n{log_path or '(없음)'}\n\n"
-                        "로그 파일을 메모장으로 열어둘까요?\n"
-                        "(그 내용을 주시면 원인 짚을 수 있습니다)"
-                    )
-                    if log_path and os.path.isfile(log_path):
-                        if messagebox.askyesno("펌업 실패", tip):
-                            try:
-                                os.startfile(log_path)
-                            except Exception:
-                                subprocess.Popen(["notepad.exe", log_path])
-                    else:
-                        messagebox.showerror("펌업 실패", tip)
+                    messagebox.showerror("펌업 실패", msg)
                 except Exception:
                     pass
         try:

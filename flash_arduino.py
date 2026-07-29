@@ -37,7 +37,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GH_RAW = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main"
 HEX_NAME = "뚱힐러.hex"
 DESKTOP = os.path.join(os.path.expanduser("~"), "Desktop")
-FLASH_LOG = os.path.join(DESKTOP, "뚱힐러_펌업로그.txt")
 TMP_ROOT = os.path.join(tempfile.gettempdir(), "ddong_firmware")
 CLI_DIR = os.path.join(TMP_ROOT, "arduino-cli")
 CLI_ZIP_URL = "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Windows_64bit.zip"
@@ -50,14 +49,13 @@ NEEDED_TOOLS = [
     ("firmware/avrdude/avrdude.conf", os.path.join("avrdude", "avrdude.conf")),
     ("firmware/avrdude/libusb0.dll", os.path.join("avrdude", "libusb0.dll")),
 ]
-LAST_FLASH_LOG = ""
 
 
 class FlashLogger:
+    """메모리만 기록 (바탕화면 txt 저장 안 함)."""
+
     def __init__(self):
         self.lines = []
-        self.path = FLASH_LOG
-        self.started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def log(self, msg):
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -83,29 +81,7 @@ class FlashLogger:
             )
 
     def save(self, ok, summary):
-        global LAST_FLASH_LOG
-        body = "\n".join(self.lines)
-        text = (
-            f"뚱힐러 펌업 로그\n시작: {self.started}\n"
-            f"결과: {'성공' if ok else '실패'} — {summary}\n"
-            f"{'=' * 60}\n{body}\n{'=' * 60}\n"
-            f"끝: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        )
-        try:
-            os.makedirs(DESKTOP, exist_ok=True)
-            with open(self.path, "w", encoding="utf-8") as f:
-                f.write(text)
-            if not ok:
-                bak = os.path.join(
-                    DESKTOP, f"뚱힐러_펌업로그_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                )
-                with open(bak, "w", encoding="utf-8") as f:
-                    f.write(text)
-            LAST_FLASH_LOG = self.path
-        except Exception:
-            LAST_FLASH_LOG = ""
-        return self.path
-
+        return ""
 
 def _port_mode(p):
     hu = (p.hwid or "").upper()
@@ -547,8 +523,7 @@ def flash(callback=None, port=None, ask_manual_reset=None):
             "자동 펌업 실패.\n"
             "· 이번 hex는 최신으로 받았습니다. 리셋버튼 있으면 더블리셋 1회로 WDT3 올리세요.\n"
             "· WDT3 이후엔 처음처럼 1200 자동펌업이 다시 됩니다.\n"
-            f"· cli: {detail2}\n"
-            f"로그: {FLASH_LOG}"
+            f"· cli: {detail2}"
         )
         return False, msg, flog.save(False, msg.replace("\n", " / "))
     except Exception as e:
