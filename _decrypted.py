@@ -1794,10 +1794,34 @@ def party_slot_active_rgb(arr):
     _, _, is_bar = _hp_bar_band_cols(arr)
     return is_bar
 
-def scan_party_hp(frame, pi):
+def count_live_party_bars(frame, flags):
+    """이번 프레임에 실제 HP바가 보이는 파티 슬롯 수 (P2~P8, index 1~7)."""
+    n = 0
+    for pi in range(1, 8):
+        if not flags[pi]:
+            continue
+        roi = PARTY_ROIS[pi]
+        if roi[0] <= 0 and roi[2] <= 0:
+            continue
+        if party_slot_active(frame, roi):
+            n += 1
+    return n
+
+def party_window_alive(frame, flags):
+    """파티창이 실제로 떠 있는지.
+    활성 슬롯에 바가 1개도 없으면 파티 미참여/창 닫힘으로 보고
+    HP 홀드를 비워 유령 힐(마우스만 이동)을 막는다."""
+    n = count_live_party_bars(frame, flags)
+    if n <= 0:
+        _party_hp_hold.clear()
+        return False
+    return True
+
+def scan_party_hp(frame, pi, require_live=False):
     """파티원 HP%. 사망 직전 파티창 깜빡임으로 잠깐 바 인식이 실패해도
     직전 정상값을 짧게 유지해서, 한 명 죽는 깜빡임 때문에 나머지 전체 힐이
-    같이 멈추는 걸 완화한다. 2초 넘게 바가 안 보이면 홀드 폐기(진짜 사망/빈칸)."""
+    같이 멈추는 걸 완화한다. 2초 넘게 바가 안 보이면 홀드 폐기(진짜 사망/빈칸).
+    require_live=True 이면 이번 프레임에 바가 보일 때만 값 반환(힐 타겟 선정용)."""
     roi = PARTY_ROIS[pi]
     if roi[0] == 0 and roi[2] == 0:
         return None
@@ -1806,6 +1830,8 @@ def scan_party_hp(frame, pi):
         pct = bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi], strict=True)
         _party_hp_hold[pi] = (pct, now)
         return pct
+    if require_live:
+        return None
     held = _party_hp_hold.get(pi)
     if held is not None:
         last_pct, last_t = held
@@ -2020,8 +2046,9 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-07-29 14:00"
+PATCH_UPDATED_AT = "2026-07-29 14:05"
 LATEST_PATCH = [
+    "🚫 파티창 없을 때 파티힐 차단 — 미파티/창닫힘인데 ROI 배경·직전홀드값으로 마우스만 이동하던 유령힐 방지. 이번 프레임에 HP바가 보이는 슬롯만 타겟",
     "💙 파랭이(엠약) 복구 — 채팅대기에 막히던 것 제거 + 10분 쿨 때문에 한 번 빗나가면 안 먹히던 문제→ROI% 이하면 수초마다 재시도. 로그에 누른 키도 표시",
     "🩹 파랭이(엠약)·버프 안 먹히던 버그 — 클릭/고정 시 Shift 키반복이 '채팅 중'으로 오인되어 파랭이·줍기·버프·해독이 영구정지되던 문제. 수정자키는 타이핑으로 안 침. 고정 중 힐 후 클릭 안 되던 복구도 같이 수정",
     "🔌 펌업 로그 txt 제거 — 바탕화면 '뚱힐러_펌업로그.txt' 더 이상 안 만듦",
@@ -2973,29 +3000,30 @@ def expert_logic():
                     fix_mode_keys(['2', 'X', '1'], 0.45); attacker_poisoned = False; log_event('🟢 격수 독해독'); continue
             if not _typing_now and chk_party_poison and chk_party_poison.get() and (now - last_party_cure >= 0.5):
                 party_flags = party_mode_flags if m == "파티" else selected_party_flags
-                cure_pi = -1; cure_tx = 0; cure_ty = 0
-                for pi in range(1, 8):
-                    if not party_flags[pi]: continue
-                    if PARTY_ROIS[pi][0] <= 0: continue
-                    if not party_slot_active(frame, PARTY_ROIS[pi]): continue
-                    if is_green_bar(frame, PARTY_ROIS[pi]):
-                        x1, y1, x2, y2 = PARTY_ROIS[pi]
-                        cure_pi = pi; cure_tx, cure_ty = (x1 + x2) // 2, (y1 + y2) // 2
-                        break
-                if cure_pi >= 0:
-                    if m == "파티":
-                        pt_orig = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt_orig))
-                        orig_x, orig_y = pt_orig.x, pt_orig.y
-                        was_fixed, was_follow = _pause_attack_click()
-                        focus_lineage_window()
-                        human_mouse_move(cure_tx + random.randint(-3, 3), cure_ty + random.randint(-2, 2)); time.sleep(0.02)
-                        # F2→F10(큐어포이즌)→클릭(대상지정)→F1 — 이미 pause됨, 키만 전송
-                        execute_keys(['2', 'X', 'K', '1'], 0.45, skip_follow_toggle=True)
-                        human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
-                        _resume_attack_click(was_fixed, was_follow)
-                    else:
-                        fix_mode_keys(['2', 'X', '1'], 0.45)
-                    last_party_cure = now; log_event(f'🟢 파티해독 P{cure_pi + 1}'); continue
+                if party_window_alive(frame, party_flags):
+                    cure_pi = -1; cure_tx = 0; cure_ty = 0
+                    for pi in range(1, 8):
+                        if not party_flags[pi]: continue
+                        if PARTY_ROIS[pi][0] <= 0: continue
+                        if not party_slot_active(frame, PARTY_ROIS[pi]): continue
+                        if is_green_bar(frame, PARTY_ROIS[pi]):
+                            x1, y1, x2, y2 = PARTY_ROIS[pi]
+                            cure_pi = pi; cure_tx, cure_ty = (x1 + x2) // 2, (y1 + y2) // 2
+                            break
+                    if cure_pi >= 0:
+                        if m == "파티":
+                            pt_orig = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt_orig))
+                            orig_x, orig_y = pt_orig.x, pt_orig.y
+                            was_fixed, was_follow = _pause_attack_click()
+                            focus_lineage_window()
+                            human_mouse_move(cure_tx + random.randint(-3, 3), cure_ty + random.randint(-2, 2)); time.sleep(0.02)
+                            # F2→F10(큐어포이즌)→클릭(대상지정)→F1 — 이미 pause됨, 키만 전송
+                            execute_keys(['2', 'X', 'K', '1'], 0.45, skip_follow_toggle=True)
+                            human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
+                            _resume_attack_click(was_fixed, was_follow)
+                        else:
+                            fix_mode_keys(['2', 'X', '1'], 0.45)
+                        last_party_cure = now; log_event(f'🟢 파티해독 P{cure_pi + 1}'); continue
 
             # 버프 (F1/F2/F3 × F5~F12 그리드) — 타이핑 중엔 대기(생명과 무관)
             if not _typing_now and chk_buff_on and chk_buff_on.get() and (now - last_buff_global >= 1.0) and (now - last_buff_seq >= BUFF_SEQ_GAP):
@@ -3050,24 +3078,27 @@ def expert_logic():
                     last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
 
                 if not healed:
-                    best_i = -1; best_hp = 999
-                    for i in range(8):
-                        if selected_party_flags[i] and PARTY_ROIS[i][0] != 0:
-                            hp_pct = scan_party_hp(frame, i)
-                            if hp_pct is not None and hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[i]:
-                                if hp_pct < best_hp:
-                                    best_hp = hp_pct; best_i = i
-                    if best_i >= 0:
-                        focus_lineage_window()
-                        was_fixed, was_follow = _pause_attack_click()
-                        try:
-                            if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
-                                ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
-                            else:
-                                ser.write(b'A')
-                            time.sleep(human_delay(1.2, 1.6)); healed = True
-                        finally:
-                            _resume_attack_click(was_fixed, was_follow)
+                    # 파티창이 실제로 떠 있을 때만 파티원 힐 (미파티/창닫힘 → 마우스 유령이동 차단)
+                    if party_window_alive(frame, selected_party_flags):
+                        best_i = -1; best_hp = 999
+                        for i in range(8):
+                            if selected_party_flags[i] and PARTY_ROIS[i][0] != 0:
+                                # 힐 타겟은 이번 프레임에 바가 보이는 슬롯만 (홀드값으로 빈곳 클릭 금지)
+                                hp_pct = scan_party_hp(frame, i, require_live=True)
+                                if hp_pct is not None and hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[i]:
+                                    if hp_pct < best_hp:
+                                        best_hp = hp_pct; best_i = i
+                        if best_i >= 0:
+                            focus_lineage_window()
+                            was_fixed, was_follow = _pause_attack_click()
+                            try:
+                                if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
+                                    ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
+                                else:
+                                    ser.write(b'A')
+                                time.sleep(human_delay(1.2, 1.6)); healed = True
+                            finally:
+                                _resume_attack_click(was_fixed, was_follow)
                     if healed: continue
 
             # 파티
@@ -3095,30 +3126,32 @@ def expert_logic():
                     last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
 
                 if not healed:
-                    pt_orig = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt_orig))
-                    orig_x, orig_y = pt_orig.x, pt_orig.y
-                    best_pi = -1; best_hp = 999; best_tx = 0; best_ty = 0
-                    for pi in range(1, 8):
-                        if not party_mode_flags[pi]: continue
-                        if PARTY_ROIS[pi][0] > 0:
-                            hp_pct = scan_party_hp(frame, pi)
-                            if hp_pct is not None and hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[pi]:
-                                if hp_pct < best_hp:
-                                    best_hp = hp_pct; best_pi = pi
-                                    x1,y1,x2,y2 = PARTY_ROIS[pi]
-                                    best_tx, best_ty = (x1+x2)//2, (y1+y2)//2
-                    if best_pi >= 0:
-                        was_fixed, was_follow = _pause_attack_click()
-                        focus_lineage_window()
-                        human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
-                        heal_key = '7' if use_strong else 'A'
-                        execute_keys(['K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
-                        human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
-                        _resume_attack_click(was_fixed, was_follow)
-                        last_party_heal = now; healed = True
-                        if use_strong:
-                            log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
+                    # 파티창 없음/미파티면 파티힐 자체 스킵 (ROI 배경 오탐·홀드값 유령이동 방지)
+                    if party_window_alive(frame, party_mode_flags):
+                        pt_orig = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt_orig))
+                        orig_x, orig_y = pt_orig.x, pt_orig.y
+                        best_pi = -1; best_hp = 999; best_tx = 0; best_ty = 0
+                        for pi in range(1, 8):
+                            if not party_mode_flags[pi]: continue
+                            if PARTY_ROIS[pi][0] > 0:
+                                hp_pct = scan_party_hp(frame, pi, require_live=True)
+                                if hp_pct is not None and hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[pi]:
+                                    if hp_pct < best_hp:
+                                        best_hp = hp_pct; best_pi = pi
+                                        x1,y1,x2,y2 = PARTY_ROIS[pi]
+                                        best_tx, best_ty = (x1+x2)//2, (y1+y2)//2
+                        if best_pi >= 0:
+                            was_fixed, was_follow = _pause_attack_click()
+                            focus_lineage_window()
+                            human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
+                            use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
+                            heal_key = '7' if use_strong else 'A'
+                            execute_keys(['K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
+                            human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
+                            _resume_attack_click(was_fixed, was_follow)
+                            last_party_heal = now; healed = True
+                            if use_strong:
+                                log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
 
             # 노파티 — 격수힐: 독 여부와 무관, UDP HP% vs 격수% 임계값만 판단
             elif m == "노파티":
