@@ -279,6 +279,10 @@ PARTY_ROIS = [(0,0,0,0)] * 8
 PARTY_HP_THRESHOLDS = [50] * 8
 PARTY_USE_ROI = [True] * 8
 PARTY_HP_100_REF = [None] * 8
+# 이름표(캐릭터 이름) ROI — 배경(나무 등)이 우연히 HP바 모양으로 오탐되는 것을 막는 이중체크용.
+# HP바 바로 위 이름 글자 자리를 지정하면, 그 자리에 흰 글자가 있을 때만 그 슬롯을 진짜 파티원으로 인정.
+# 미설정(0,0,0,0)이면 기존처럼 이름표 체크 없이 HP바만으로 판정(하위호환).
+PARTY_NAME_ROIS = [(0,0,0,0)] * 8
 # 파티창 사망 직전 깜빡임 때 전체 ROI가 잠깐 '바 없음'으로 떨어지는 것 방지.
 # 슬롯별로 직전 정상 HP%를 잠시 유지(홀드). 진짜 사망/빈칸은 시간 지나면 폐기.
 _party_hp_hold = {}          # pi -> (hp_pct, last_ok_time)
@@ -688,6 +692,7 @@ def load_hidden_config():
             danger_roi_vals = [0, 0, 0, 0]
             mna_roi_vals = [0, 0, 0, 0]
             party_roi_vals = [[0,0,0,0] for _ in range(8)]
+            party_name_roi_vals = [[0,0,0,0] for _ in range(8)]
             
             for line in lines[1:]:
                 line = line.strip()
@@ -739,6 +744,10 @@ def load_hidden_config():
                     if key == f"PARTY_ROI_P{pi+1}_Y1": party_roi_vals[pi][1] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
                     if key == f"PARTY_ROI_P{pi+1}_X2": party_roi_vals[pi][2] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
                     if key == f"PARTY_ROI_P{pi+1}_Y2": party_roi_vals[pi][3] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
+                    if key == f"PARTY_NAME_ROI_P{pi+1}_X1": party_name_roi_vals[pi][0] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
+                    if key == f"PARTY_NAME_ROI_P{pi+1}_Y1": party_name_roi_vals[pi][1] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
+                    if key == f"PARTY_NAME_ROI_P{pi+1}_X2": party_name_roi_vals[pi][2] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
+                    if key == f"PARTY_NAME_ROI_P{pi+1}_Y2": party_name_roi_vals[pi][3] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
                     if key == f"PARTY_HP_100_REF_P{pi+1}": PARTY_HP_100_REF[pi] = int(val_str) if val_str.lstrip('-').isdigit() else None; break
                     if key == f"PARTY_HP_THR_P{pi+1}": PARTY_HP_THRESHOLDS[pi] = int(val_str) if val_str.lstrip('-').isdigit() else 50; break
                     if key == f"PARTY_USE_ROI_P{pi+1}": PARTY_USE_ROI[pi] = bool(int(val_str)) if val_str in ('0','1') else True; break
@@ -765,6 +774,7 @@ def load_hidden_config():
         if mna_roi_vals[0] != 0 or mna_roi_vals[2] != 0: MNA_ROI = tuple(mna_roi_vals)
         for pi in range(8):
             if party_roi_vals[pi][0] != 0 or party_roi_vals[pi][2] != 0: PARTY_ROIS[pi] = tuple(party_roi_vals[pi])
+            if party_name_roi_vals[pi][0] != 0 or party_name_roi_vals[pi][2] != 0: PARTY_NAME_ROIS[pi] = tuple(party_name_roi_vals[pi])
         globals()["saved_buff_on"] = saved_buff_on
         globals()["saved_buff_grid"] = saved_buff_grid
     migrate_legacy_buffs()
@@ -873,6 +883,8 @@ def save_hidden_config(pwd_to_save):
             for pi in range(8):
                 r = PARTY_ROIS[pi]
                 f.write(f"PARTY_ROI_P{pi+1}_X1={r[0]}\nPARTY_ROI_P{pi+1}_Y1={r[1]}\nPARTY_ROI_P{pi+1}_X2={r[2]}\nPARTY_ROI_P{pi+1}_Y2={r[3]}\n")
+                nr = PARTY_NAME_ROIS[pi]
+                f.write(f"PARTY_NAME_ROI_P{pi+1}_X1={nr[0]}\nPARTY_NAME_ROI_P{pi+1}_Y1={nr[1]}\nPARTY_NAME_ROI_P{pi+1}_X2={nr[2]}\nPARTY_NAME_ROI_P{pi+1}_Y2={nr[3]}\n")
                 if PARTY_HP_100_REF[pi] is not None: f.write(f"PARTY_HP_100_REF_P{pi+1}={PARTY_HP_100_REF[pi]}\n")
                 f.write(f"PARTY_HP_THR_P{pi+1}={PARTY_HP_THRESHOLDS[pi]}\nPARTY_USE_ROI_P{pi+1}={1 if PARTY_USE_ROI[pi] else 0}\n")
         ctypes.windll.kernel32.SetFileAttributesW(AUTH_FILE, 2)
@@ -949,6 +961,12 @@ def _open_admin_panel_impl():
                                 bar.set(hp_pct / 100.0)
                                 bar.configure(progress_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
                                 entries[f"P{pi+1}_PCT"].configure(text=f"{int(hp_pct)}%", text_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
+                        name_status = entries.get(f"P{pi+1}_NAME_STATUS")
+                        if name_status is not None and PARTY_NAME_ROIS[pi][0] > 0:
+                            if party_name_tag_present(frame, PARTY_NAME_ROIS[pi]):
+                                name_status.configure(text="🏷️있음", text_color="#a6e3a1")
+                            else:
+                                name_status.configure(text="🏷️없음", text_color="#6c7086")
             except: pass
         admin.after(500, update_admin_live)
 
@@ -1130,6 +1148,30 @@ def _open_admin_panel_impl():
         tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
         ov.bind("<Escape>",lambda e:ov.destroy())
 
+    def open_party_name_roi_overlay(pi):
+        """이름표(캐릭터 이름) ROI 지정 — HP바 바로 위 이름 글자 부분만 드래그.
+        배경(나무 등)이 우연히 HP바 모양으로 오탐되는 걸 이중으로 막는 용도."""
+        ov = tk.Toplevel(admin); ov.attributes("-fullscreen",True); ov.attributes("-alpha",0.35)
+        ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
+        cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
+        d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
+        def dn(e): d["x1"],d["y1"]=e.x_root,e.y_root; d["r"]=cv.create_rectangle(e.x,e.y,e.x,e.y,outline="#f9e2af",width=4)
+        def mv(e):
+            if d["r"]: cv.coords(d["r"],d["x1"]-ov.winfo_rootx(),d["y1"]-ov.winfo_rooty(),e.x,e.y)
+        def up(e):
+            d["x2"],d["y2"]=e.x_root,e.y_root
+            x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
+            if x2-x1<8 or y2-y1<3: ov.destroy(); return
+            PARTY_NAME_ROIS[pi]=(x1,y1,x2,y2)
+            if f"P{pi+1}_NAME_ROI_LBL" in entries:
+                entries[f"P{pi+1}_NAME_ROI_LBL"].configure(text=f"이름표:({x1},{y1}) {x2-x1}x{y2-y1}")
+            save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+            ov.destroy()
+        cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
+        tk.Label(ov,text=f"🏷️ P{pi+1} 이름표(캐릭터 이름) 드래그 — HP바 바로 위 이름 글자만",fg="#f9e2af",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+        tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+        ov.bind("<Escape>",lambda e:ov.destroy())
+
     # --- 쫄법 피통 섹션 ---
     row_self_btns = ctk.CTkFrame(scrollable_frame, fg_color="transparent"); row_self_btns.pack(fill="x", pady=1)
     ctk.CTkButton(row_self_btns, text="🖱️ 쫄법 피통 셋팅", height=22, fg_color="#1f538d", hover_color="#14375e", font=("Malgun Gothic", 9, "bold"), command=open_self_hp_overlay).pack(side="left", padx=1)
@@ -1190,6 +1232,16 @@ def _open_admin_panel_impl():
         thr_lbl = ctk.CTkLabel(roi_row, text=f"{var.get()}%", text_color="#f38ba8", font=("Malgun Gothic", 9, "bold"), width=24)
         thr_lbl.pack(side="left")
         var.trace_add("write", lambda *a, i=pi, v=var, l=thr_lbl: _set_thr(i, v, l))
+        # row 3: 이름표 ROI (배경 오탐 이중체크용, 선택사항 — 미설정이면 기존처럼 HP바만으로 판정)
+        name_row = ctk.CTkFrame(cell, fg_color="transparent"); name_row.grid(row=3, column=0, columnspan=3, pady=(0,4), sticky="ew")
+        ctk.CTkButton(name_row, text="🏷️이름", width=38, height=20, fg_color="#8a6d1f", hover_color="#6b5417", font=("Malgun Gothic", 8, "bold"),
+                     command=lambda i=pi: open_party_name_roi_overlay(i)).pack(side="left", padx=(4,2))
+        nr = PARTY_NAME_ROIS[pi]
+        name_roi_info = f"이름표:({nr[0]},{nr[1]}) {nr[2]-nr[0]}x{nr[3]-nr[1]}" if nr[0] != 0 else "이름표 미설정(HP바만 판정)"
+        name_roi_lbl = ctk.CTkLabel(name_row, text=name_roi_info, text_color="#9399b2", font=("Consolas", 8))
+        name_roi_lbl.pack(side="left", padx=(2,4)); entries[f"{prefix}_NAME_ROI_LBL"] = name_roi_lbl
+        name_status_lbl = ctk.CTkLabel(name_row, text="", text_color="#6c7086", font=("Malgun Gothic", 8, "bold"))
+        name_status_lbl.pack(side="left"); entries[f"{prefix}_NAME_STATUS"] = name_status_lbl
         if r[0] != 0:
             admin.after(150, lambda p=pi, w=pv: refresh_preview(w, None, PARTY_ROIS[p], PARTY_HP_100_REF[p]))
         return cell
@@ -1278,6 +1330,7 @@ def open_guide_panel():
     add_w("노파티 모드는 비비기만 됩니다 (제자리 힐 불가)")
     add_w("노파티 힐은 고정(PgUp) 상태에서만 제자리 힐이 동작합니다")
     add_w("제어판에서 파티원 HP바를 드래그로 설정 후 💯 100% 기준을 꼭 저장하세요")
+    add_w("🏷️이름표 ROI(선택) — HP바 위 이름 글자를 지정하면, 파티 없을 때 배경(나무 등)이 HP바로 오탐돼 유령힐 나가는 것을 이중으로 차단")
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
     add_t("🕹️ 장치 (뚱USB / 뚱박스)")
     add_w("상단 [장치]에서 뚱USB(기존) 또는 뚱박스 중 선택합니다")
@@ -1792,16 +1845,41 @@ def is_green_bar(frame, roi):
         return avgG > avgR*1.05 and avgR < 120
     except: return False
 
-def party_slot_active(frame, roi):
-    """파티 슬롯에 HP바 존재 여부 — 빈칸·사망(바 없음/회색) 힐 차단."""
+def party_name_tag_present(frame, roi):
+    """이름표(캐릭터 이름) 자리에 흰 글자가 있는지 확인.
+    자연배경(나무·땅바닥 등)엔 이런 흰 글자 뭉치가 우연히 나오지 않으므로,
+    HP바 오탐과 별개로 '진짜 파티원 자리'인지 이중확인하는 용도.
+    ROI 미설정(0,0,0,0)이면 검사 생략(하위호환 — True)."""
+    x1, y1, x2, y2 = roi
+    if x1 == 0 and x2 == 0:
+        return True
+    try:
+        arr = frame[y1:y2, x1:x2]
+        if arr.size == 0:
+            return False
+        R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
+        bright = (R > 190) & (G > 190) & (B > 190)
+        h, w = bright.shape
+        return int(bright.sum()) >= max(3, (h * w) // 40)
+    except Exception:
+        return False
+
+def party_slot_active(frame, roi, pi=None):
+    """파티 슬롯에 HP바 존재 여부 — 빈칸·사망(바 없음/회색) 힐 차단.
+    pi가 주어지고 이름표 ROI(PARTY_NAME_ROIS[pi])가 설정돼 있으면,
+    그 자리에 흰 글자(이름)까지 있어야 진짜 파티원으로 인정 — 배경 오탐 이중 차단."""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
         return False
     try:
         r = frame[y1:y2, x1:x2]
-        return party_slot_active_rgb(r)
+        if not party_slot_active_rgb(r):
+            return False
     except Exception:
         return False
+    if pi is not None and not party_name_tag_present(frame, PARTY_NAME_ROIS[pi]):
+        return False
+    return True
 
 def party_slot_active_rgb(arr):
     """슬롯에 실제 HP바(빨강 또는 넓은 독초록)가 있으면 True.
@@ -1821,7 +1899,7 @@ def count_live_party_bars(frame, flags):
         roi = PARTY_ROIS[pi]
         if roi[0] <= 0 and roi[2] <= 0:
             continue
-        if party_slot_active(frame, roi):
+        if party_slot_active(frame, roi, pi):
             n += 1
     return n
 
@@ -1849,7 +1927,7 @@ def scan_party_hp(frame, pi, require_live=False):
     if roi[0] == 0 and roi[2] == 0:
         return None
     now = time.time()
-    if party_slot_active(frame, roi):
+    if party_slot_active(frame, roi, pi):
         pct = bar_fill_pct(frame, roi, PARTY_HP_100_REF[pi], strict=True)
         _party_hp_hold[pi] = (pct, now)
         return pct
@@ -2069,8 +2147,9 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-07-29 22:50"
+PATCH_UPDATED_AT = "2026-07-30 23:55"
 LATEST_PATCH = [
+    "🏷️ 파티 유령힐 이름표 이중체크 — 캐릭터 움직이면 배경(나무 등)이 바뀌면서 아무 슬롯이나 우연히 HP바 모양으로 오탐되던 문제. 제어판에서 HP바 위 '이름표' ROI를 추가로 지정하면, 그 자리에 흰 글자(이름)까지 있어야 진짜 파티원으로 인정 (선택사항, 미설정이면 기존과 동일)",
     "💙 파랭이(엠약) 10분 쿨 원복 — 직전 패치에서 5초 재시도로 잘못 바꿔서 계속 처묵처묵하던 버그. 원래 설계대로 10분마다 체크 + 채팅 중 대기로 원복",
     "🚫 파티 유령힐 재차단 — HP바 오탐 기준 강화 + 연속 15프레임 확인 후에만 파티힐. 미파티/창없음에 마우스 이동 방지",
     "🕹️ 뚱박스 드롭다운 응답없음 복구 — 장치만 바꿔도 kmNet.init 하던 퇴화 제거(연결은 Insert때만). init 2초 타임아웃 복구",
@@ -3026,7 +3105,7 @@ def expert_logic():
                     for pi in range(1, 8):
                         if not party_flags[pi]: continue
                         if PARTY_ROIS[pi][0] <= 0: continue
-                        if not party_slot_active(frame, PARTY_ROIS[pi]): continue
+                        if not party_slot_active(frame, PARTY_ROIS[pi], pi): continue
                         if is_green_bar(frame, PARTY_ROIS[pi]):
                             x1, y1, x2, y2 = PARTY_ROIS[pi]
                             cure_pi = pi; cure_tx, cure_ty = (x1 + x2) // 2, (y1 + y2) // 2
