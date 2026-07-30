@@ -128,6 +128,7 @@ _logo_frames = []            # 뚱박스 LCD 로고 프레임 (BGR flatten)
 _logo_delay = 0.08           # 프레임 간격(초)
 _party_alive_streak = 0      # 파티창 연속 감지 카운트 (배경 오탐 유령힐 방지)
 PARTY_ALIVE_NEED = 15        # 연속 N프레임 바가 보여야 파티창으로 인정
+_party_poison_first_seen = {}  # pi -> 초록(독)바 최초 감지 시각 (해독 반응지연 진단용)
 
 # ── KMBox Net 접속 설정 (아두이노 대체 하드웨어) ──
 KM_IP = '192.168.2.188'
@@ -3103,6 +3104,21 @@ def expert_logic():
 
             m = mode_var.get() if mode_var else "파티"
 
+            # 파티 해독 반응지연 진단용 — 초록(독)바가 화면에 실제로 처음 보인 시각을 기록.
+            # 게이트(쿨다운·타이핑중·party_window_alive)와 무관하게 매 프레임 스캔해서,
+            # 나중에 실제 해독키가 나갈 때 "감지~해독" 걸린 시간을 로그로 남기기 위함.
+            if chk_party_poison and chk_party_poison.get():
+                _diag_flags = party_mode_flags if m == "파티" else selected_party_flags
+                for _pi in range(1, 8):
+                    if not _diag_flags[_pi] or PARTY_ROIS[_pi][0] <= 0:
+                        _party_poison_first_seen.pop(_pi, None); continue
+                    if party_slot_active(frame, PARTY_ROIS[_pi], _pi) and is_green_bar(frame, PARTY_ROIS[_pi]):
+                        if _pi not in _party_poison_first_seen:
+                            _party_poison_first_seen[_pi] = now
+                            log_event(f'🟢 파티독 감지 P{_pi + 1} (해독 대기중)')
+                    else:
+                        _party_poison_first_seen.pop(_pi, None)
+
             # ── 해독 ──────────────────────────────────────
             # 쫄법 독:   F2→F9(엔줄고정)→F1
             # 격수 독:   F2→F10(큐어포이즌)→F1 (UDP)
@@ -3144,7 +3160,8 @@ def expert_logic():
                             _resume_attack_click(was_fixed, was_follow)
                         else:
                             fix_mode_keys(['2', 'X', '1'], 0.45)
-                        last_party_cure = now; log_event(f'🟢 파티해독 P{cure_pi + 1}'); continue
+                        _seen_at = _party_poison_first_seen.pop(cure_pi, now)
+                        last_party_cure = now; log_event(f'🟢 파티해독 P{cure_pi + 1} (감지후 {now - _seen_at:.1f}초)'); continue
 
             # 버프 (F1/F2/F3 × F5~F12 그리드) — 타이핑 중엔 대기(생명과 무관)
             if not _typing_now and chk_buff_on and chk_buff_on.get() and (now - last_buff_global >= 1.0) and (now - last_buff_seq >= BUFF_SEQ_GAP):
