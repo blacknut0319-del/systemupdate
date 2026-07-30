@@ -965,9 +965,9 @@ def _open_admin_panel_impl():
                         if name_status is not None and PARTY_NAME_ROIS[pi][0] > 0:
                             stats = _party_name_tag_stats(frame, PARTY_NAME_ROIS[pi])
                             if stats is not None:
-                                b, d, t = stats
+                                b, d, t, ar, ag, ab = stats
                                 present = b >= max(3, t // 30) and d >= max(2, t // 40)
-                                txt = f"🏷️{'있음' if present else '없음'} (B{b}/D{d}/T{t})"
+                                txt = f"🏷️{'있음' if present else '없음'} (B{b}/D{d}/T{t} RGB{ar},{ag},{ab})"
                                 name_status.configure(text=txt, text_color="#a6e3a1" if present else "#6c7086")
             except: pass
         admin.after(500, update_admin_live)
@@ -1848,7 +1848,8 @@ def is_green_bar(frame, roi):
     except: return False
 
 def _party_name_tag_stats(frame, roi):
-    """이름표 ROI의 진단용 원시 수치. (밝은픽셀수, 어두운픽셀수, 전체픽셀수) 또는 None(ROI 없음/에러)."""
+    """이름표 ROI의 진단용 원시 수치.
+    (밝은픽셀수, 어두운픽셀수, 전체픽셀수, 밝은픽셀 평균R, 평균G, 평균B) 또는 None(ROI 없음/에러)."""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
         return None
@@ -1856,11 +1857,17 @@ def _party_name_tag_stats(frame, roi):
         arr = frame[y1:y2, x1:x2]
         if arr.size == 0:
             return None
-        gray = arr[:, :, :3].astype(int).sum(axis=2) / 3.0
+        R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
+        gray = (R + G + B) / 3.0
         total = gray.size
-        bright = int((gray > 150).sum())
+        bright_mask = gray > 150
+        bright = int(bright_mask.sum())
         dark = int((gray < 70).sum())
-        return bright, dark, total
+        if bright > 0:
+            avg_r = int(R[bright_mask].mean()); avg_g = int(G[bright_mask].mean()); avg_b = int(B[bright_mask].mean())
+        else:
+            avg_r = avg_g = avg_b = 0
+        return bright, dark, total, avg_r, avg_g, avg_b
     except Exception:
         return None
 
@@ -1875,7 +1882,7 @@ def party_name_tag_present(frame, roi):
     stats = _party_name_tag_stats(frame, roi)
     if stats is None:
         return False
-    bright, dark, total = stats
+    bright, dark, total, _r, _g, _b = stats
     return bright >= max(3, total // 30) and dark >= max(2, total // 40)
 
 def party_slot_active(frame, roi, pi=None):
