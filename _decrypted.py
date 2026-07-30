@@ -281,10 +281,10 @@ PARTY_HP_THRESHOLDS = [50] * 8
 PARTY_USE_ROI = [True] * 8
 PARTY_HP_100_REF = [None] * 8
 # 아이콘(초상화) ROI — 배경(나무 등)이 우연히 HP바 모양으로 오탐되는 것을 막는 이중체크용.
-# HP바 옆 캐릭터 아이콘 자리를 지정하면, 그 자리에 실제 그림(색 표준편차 큼)이 있을 때만 진짜 파티원으로 인정.
+# HP바 옆 캐릭터 아이콘 자리를 지정하면, 그 자리에 아이콘 뒤판 특유의 검정 픽셀이 있을 때만 진짜 파티원으로 인정.
 # 미설정(0,0,0,0)이면 기존처럼 아이콘 체크 없이 HP바만으로 판정(하위호환).
 PARTY_NAME_ROIS = [(0,0,0,0)] * 8
-ICON_STD_THRESHOLD = 30  # 임시값 — 실측 진단수치(표준편차) 보고 조정 예정
+ICON_BLACK_PCT_THRESHOLD = 0.15  # 임시값 — 실측 진단수치(검은픽셀비율) 보고 조정 예정
 # 파티창 사망 직전 깜빡임 때 전체 ROI가 잠깐 '바 없음'으로 떨어지는 것 방지.
 # 슬롯별로 직전 정상 HP%를 잠시 유지(홀드). 진짜 사망/빈칸은 시간 지나면 폐기.
 _party_hp_hold = {}          # pi -> (hp_pct, last_ok_time)
@@ -968,11 +968,12 @@ def _open_admin_panel_impl():
                         if name_status is not None and PARTY_NAME_ROIS[pi][0] > 0:
                             stats = _party_name_tag_stats(frame, PARTY_NAME_ROIS[pi])
                             if stats is not None:
-                                std, ar, ag, ab, t = stats
-                                present = std >= ICON_STD_THRESHOLD
+                                black, t, ar, ag, ab = stats
+                                black_pct = (black / t * 100) if t else 0
+                                present = t > 0 and (black / t) >= ICON_BLACK_PCT_THRESHOLD
                                 name_status.configure(text=f"🖼️{'있음' if present else '없음'}", text_color="#a6e3a1" if present else "#6c7086")
                                 if name_diag is not None:
-                                    name_diag.configure(text=f"표준편차{std:.1f} T{t} RGB{ar},{ag},{ab}")
+                                    name_diag.configure(text=f"검정{black_pct:.0f}% B{black}/T{t} RGB{ar},{ag},{ab}")
             except: pass
         admin.after(500, update_admin_live)
 
@@ -1249,7 +1250,7 @@ def _open_admin_panel_impl():
         name_roi_lbl.pack(side="left", padx=(2,4)); entries[f"{prefix}_NAME_ROI_LBL"] = name_roi_lbl
         name_status_lbl = ctk.CTkLabel(name_row, text="", text_color="#6c7086", font=("Malgun Gothic", 8, "bold"))
         name_status_lbl.pack(side="left"); entries[f"{prefix}_NAME_STATUS"] = name_status_lbl
-        # row 4: 아이콘 판정 진단 수치(표준편차·RGB) — 칸 폭에 맞춰 줄바꿈, 보정용
+        # row 4: 아이콘 판정 진단 수치(검은픽셀비율·RGB) — 칸 폭에 맞춰 줄바꿈, 보정용
         diag_lbl = ctk.CTkLabel(cell, text="", text_color="#6c7086", font=("Consolas", 7), justify="left", wraplength=220)
         diag_lbl.grid(row=4, column=0, columnspan=3, padx=(6,4), pady=(0,4), sticky="w")
         entries[f"{prefix}_NAME_DIAG"] = diag_lbl
@@ -1858,9 +1859,9 @@ def is_green_bar(frame, roi):
 
 def _party_name_tag_stats(frame, roi):
     """아이콘(초상화) ROI의 진단용 원시 수치.
-    아이콘은 실제 그림이라 여러 색이 섞여 픽셀 명암 표준편차가 크고,
-    빈칸(나무 패널 배경)은 단색에 가까워 표준편차가 작음 — 이 차이로 판별.
-    (표준편차, 평균R, 평균G, 평균B, 전체픽셀수) 또는 None(ROI 없음/에러)."""
+    아이콘 슬롯은 뒤판이 검정(black)으로 고정된 UI라, 게임 야외배경(풀·흙·나무=항상 따뜻한 톤,
+    검정에 가까운 색이 거의 안 나옴)과 뚜렷이 구분됨 — 검은 픽셀 비율로 판별.
+    (검은픽셀수, 전체픽셀수, 평균R, 평균G, 평균B) 또는 None(ROI 없음/에러)."""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
         return None
@@ -1868,28 +1869,27 @@ def _party_name_tag_stats(frame, roi):
         arr = frame[y1:y2, x1:x2]
         if arr.size == 0:
             return None
-        R = arr[:, :, 0].astype(float); G = arr[:, :, 1].astype(float); B = arr[:, :, 2].astype(float)
-        gray = (R + G + B) / 3.0
-        total = gray.size
-        std = float(gray.std())
+        R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
+        total = R.size
+        black = int(((R < 40) & (G < 40) & (B < 40)).sum())
         avg_r = int(R.mean()); avg_g = int(G.mean()); avg_b = int(B.mean())
-        return std, avg_r, avg_g, avg_b, total
+        return black, total, avg_r, avg_g, avg_b
     except Exception:
         return None
 
 def party_name_tag_present(frame, roi):
     """아이콘(초상화) 자리에 실제 캐릭터 아이콘이 있는지 확인.
-    아이콘=여러 색이 섞인 그림이라 명암 표준편차가 큼. 빈칸(나무 패널 배경)은
-    단색에 가까워 표준편차가 작음. 이름 글자(반투명)보다 훨씬 뚜렷하게 구분됨.
+    아이콘 슬롯 뒤판은 검정으로 고정된 UI 요소라서, 게임 야외배경(항상 따뜻한 톤)이
+    비쳐 보이는 빈 슬롯과 검은 픽셀 비율로 뚜렷이 구분됨.
     ROI 미설정(0,0,0,0)이면 검사 생략(하위호환 — True).
-    ⚠ 임계값(ICON_STD_THRESHOLD)은 실측 진단수치로 보정 예정(진단표시 우선)."""
+    ⚠ 임계값(ICON_BLACK_PCT_THRESHOLD)은 실측 진단수치로 보정 예정(진단표시 우선)."""
     if roi[0] == 0 and roi[2] == 0:
         return True
     stats = _party_name_tag_stats(frame, roi)
     if stats is None:
         return False
-    std, _r, _g, _b, _t = stats
-    return std >= ICON_STD_THRESHOLD
+    black, total, _r, _g, _b = stats
+    return total > 0 and (black / total) >= ICON_BLACK_PCT_THRESHOLD
 
 def party_slot_active(frame, roi, pi=None):
     """파티 슬롯에 HP바 존재 여부 — 빈칸·사망(바 없음/회색) 힐 차단.
@@ -2176,7 +2176,7 @@ def fix_mode_keys(keys, delay=0.5):
 
 PATCH_UPDATED_AT = "2026-07-31 02:26"
 LATEST_PATCH = [
-    "🖼️ 파티 유령힐 이중체크 — 이름표(글자) 방식이 반투명이라 배경에 묻혀 오판정되던 문제로 아이콘(초상화) 방식으로 교체. 아이콘은 실제 그림이라 명암 표준편차로 배경(단색 나무패널)과 뚜렷이 구분됨 (제어판 '🖼️아이콘' 버튼, 선택사항)",
+    "🖼️ 파티 유령힐 이중체크 — 이름표(글자)→아이콘(초상화) 방식으로 교체, 표준편차 방식도 디테일한 배경엔 안 통해 검은 뒤판 픽셀비율로 재변경. 야외배경(항상 따뜻한 톤)엔 검정이 거의 없어 뚜렷이 구분됨 (제어판 '🖼️아이콘' 버튼, 선택사항)",
     "🏷️ 파티 유령힐 이름표 이중체크(구버전) — 캐릭터 움직이면 배경(나무 등)이 바뀌면서 아무 슬롯이나 우연히 HP바 모양으로 오탐되던 문제. 제어판에서 HP바 위 '이름표' ROI를 추가로 지정하면, 그 자리에 흰 글자(이름)까지 있어야 진짜 파티원으로 인정 (선택사항, 미설정이면 기존과 동일)",
     "💙 파랭이(엠약) 10분 쿨 원복 — 직전 패치에서 5초 재시도로 잘못 바꿔서 계속 처묵처묵하던 버그. 원래 설계대로 10분마다 체크 + 채팅 중 대기로 원복",
     "🚫 파티 유령힐 재차단 — HP바 오탐 기준 강화 + 연속 15프레임 확인 후에만 파티힐. 미파티/창없음에 마우스 이동 방지",
