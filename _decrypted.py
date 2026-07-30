@@ -963,13 +963,15 @@ def _open_admin_panel_impl():
                                 bar.configure(progress_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
                                 entries[f"P{pi+1}_PCT"].configure(text=f"{int(hp_pct)}%", text_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
                         name_status = entries.get(f"P{pi+1}_NAME_STATUS")
+                        name_diag = entries.get(f"P{pi+1}_NAME_DIAG")
                         if name_status is not None and PARTY_NAME_ROIS[pi][0] > 0:
                             stats = _party_name_tag_stats(frame, PARTY_NAME_ROIS[pi])
                             if stats is not None:
                                 b, d, t, ar, ag, ab = stats
                                 present = b >= max(3, t // 30) and d >= max(2, t // 40)
-                                txt = f"🏷️{'있음' if present else '없음'} (B{b}/D{d}/T{t} RGB{ar},{ag},{ab})"
-                                name_status.configure(text=txt, text_color="#a6e3a1" if present else "#6c7086")
+                                name_status.configure(text=f"🏷️{'있음' if present else '없음'}", text_color="#a6e3a1" if present else "#6c7086")
+                                if name_diag is not None:
+                                    name_diag.configure(text=f"B{b}/D{d}/T{t} RGB{ar},{ag},{ab}")
             except: pass
         admin.after(500, update_admin_live)
 
@@ -1245,6 +1247,10 @@ def _open_admin_panel_impl():
         name_roi_lbl.pack(side="left", padx=(2,4)); entries[f"{prefix}_NAME_ROI_LBL"] = name_roi_lbl
         name_status_lbl = ctk.CTkLabel(name_row, text="", text_color="#6c7086", font=("Malgun Gothic", 8, "bold"))
         name_status_lbl.pack(side="left"); entries[f"{prefix}_NAME_STATUS"] = name_status_lbl
+        # row 4: 이름표 판정 진단 수치(밝은/어두운픽셀·RGB) — 칸 폭에 맞춰 줄바꿈, 보정용
+        diag_lbl = ctk.CTkLabel(cell, text="", text_color="#6c7086", font=("Consolas", 7), justify="left", wraplength=220)
+        diag_lbl.grid(row=4, column=0, columnspan=3, padx=(6,4), pady=(0,4), sticky="w")
+        entries[f"{prefix}_NAME_DIAG"] = diag_lbl
         if r[0] != 0:
             admin.after(150, lambda p=pi, w=pv: refresh_preview(w, None, PARTY_ROIS[p], PARTY_HP_100_REF[p]))
         return cell
