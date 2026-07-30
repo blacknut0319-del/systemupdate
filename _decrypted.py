@@ -1846,8 +1846,9 @@ def is_green_bar(frame, roi):
     except: return False
 
 def party_name_tag_present(frame, roi):
-    """이름표(캐릭터 이름) 자리에 흰 글자가 있는지 확인.
-    자연배경(나무·땅바닥 등)엔 이런 흰 글자 뭉치가 우연히 나오지 않으므로,
+    """이름표(캐릭터 이름) 자리에 '글자'가 있는지 확인 — 색상 무관(흰색/노랑=파티장/회색=자리비움 다 인정).
+    게임 글자는 색과 무관하게 '밝은 채움 + 어두운 외곽선(그림자)'이 촘촘히 섞여 명암대비가 큼.
+    자연배경(나무·땅바닥 등)은 좁은 영역 안에서 밝은/어두운 픽셀이 이렇게 같이 섞이는 경우가 드묾.
     HP바 오탐과 별개로 '진짜 파티원 자리'인지 이중확인하는 용도.
     ROI 미설정(0,0,0,0)이면 검사 생략(하위호환 — True)."""
     x1, y1, x2, y2 = roi
@@ -1857,10 +1858,11 @@ def party_name_tag_present(frame, roi):
         arr = frame[y1:y2, x1:x2]
         if arr.size == 0:
             return False
-        R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
-        bright = (R > 190) & (G > 190) & (B > 190)
-        h, w = bright.shape
-        return int(bright.sum()) >= max(3, (h * w) // 40)
+        gray = arr[:, :, :3].astype(int).sum(axis=2) / 3.0
+        total = gray.size
+        bright = int((gray > 150).sum())
+        dark = int((gray < 70).sum())
+        return bright >= max(3, total // 30) and dark >= max(2, total // 40)
     except Exception:
         return False
 
