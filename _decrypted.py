@@ -963,10 +963,12 @@ def _open_admin_panel_impl():
                                 entries[f"P{pi+1}_PCT"].configure(text=f"{int(hp_pct)}%", text_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
                         name_status = entries.get(f"P{pi+1}_NAME_STATUS")
                         if name_status is not None and PARTY_NAME_ROIS[pi][0] > 0:
-                            if party_name_tag_present(frame, PARTY_NAME_ROIS[pi]):
-                                name_status.configure(text="🏷️있음", text_color="#a6e3a1")
-                            else:
-                                name_status.configure(text="🏷️없음", text_color="#6c7086")
+                            stats = _party_name_tag_stats(frame, PARTY_NAME_ROIS[pi])
+                            if stats is not None:
+                                b, d, t = stats
+                                present = b >= max(3, t // 30) and d >= max(2, t // 40)
+                                txt = f"🏷️{'있음' if present else '없음'} (B{b}/D{d}/T{t})"
+                                name_status.configure(text=txt, text_color="#a6e3a1" if present else "#6c7086")
             except: pass
         admin.after(500, update_admin_live)
 
@@ -1845,26 +1847,36 @@ def is_green_bar(frame, roi):
         return avgG > avgR*1.05 and avgR < 120
     except: return False
 
-def party_name_tag_present(frame, roi):
-    """이름표(캐릭터 이름) 자리에 '글자'가 있는지 확인 — 색상 무관(흰색/노랑=파티장/회색=자리비움 다 인정).
-    게임 글자는 색과 무관하게 '밝은 채움 + 어두운 외곽선(그림자)'이 촘촘히 섞여 명암대비가 큼.
-    자연배경(나무·땅바닥 등)은 좁은 영역 안에서 밝은/어두운 픽셀이 이렇게 같이 섞이는 경우가 드묾.
-    HP바 오탐과 별개로 '진짜 파티원 자리'인지 이중확인하는 용도.
-    ROI 미설정(0,0,0,0)이면 검사 생략(하위호환 — True)."""
+def _party_name_tag_stats(frame, roi):
+    """이름표 ROI의 진단용 원시 수치. (밝은픽셀수, 어두운픽셀수, 전체픽셀수) 또는 None(ROI 없음/에러)."""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
-        return True
+        return None
     try:
         arr = frame[y1:y2, x1:x2]
         if arr.size == 0:
-            return False
+            return None
         gray = arr[:, :, :3].astype(int).sum(axis=2) / 3.0
         total = gray.size
         bright = int((gray > 150).sum())
         dark = int((gray < 70).sum())
-        return bright >= max(3, total // 30) and dark >= max(2, total // 40)
+        return bright, dark, total
     except Exception:
+        return None
+
+def party_name_tag_present(frame, roi):
+    """이름표(캐릭터 이름) 자리에 '글자'가 있는지 확인 — 색상 무관(흰색/노랑=파티장/회색=자리비움 다 인정 목표).
+    게임 글자는 색과 무관하게 '밝은 채움 + 어두운 외곽선(그림자)'이 촘촘히 섞여 명암대비가 큼.
+    자연배경(나무·땅바닥 등)은 좁은 영역 안에서 밝은/어두운 픽셀이 이렇게 같이 섞이는 경우가 드묾.
+    HP바 오탐과 별개로 '진짜 파티원 자리'인지 이중확인하는 용도.
+    ROI 미설정(0,0,0,0)이면 검사 생략(하위호환 — True)."""
+    if roi[0] == 0 and roi[2] == 0:
+        return True
+    stats = _party_name_tag_stats(frame, roi)
+    if stats is None:
         return False
+    bright, dark, total = stats
+    return bright >= max(3, total // 30) and dark >= max(2, total // 40)
 
 def party_slot_active(frame, roi, pi=None):
     """파티 슬롯에 HP바 존재 여부 — 빈칸·사망(바 없음/회색) 힐 차단.
