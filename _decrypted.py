@@ -549,14 +549,6 @@ last_party_heal = 0
 last_party_cure = 0
 last_noparty_heal = 0
 
-# 연속 힐(자힐/격수힐 등)이 짧은 간격으로 반복될 때 고정(Shift)을 매번 뗏다 붙였다
-# 하지 않고, 마지막 힐로부터 일정 시간(PAUSE_COALESCE_SEC) 조용해진 뒤에만 복구.
-PAUSE_COALESCE_SEC = 1.0
-_coalesced_pause_active = False
-_coalesced_was_fixed = False
-_coalesced_was_follow = False
-_coalesced_last_use = 0.0
-
 selected_party_flags = [0, 1, 0, 0, 0, 0, 0, 0]
 saved_party_flags = "0,1,0,0,0,0,0,0"
 party_mode_flags = [1, 1, 1, 1, 1, 1, 1, 1]
@@ -2148,37 +2140,13 @@ def _resume_attack_click(was_fixed, was_follow):
     try:
         if was_fixed and chk_fix and chk_fix.get():
             ser.write(b'H'); time.sleep(0.04)   # 고정 복구
+            # 시리얼 씹힘 대비: 'H'는 절대상태 지정(누름)이라 중복 전송해도 안전 → 한 번 더 보내 유실 확률 낮춤
+            time.sleep(0.05)
+            ser.write(b'H'); time.sleep(0.04)
         elif was_follow and chk_follow and chk_follow.get():
             ser.write(b'T'); time.sleep(0.04)
     except Exception:
         pass
-
-def _pause_attack_click_coalesced():
-    """연속 힐용: 이미 최근(PAUSE_COALESCE_SEC 이내)에 떼둔 상태면 재전송(U) 없이 재사용,
-    아니면 새로 떼고 상태 기억. 복구(H)는 여기서 하지 않고 _check_coalesced_resume이 처리."""
-    global _coalesced_pause_active, _coalesced_was_fixed, _coalesced_was_follow, _coalesced_last_use
-    now = time.time()
-    if _coalesced_pause_active and (now - _coalesced_last_use) < PAUSE_COALESCE_SEC:
-        _coalesced_last_use = now
-        return _coalesced_was_fixed, _coalesced_was_follow
-    was_fixed, was_follow = _pause_attack_click()
-    _coalesced_pause_active = True
-    _coalesced_was_fixed, _coalesced_was_follow = was_fixed, was_follow
-    _coalesced_last_use = now
-    if was_fixed or was_follow:
-        log_event(f"⏸️ 고정/클릭 일시해제 (연속힐 시작, {'고정' if was_fixed else '따라'})")
-    return was_fixed, was_follow
-
-def _check_coalesced_resume():
-    """메인루프에서 매 틱 호출: 마지막 코얼레스 힐 이후 조용해지면 그때 한 번만 복구(H)."""
-    global _coalesced_pause_active
-    if not _coalesced_pause_active:
-        return
-    if time.time() - _coalesced_last_use >= PAUSE_COALESCE_SEC:
-        _resume_attack_click(_coalesced_was_fixed, _coalesced_was_follow)
-        if _coalesced_was_fixed or _coalesced_was_follow:
-            log_event(f"▶️ 고정/클릭 복구 (연속힐 종료, {'고정' if _coalesced_was_fixed else '따라'})")
-        _coalesced_pause_active = False
 
 def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
     global ser, running
@@ -2211,7 +2179,7 @@ def fix_mode_keys(keys, delay=0.5):
 
 PATCH_UPDATED_AT = "2026-08-02 01:30"
 LATEST_PATCH = [
-    "🛡️ 고정(Shift) 풀림 현상 완화 — 노파티/솔로(파티) 자힐·격수힐·파티힐이 짧은 간격으로 연속 발생할 때마다 매번 고정(U)/복구(H)를 반복하던 것을, 조용해질 때까지(1초) 묶어서 한 번만 떼고 한 번만 복구하도록 변경. 힐 속도 상향 이후 발생하던 고정 풀림 완화 목적",
+    "🛡️ 고정(Shift) 풀림 현상 완화 — 힐 때마다 보내는 고정복구('H') 명령이 시리얼 통신 중 가끔 씹혀서 고정이 안 풀리게, 짧은 간격을 두고 한 번 더 보내도록 보강 (H는 절대상태 지정이라 중복 전송해도 안전). 힐 사이 고정 유지 방식(매 힐 직후 즉시 재고정)은 그대로 유지",
     "🖼️ 파티 유령힐 이중체크 — 이름표(글자)→아이콘(초상화) 방식으로 교체, 표준편차 방식도 디테일한 배경엔 안 통해 검은 뒤판 픽셀비율로 재변경. 야외배경(항상 따뜻한 톤)엔 검정이 거의 없어 뚜렷이 구분됨 (제어판 '🖼️아이콘' 버튼, 선택사항)",
     "🏷️ 파티 유령힐 이름표 이중체크(구버전) — 캐릭터 움직이면 배경(나무 등)이 바뀌면서 아무 슬롯이나 우연히 HP바 모양으로 오탐되던 문제. 제어판에서 HP바 위 '이름표' ROI를 추가로 지정하면, 그 자리에 흰 글자(이름)까지 있어야 진짜 파티원으로 인정 (선택사항, 미설정이면 기존과 동일)",
     "💙 파랭이(엠약) 10분 쿨 원복 — 직전 패치에서 5초 재시도로 잘못 바꿔서 계속 처묵처묵하던 버그. 원래 설계대로 10분마다 체크 + 채팅 중 대기로 원복",
@@ -3105,7 +3073,6 @@ def expert_logic():
 
     while True:
         now = time.time()
-        _check_coalesced_resume()
         if _reconnect_req and not running and not globals().get('_fw_flash_busy'):
             globals()['_reconnect_req'] = False
             connect_hardware()
@@ -3242,22 +3209,20 @@ def expert_logic():
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
-                        _pause_attack_click_coalesced()
-                        if prob == 0: execute_keys(['E'], 1.0, skip_follow_toggle=True)
-                        elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                        if prob == 0: execute_keys(['E'], 1.0)
+                        elif prob >= 100: execute_keys(['B'], 0.5)
                         else:
-                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                            else: execute_keys(['E'], 1.0, skip_follow_toggle=True)
+                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                            else: execute_keys(['E'], 1.0)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
-                    _pause_attack_click_coalesced()
-                    if prob == 0: execute_keys(['E'], 1.0, skip_follow_toggle=True)
-                    elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                    if prob == 0: execute_keys(['E'], 1.0)
+                    elif prob >= 100: execute_keys(['B'], 0.5)
                     else:
-                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                        else: execute_keys(['E'], 1.0, skip_follow_toggle=True)
+                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                        else: execute_keys(['E'], 1.0)
                     last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
 
                 if not healed:
@@ -3273,12 +3238,15 @@ def expert_logic():
                                         best_hp = hp_pct; best_i = i
                         if best_i >= 0:
                             focus_lineage_window()
-                            _pause_attack_click_coalesced()
-                            if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
-                                ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
-                            else:
-                                ser.write(b'A')
-                            time.sleep(human_delay(0.6, 0.9)); healed = True
+                            was_fixed, was_follow = _pause_attack_click()
+                            try:
+                                if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
+                                    ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
+                                else:
+                                    ser.write(b'A')
+                                time.sleep(human_delay(0.6, 0.9)); healed = True
+                            finally:
+                                _resume_attack_click(was_fixed, was_follow)
                     if healed: continue
 
             # 파티
@@ -3341,22 +3309,20 @@ def expert_logic():
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
-                        _pause_attack_click_coalesced()
-                        if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
-                        elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                        if prob == 0: execute_keys(['E'], 0.8)
+                        elif prob >= 100: execute_keys(['B'], 0.5)
                         else:
-                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                            else: execute_keys(['E'], 0.8, skip_follow_toggle=True)
+                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                            else: execute_keys(['E'], 0.8)
                         last_self_heal = now; action_taken = True
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 20) and (now - last_self_heal >= 0.2):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
-                    _pause_attack_click_coalesced()
-                    if prob == 0: execute_keys(['E'], 0.8, skip_follow_toggle=True)
-                    elif prob >= 100: execute_keys(['B'], 0.5, skip_follow_toggle=True)
+                    if prob == 0: execute_keys(['E'], 0.8)
+                    elif prob >= 100: execute_keys(['B'], 0.5)
                     else:
-                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5, skip_follow_toggle=True)
-                        else: execute_keys(['E'], 0.8, skip_follow_toggle=True)
+                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
+                        else: execute_keys(['E'], 0.8)
                     last_self_heal = now; action_taken = True
                 
                 if not action_taken and (now - last_noparty_heal >= 0.2):
@@ -3364,14 +3330,17 @@ def expert_logic():
                     atk_hp = attacker_hp_udp
                     if chk_attacker_sw.get() and udp_ok and atk_hp < attacker_hp_threshold:
                         focus_lineage_window()
-                        _pause_attack_click_coalesced()
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
-                        if use_strong:
-                            ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.6, 0.9))
-                        elif random.randint(1, 100) <= 85:
-                            ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.6, 0.9))
-                        else:
-                            time.sleep(human_delay(0.2, 0.3))
+                        was_fixed, was_follow = _pause_attack_click()
+                        try:
+                            use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
+                            if use_strong:
+                                ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.6, 0.9))
+                            elif random.randint(1, 100) <= 85:
+                                ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.6, 0.9))
+                            else:
+                                time.sleep(human_delay(0.2, 0.3))
+                        finally:
+                            _resume_attack_click(was_fixed, was_follow)
                         last_noparty_heal = now
 
                 
