@@ -3624,7 +3624,7 @@ def _on_strong_heal():
     except Exception: pass
 RoundedToggle(frame_strong, "⚡ 상위힐", "#58a6ff", var=chk_strong_heal, cmd=_on_strong_heal).pack(side="left", padx=4)
 sv = ctk.IntVar(value=strong_heal_pct)
-ctk.CTkSlider(frame_strong, from_=5, to=50, variable=sv, width=60, height=18, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8").pack(side="left", padx=2)
+ctk.CTkSlider(frame_strong, from_=5, to=70, variable=sv, width=60, height=18, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8").pack(side="left", padx=2)
 s_lbl = ctk.CTkLabel(frame_strong, text=f"{strong_heal_pct}%", text_color="#f38ba8", font=("Malgun Gothic",10,"bold"), width=28)
 s_lbl.pack(side="left")
 def update_strong_thr(v, lbl=s_lbl):
