@@ -1766,6 +1766,28 @@ def _self_hp_pct_from_arr(arr, ref100=None):
     except Exception:
         return 100.0
 
+def _save_danger_debug(frame, roi, pct):
+    """위기베르 오작동 진단용 — 발동 순간 ROI(여유 10px 포함) 스크린샷을 저장.
+    실제로 뭘 보고 오판했는지 눈으로 확인하기 위한 용도(최근 20장만 보관)."""
+    try:
+        folder = "위기베르_디버그"
+        os.makedirs(folder, exist_ok=True)
+        x1, y1, x2, y2 = roi
+        h, w = frame.shape[0], frame.shape[1]
+        cx1, cy1 = max(0, x1 - 10), max(0, y1 - 10)
+        cx2, cy2 = min(w, x2 + 10), min(h, y2 + 10)
+        crop = frame[cy1:cy2, cx1:cx2]
+        if crop.size == 0:
+            return
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        Image.fromarray(crop).save(os.path.join(folder, f"danger_{ts}_HP{pct:.0f}.png"))
+        files = sorted(f for f in os.listdir(folder) if f.endswith(".png"))
+        for old in files[:-20]:
+            try: os.remove(os.path.join(folder, old))
+            except Exception: pass
+    except Exception:
+        pass
+
 def self_hp_pct(frame, roi, ref100=None):
     """쫄법(자기) HP% — 위기베르·자힐 전용, 파티 판정과 무관. (예전 초창기 버전 그대로)"""
     x1, y1, x2, y2 = roi
@@ -2177,8 +2199,9 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-02 01:30"
+PATCH_UPDATED_AT = "2026-08-02 03:15"
 LATEST_PATCH = [
+    "🩻 위기베르 오작동 진단용 스크린샷 저장 — dxcam 사용 중인데도 피가 많을 때 발동하는 문제 원인 확인용. 발동 순간 ROI 주변을 '위기베르_디버그' 폴더에 자동 저장(최근 20장 보관). 판정 로직 자체는 변경 없음",
     "🛡️ 고정(Shift) 풀림 현상 완화 — 힐 때마다 보내는 고정복구('H') 명령이 시리얼 통신 중 가끔 씹혀서 고정이 안 풀리게, 짧은 간격을 두고 한 번 더 보내도록 보강 (H는 절대상태 지정이라 중복 전송해도 안전). 힐 사이 고정 유지 방식(매 힐 직후 즉시 재고정)은 그대로 유지",
     "🖼️ 파티 유령힐 이중체크 — 이름표(글자)→아이콘(초상화) 방식으로 교체, 표준편차 방식도 디테일한 배경엔 안 통해 검은 뒤판 픽셀비율로 재변경. 야외배경(항상 따뜻한 톤)엔 검정이 거의 없어 뚜렷이 구분됨 (제어판 '🖼️아이콘' 버튼, 선택사항)",
     "🏷️ 파티 유령힐 이름표 이중체크(구버전) — 캐릭터 움직이면 배경(나무 등)이 바뀌면서 아무 슬롯이나 우연히 HP바 모양으로 오탐되던 문제. 제어판에서 HP바 위 '이름표' ROI를 추가로 지정하면, 그 자리에 흰 글자(이름)까지 있어야 진짜 파티원으로 인정 (선택사항, 미설정이면 기존과 동일)",
@@ -3093,7 +3116,9 @@ def expert_logic():
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
                     focus_lineage_window()
                     _cap = 'dx' if getattr(camera, '_dx_ok', False) else 'mss'   # 다음에 또 오작동하면 캡처백엔드까지 로그로 바로 확인 가능
-                    ser.write(b'C'); log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%, cap:{_cap})"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
+                    ser.write(b'C')
+                    _save_danger_debug(frame, danger_roi, danger_pct)
+                    log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%, cap:{_cap})"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
             # 채팅 등 실제 타이핑 중엔 "생명과 무관한" 동작(버프·줍기·해독·파랭이)만 일시정지.
             # 자힐·파티힐(A/7)·위기베르는 절대 여기서 안 막음 — 채팅 중이라도 실제로
