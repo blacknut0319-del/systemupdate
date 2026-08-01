@@ -3240,7 +3240,7 @@ def expert_logic():
                                     ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
                                 else:
                                     ser.write(b'A')
-                                time.sleep(human_delay(0.6, 0.9)); healed = True
+                                time.sleep(human_delay(0.1, 0.15)); healed = True
                             finally:
                                 _resume_attack_click(was_fixed, was_follow)
                     if healed: continue
@@ -3330,9 +3330,9 @@ def expert_logic():
                         try:
                             use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
                             if use_strong:
-                                ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.6, 0.9))
+                                ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.1, 0.15))
                             elif random.randint(1, 100) <= 85:
-                                ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.6, 0.9))
+                                ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.1, 0.15))
                             else:
                                 time.sleep(human_delay(0.2, 0.3))
                         finally:
