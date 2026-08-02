@@ -350,6 +350,7 @@ def hp_pct_from_bar(arr, w, h, petrified=False):
     평소: 빨강+초록(독). 석화일 때만 어두운 회색 열=채움(빈칸=밝은 은색 제외).
     석화%는 상·하 장식(금테/갈색)을 피하려고 ROI 세로 중앙 50%만 사용."""
     if petrified and w >= 2:
+        # 석화: 고정밝기 임계 대신 채움|빈칸 경계 분할 (64%→85% 부풀림 방지)
         hh = arr.shape[0]
         y1, y2 = max(0, hh // 4), max(1, (3 * hh) // 4)
         if y2 <= y1:
@@ -358,15 +359,39 @@ def hp_pct_from_bar(arr, w, h, petrified=False):
         R = band[:, :, 0].astype(np.float32)
         G = band[:, :, 1].astype(np.float32)
         B = band[:, :, 2].astype(np.float32)
-        # HP 흰글자 제외 + 어두운 열만 채움(<=105). 140은 빈칸 은색까지 먹음
         text = (R >= 190) & (G >= 190) & (B >= 190)
         R2 = R.copy(); R2[text] = np.nan
-        col_med = np.nanmedian(R2, axis=0)
-        bad = np.isnan(col_med)
+        col = np.nanmedian(R2, axis=0)
+        bad = np.isnan(col)
         if np.any(bad):
-            col_med = np.where(bad, np.median(R, axis=0), col_med)
-        filled_cols = int(np.sum(col_med <= 105))
-        return round(filled_cols / max(len(col_med), 1) * 100, 1)
+            col = np.where(bad, np.median(R, axis=0), col)
+        ww = len(col)
+        ksize = max(3, ww // 50)
+        if ksize % 2 == 0:
+            ksize += 1
+        pad = ksize // 2
+        sm = np.convolve(np.pad(col, (pad, pad), mode="edge"), np.ones(ksize) / ksize, mode="valid")
+        best_l = (-1e9, None); best_r = (-1e9, None)
+        lo, hi = max(1, ww // 20), min(ww, ww - ww // 20)
+        for k in range(lo, hi):
+            left = float(sm[:k].mean()); right = float(sm[k:].mean())
+            if right - left > best_l[0]: best_l = (right - left, k)
+            if left - right > best_r[0]: best_r = (left - right, k)
+        cands = []
+        if best_l[1] is not None:
+            k = best_l[1]; cands.append((best_l[0], sm[:k], sm[k:], 100.0 * k / ww))
+        if best_r[1] is not None:
+            k = best_r[1]; cands.append((best_r[0], sm[k:], sm[:k], 100.0 * (ww - k) / ww))
+        best = None
+        for diff, fill_side, empty_side, pct in cands:
+            fill_m = float(np.mean(fill_side)); empty_m = float(np.mean(empty_side))
+            empty_p30 = float(np.percentile(empty_side, 30))
+            if diff >= 12 and empty_p30 >= fill_m + 20 and empty_m >= fill_m + 15:
+                if best is None or diff > best[0]:
+                    best = (diff, pct)
+        if best is None:
+            return 100.0 if float(np.median(col)) <= 120 else round(100.0 * float(np.mean(col <= 105)), 1)
+        return round(best[1], 1)
     red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
     green = (arr[:,:,1]>15)&(arr[:,:,1]>arr[:,:,0]*1.03)&(arr[:,:,1]>arr[:,:,2]*1.03)
     bar_px = red | green

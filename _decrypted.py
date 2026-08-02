@@ -1757,11 +1757,10 @@ def _hp_bar_lenient_cols(arr):
     return run_end - int(idx[0]) + 1, w
 
 def _petrify_hp_pct_from_arr(arr):
-    """석화 HP% — 빨간피(빨강 마스크→열)와 같은 구조.
-    채움=어두운 회색 열, 빈칸=밝은 은색 열. 스샷 실측 채움≈56 / 빈칸≈150.
-    - 세로 중앙 50%만 사용(금테·갈색 장식 제외)
-    - HP 숫자 흰글자(R>=190)는 열 중앙값에서 제외(만땅인데 95% 되던 원인)
-    - 열 median R<=105 만 채움(140은 빈칸 은색까지 먹어 %가 안 내려갔음)"""
+    """석화 HP% — 빨간피처럼 '채움|빈칸 경계'로 %.
+    고정 밝기임계(105/140)는 빈칸이 덜 밝을 때 64%→85%처럼 부풀림.
+    열 밝기 프로파일에서 어두움(채움)↔밝음(빈칸) 분할점을 찾아 채움 폭/% 계산.
+    풀피는 대비가 약하거나 빈칸쪽이 꾸준히 밝지 않으면 100%."""
     if arr.size == 0:
         return 100.0
     try:
@@ -1778,12 +1777,45 @@ def _petrify_hp_pct_from_arr(arr):
         text = (R >= 190) & (G >= 190) & (B >= 190)
         R2 = R.copy()
         R2[text] = np.nan
-        col_med = np.nanmedian(R2, axis=0)
-        bad = np.isnan(col_med)
+        col = np.nanmedian(R2, axis=0)
+        bad = np.isnan(col)
         if np.any(bad):
-            col_med = np.where(bad, np.median(R, axis=0), col_med)
-        filled_cols = int(np.sum(col_med <= 105))
-        return min(100.0, round(filled_cols / max(len(col_med), 1) * 100, 1))
+            col = np.where(bad, np.median(R, axis=0), col)
+        ww = len(col)
+        ksize = max(3, ww // 50)
+        if ksize % 2 == 0:
+            ksize += 1
+        pad = ksize // 2
+        sm = np.convolve(np.pad(col, (pad, pad), mode="edge"), np.ones(ksize) / ksize, mode="valid")
+        best_l = (-1e9, None)
+        best_r = (-1e9, None)
+        lo, hi = max(1, ww // 20), min(ww, ww - ww // 20)
+        for k in range(lo, hi):
+            left = float(sm[:k].mean())
+            right = float(sm[k:].mean())
+            if right - left > best_l[0]:
+                best_l = (right - left, k)
+            if left - right > best_r[0]:
+                best_r = (left - right, k)
+        cands = []
+        if best_l[1] is not None:
+            k = best_l[1]
+            cands.append((best_l[0], sm[:k], sm[k:], 100.0 * k / ww))
+        if best_r[1] is not None:
+            k = best_r[1]
+            cands.append((best_r[0], sm[k:], sm[:k], 100.0 * (ww - k) / ww))
+        best = None
+        for diff, fill_side, empty_side, pct in cands:
+            fill_m = float(np.mean(fill_side))
+            empty_m = float(np.mean(empty_side))
+            empty_p30 = float(np.percentile(empty_side, 30))
+            # 빈칸이 채움보다 꾸준히 밝아야 함(풀피+HP글자 스파이크 오분할 방지)
+            if diff >= 12 and empty_p30 >= fill_m + 20 and empty_m >= fill_m + 15:
+                if best is None or diff > best[0]:
+                    best = (diff, pct)
+        if best is None:
+            return 100.0 if float(np.median(col)) <= 120 else min(100.0, round(100.0 * float(np.mean(col <= 105)), 1))
+        return min(100.0, round(best[1], 1))
     except Exception:
         return 100.0
 
@@ -2266,7 +2298,7 @@ def fix_mode_keys(keys, delay=0.5):
 
 PATCH_UPDATED_AT = "2026-08-03 03:30"
 LATEST_PATCH = [
-    "🪨 석화 HP% 정확도 — 빨간피처럼 채움열만 셈. 흰 HP숫자 제외+열밝기<=105(어두움=피/밝음=빈칸). 이전 140임계는 은색 빈칸까지 먹어 석화중 %가 안 내려감. 격수모니터 hp_start 재시작 필수",
+    "🪨 석화 HP% 경계분할 — 고정밝기(105)가 빈칸이 덜 밝을 때 64%→85%로 부풀리던 문제. 열밝기에서 채움|빈칸 경계를 찾아 %계산(빨간피 좌→우 채움과 동일 개념). 격수모니터 hp_start 재시작 필수",
     "🛡️ 위기베르 순간오독 필터(다수결) — 한 프레임만 보고 즉시발동하던 걸, 낮은 값 감지시 2번 더 재확인해서 3번 중 2번 이상 낮아야 최종발동. 재확인 사이 25ms 대기(dxcam 동일프레임 방지). 재확인 실패시엔 안전하게 발동 쪽",
     "🩻 위기베르 오작동 진단용 스크린샷 저장 — dxcam 사용 중인데도 피가 많을 때 발동하는 문제 원인 확인용. 발동 순간 ROI 주변을 '위기베르_디버그' 폴더에 자동 저장(최근 20장 보관). 판정 로직 자체는 변경 없음",
     "🛡️ 고정(Shift) 풀림 현상 완화 — 힐 때마다 보내는 고정복구('H') 명령이 시리얼 통신 중 가끔 씹혀서 고정이 안 풀리게, 짧은 간격을 두고 한 번 더 보내도록 보강 (H는 절대상태 지정이라 중복 전송해도 안전). 힐 사이 고정 유지 방식(매 힐 직후 즉시 재고정)은 그대로 유지",
