@@ -334,22 +334,25 @@ def update_preview(arr):
 def _hp_bar_poisoned(red_cnt, green_cnt, total_px):
     return green_cnt > total_px * 0.05 or (green_cnt > red_cnt and green_cnt > total_px * 0.02)
 
-def hp_pct_from_bar(arr, w, h):
-    """HP바 채움% — ROI 가로폭 기준, 빨강/초록(독)/회색(석화) 색상 무관.
-    석화 회색은 독 초록처럼 '채움'만 잡음. 밝기 R>80(빨강 채움과 동일)이라 어두운 빈칸은 제외."""
+def hp_pct_from_bar(arr, w, h, petrified=False):
+    """HP바 채움% — ROI 가로폭 기준.
+    기본: 빨강+초록(독). 석화일 때만 회색 채움 추가(독이 초록을 세는 것과 동일 개념).
+    평소에 회색을 항상 세면 빈칸/테두리가 잡혀 닳아도 100%로 고정될 수 있음."""
     r = arr[:,:,0].astype(int); g = arr[:,:,1].astype(int); b = arr[:,:,2].astype(int)
     red = (r>80)&(r>g*1.2)&(r>b*1.2)
     green = (g>15)&(g>r*1.03)&(g>b*1.03)
-    gray = (abs(r-g)<25)&(abs(g-b)<25)&(abs(r-b)<25)&(r>80)&(r<170)  # 석화 채움만 (빈칸 R낮음)
-    bar_px = red | green | gray
+    bar_px = red | green
+    if petrified:
+        gray = (abs(r-g)<25)&(abs(g-b)<25)&(abs(r-b)<25)&(r>80)&(r<170)
+        bar_px = bar_px | gray
     if w >= 2:
         filled_cols = int(np.sum(np.any(bar_px, axis=0)))
         return round(filled_cols / w * 100, 1)
-    red_cnt = int(np.sum(bar_px))
+    fill_cnt = int(np.sum(bar_px))
     total_px = max(w * h, 1)
     if HP_100_REF and HP_100_REF > 0:
-        return round(red_cnt / HP_100_REF * 100, 1)
-    return round(red_cnt / total_px * 100, 1)
+        return round(fill_cnt / HP_100_REF * 100, 1)
+    return round(fill_cnt / total_px * 100, 1)
 
 def sender():
     global hp_pct
@@ -368,7 +371,7 @@ def sender():
             poisoned = _hp_bar_poisoned(int(np.sum(red)), green_cnt, total_px)
             gray = (abs(arr[:,:,0]-arr[:,:,1])<25)&(abs(arr[:,:,1]-arr[:,:,2])<25)&(abs(arr[:,:,0]-arr[:,:,2])<25)&(arr[:,:,0]>30)
             petrified = int(np.sum(gray)) > (total_px * 0.12)
-            hp_pct = hp_pct_from_bar(arr, w, h)
+            hp_pct = hp_pct_from_bar(arr, w, h, petrified=petrified)
             sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (ip_var.get(), TARGET_PORT))
             root.after(0, update_bar)
             root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))
