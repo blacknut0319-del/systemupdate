@@ -1748,24 +1748,21 @@ def _hp_bar_lenient_cols(arr):
 def _self_hp_pct_from_arr(arr, ref100=None):
     """쫄법(자기) HP% — 예전 초창기 버전(06191252.py)의 roi_hp_pct 로직을 그대로 사용.
     가공/보정 없이 단순하게: 채움 픽셀 개수 세서 ref100(픽셀개수, 100%일때 값)으로 나눔.
-    기본은 빨강+초록(독). 석화(회색 채움이 우세)일 때만 회색도 채움으로 추가 —
-    독이 초록을 세는 것과 같은 개념이되, 평소 빈칸/테두리 회색이 100%로 고정되던 오탐 방지."""
+    빨강뿐 아니라 독(초록)일 때도 채움으로 잡음 — 안 그러면 독 걸려서 바가
+    초록으로 바뀌는 순간 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동함.
+    초록 기준은 is_green_bar(독 감지)와 반드시 동일해야 함 — 기준이 서로 다르면
+    "독 걸림"으로는 인식되는데 "채움"으로는 인식 안 되는 색 구간이 생겨서,
+    피가 가득 차있어도 독 상태에서 위기베르가 잘못 발동하는 문제가 있었음."""
     if arr.size == 0:
         return 100.0
     try:
         R, G, B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
         red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
         grn = (G > 15) & (G > R * 1.03) & (G > B * 1.03)   # is_green_bar와 동일 기준
-        fill = red | grn
-        total = max(arr.shape[0] * arr.shape[1], 1)
-        # 석화 판정과 동일 계열: 빨간 채움이 거의 없고 밝은 회색 채움이 충분할 때만 회색 포함
-        gry = (abs(R - G) < 25) & (abs(G - B) < 25) & (abs(R - B) < 25) & (R > 80) & (R < 170)
-        if int(np.sum(red)) < total * 0.03 and int(np.sum(gry)) > total * 0.08:
-            fill = fill | gry
-        raw = int(np.sum(fill))
+        raw = int(np.sum(red | grn))
         if ref100 and ref100 > 0:
             return min(100.0, round(raw / ref100 * 100, 1))
-        return min(100.0, round(raw / max(total, 1) * 100, 1))
+        return min(100.0, round(raw / max(arr.shape[0] * arr.shape[1], 1) * 100, 1))
     except Exception:
         return 100.0
 
@@ -1803,26 +1800,6 @@ def self_hp_pct(frame, roi, ref100=None):
         return _self_hp_pct_from_arr(r, ref100)
     except Exception:
         return 100.0
-
-def _danger_confirm_majority(danger_roi, danger_ref, first_pct, threshold):
-    """위기베르 순간오독 필터 — 최초 감지값 포함 총 3번 중 2번 이상 낮아야 최종발동.
-    재확인 캡처를 못 가져오면 판단불가라 안전하게 '낮음'으로 취급(놓치는 것보다 낫음).
-    진짜 위험한 상황(전투이펙트로 흔들려도)은 3개 중 대개 2개 이상 낮게 나와서 실발동엔 영향 없음.
-    dxcam get_latest_frame은 대기 없이 부르면 같은 프레임이 다시 올 수 있어, 재확인 사이 짧게 쉼."""
-    samples = [first_pct]
-    low_count = 1
-    for _ in range(2):
-        time.sleep(0.025)  # ~60fps 기준 다음 프레임이 올 시간
-        f2 = camera.get_latest_frame() if camera else None
-        if f2 is None:
-            samples.append(None)
-            low_count += 1
-            continue
-        p2 = self_hp_pct(f2, danger_roi, danger_ref)
-        samples.append(p2)
-        if p2 < threshold:
-            low_count += 1
-    return low_count >= 2, samples
 
 def bar_fill_pct_from_rgb(arr, ref100=None, strict=False):
     """HP바 채움% (파티 전용) — 바 행 자동탐지 후 채움 열 수 / 100%보정(열 수).
@@ -2222,10 +2199,8 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-03 02:55"
+PATCH_UPDATED_AT = "2026-08-02 03:15"
 LATEST_PATCH = [
-    "🪨 석화 HP% — 독(초록)처럼 석화일 때 회색 채움도 %에 포함. 평소(빨간피)엔 회색 안 셈(빈칸/테두리 때문에 100% 고정되던 버그). 격수모니터(attacker_hp)는 뚱힐러와 별도라 프로그램 재시작 필요",
-    "🛡️ 위기베르 순간오독 필터(다수결) — 한 프레임만 보고 즉시발동하던 걸, 낮은 값 감지시 2번 더 즉시 재확인해서 3번 중 2번 이상 낮아야 최종발동으로 변경. 예전 '연속2프레임 모두 낮아야'(디바운스) 방식은 전투이펙트로 흔들리면 진짜 위험할 때도 못 터지는 문제가 있었는데, 이번엔 '다수만 낮으면 됨'이라 그 문제 없이 순간 캡처오독만 걸러냄. 재확인 캡처 실패시엔 안전하게 발동 쪽으로 처리",
     "🩻 위기베르 오작동 진단용 스크린샷 저장 — dxcam 사용 중인데도 피가 많을 때 발동하는 문제 원인 확인용. 발동 순간 ROI 주변을 '위기베르_디버그' 폴더에 자동 저장(최근 20장 보관). 판정 로직 자체는 변경 없음",
     "🛡️ 고정(Shift) 풀림 현상 완화 — 힐 때마다 보내는 고정복구('H') 명령이 시리얼 통신 중 가끔 씹혀서 고정이 안 풀리게, 짧은 간격을 두고 한 번 더 보내도록 보강 (H는 절대상태 지정이라 중복 전송해도 안전). 힐 사이 고정 유지 방식(매 힐 직후 즉시 재고정)은 그대로 유지",
     "🖼️ 파티 유령힐 이중체크 — 이름표(글자)→아이콘(초상화) 방식으로 교체, 표준편차 방식도 디테일한 배경엔 안 통해 검은 뒤판 픽셀비율로 재변경. 야외배경(항상 따뜻한 톤)엔 검정이 거의 없어 뚜렷이 구분됨 (제어판 '🖼️아이콘' 버튼, 선택사항)",
@@ -3128,27 +3103,22 @@ def expert_logic():
             frame = camera.get_latest_frame() if camera else None
             if frame is None: time.sleep(0.01); continue 
 
-            # 위험베르 — 최우선 (HP%만 판정, 빨강/초록/회색(석화) 독·석화 무관)
+            # 위험베르 — 최우선 (HP%만 판정, 빨강/초록 독 무관)
             danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
             if danger_roi[0] != 0:
                 danger_pct = self_hp_pct(frame, danger_roi, danger_ref)   # 예전 초창기 버전 그대로
-                # 예전엔 "연속 2프레임 모두 낮아야 발동"이라 전투 이펙트로 한 프레임만 튀어도
-                # 진짜 위험할 때조차 발동을 놓치는 치명적 문제가 있어서 뺐었음. 지금은 그 대신
-                # "3번 중 2번 이상 낮으면 발동"(다수결) — 순간 캡처오독 1번은 걸러내면서도,
-                # 진짜 위험하면 3개 중 대부분이 낮게 나오므로 실발동엔 거의 영향 없음.
+                # 연속프레임 확인(디바운스)은 제거함 — 전투 이펙트로 매 프레임 픽셀이
+                # 미세하게 흔들리면 "연속으로 낮게"가 오히려 잘 안 걸려서, 진짜 위험한
+                # 순간에 위기베르가 발동을 안 하는 훨씬 위험한 문제가 생겼음(생명과 직결).
+                # 한 프레임 오독으로 어쩌다 한번 더 발동하는 것보다, 위험할 때 반드시
+                # 발동하는 쪽이 훨씬 중요하므로 즉시발동으로 원복.
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
-                    _confirmed, _samples = _danger_confirm_majority(danger_roi, danger_ref, danger_pct, danger_hp_threshold)
-                    _samp_str = ",".join("?" if s is None else f"{s:.0f}" for s in _samples)
-                    if _confirmed:
-                        focus_lineage_window()
-                        _cap = 'dx' if getattr(camera, '_dx_ok', False) else 'mss'   # 다음에 또 오작동하면 캡처백엔드까지 로그로 바로 확인 가능
-                        ser.write(b'C')
-                        _save_danger_debug(frame, danger_roi, danger_pct)
-                        log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%, 확인:{_samp_str}, cap:{_cap})"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
-                    else:
-                        # 순간 오독으로 걸러진 경우 — 실제로 필터가 작동하는지 확인용
-                        log_event(f"🛡️ 위기베르 오독걸러짐 (확인:{_samp_str})")
+                    focus_lineage_window()
+                    _cap = 'dx' if getattr(camera, '_dx_ok', False) else 'mss'   # 다음에 또 오작동하면 캡처백엔드까지 로그로 바로 확인 가능
+                    ser.write(b'C')
+                    _save_danger_debug(frame, danger_roi, danger_pct)
+                    log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%, cap:{_cap})"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
 
             # 채팅 등 실제 타이핑 중엔 "생명과 무관한" 동작(버프·줍기·해독·파랭이)만 일시정지.
             # 자힐·파티힐(A/7)·위기베르는 절대 여기서 안 막음 — 채팅 중이라도 실제로
@@ -3356,7 +3326,7 @@ def expert_logic():
                             if use_strong:
                                 log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
 
-            # 노파티 — 격수힐: 독/석화 여부와 무관, UDP HP% vs 격수% 임계값만 판단
+            # 노파티 — 격수힐: 독 여부와 무관, UDP HP% vs 격수% 임계값만 판단
             elif m == "노파티":
                 action_taken = False
                 if SELF_HP_ROI[0] != 0:
