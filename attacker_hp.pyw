@@ -335,10 +335,12 @@ def _hp_bar_poisoned(red_cnt, green_cnt, total_px):
     return green_cnt > total_px * 0.05 or (green_cnt > red_cnt and green_cnt > total_px * 0.02)
 
 def hp_pct_from_bar(arr, w, h):
-    """HP바 채움% — ROI 가로폭 기준, 빨강/초록(독) 색상 무관."""
-    red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
-    green = (arr[:,:,1]>15)&(arr[:,:,1]>arr[:,:,0]*1.03)&(arr[:,:,1]>arr[:,:,2]*1.03)
-    bar_px = red | green
+    """HP바 채움% — ROI 가로폭 기준, 빨강/초록(독)/회색(석화) 색상 무관."""
+    r = arr[:,:,0].astype(int); g = arr[:,:,1].astype(int); b = arr[:,:,2].astype(int)
+    red = (r>80)&(r>g*1.2)&(r>b*1.2)
+    green = (g>15)&(g>r*1.03)&(g>b*1.03)
+    gray = (abs(r-g)<25)&(abs(g-b)<25)&(abs(r-b)<25)&(r>30)&(r<170)  # 석화 채움 (빈칸 어두운색 제외)
+    bar_px = red | green | gray
     if w >= 2:
         filled_cols = int(np.sum(np.any(bar_px, axis=0)))
         return round(filled_cols / w * 100, 1)
