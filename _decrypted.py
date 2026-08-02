@@ -1029,7 +1029,12 @@ def _open_admin_panel_impl():
                         pct = bar_fill_pct_from_rgb(arr, ref100, strict=True)
                         roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
                 else:
-                    pct = _self_hp_pct_from_arr(arr, ref100)   # 쫄법 전용 — 예전 초창기 버전 그대로(빨강 픽셀 개수)
+                    # 쫄법 미리보기 — 석화면 어두운 열%, 아니면 빨강+초록 픽셀%
+                    _R, _G, _B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
+                    _gray = (abs(_R - _G) < 35) & (abs(_G - _B) < 35) & (abs(_R - _B) < 35) & (_R > 20) & (_R < 170)
+                    _red = (_R > 80) & (_R > _G * 1.2) & (_R > _B * 1.2)
+                    _pet = int(np.sum(_gray)) > arr.shape[0] * arr.shape[1] * 0.15 and int(np.sum(_red)) < arr.shape[0] * arr.shape[1] * 0.03
+                    pct = _self_hp_pct_from_arr(arr, ref100, petrified=_pet)
                     roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
 
     def open_self_hp_overlay():
@@ -1745,17 +1750,37 @@ def _hp_bar_lenient_cols(arr):
                 break                # 큰 틈 이후의 우측 잔상/장식은 무시 (span 뻥튀기 방지)
     return run_end - int(idx[0]) + 1, w
 
-def _self_hp_pct_from_arr(arr, ref100=None):
+def _petrify_hp_pct_from_arr(arr):
+    """석화 HP% — 열 중앙값 밝기. 채움=어두운 회색, 빈칸=밝은 은색/흰색.
+    스샷 실측: 채움 medianR≈56, 빈칸≈158 → 열 median R<=140 을 채움으로 셈.
+    (예전에 R>80 회색을 채움으로 넣으면 빈칸이 더 밝아서 닳아도 100% 고정됐음)"""
+    if arr.size == 0:
+        return 100.0
+    try:
+        R = arr[:, :, 0].astype(np.float32)
+        w = R.shape[1]
+        if w < 2:
+            return 100.0
+        col_med = np.median(R, axis=0)
+        filled_cols = int(np.sum(col_med <= 140))
+        return min(100.0, round(filled_cols / w * 100, 1))
+    except Exception:
+        return 100.0
+
+def _self_hp_pct_from_arr(arr, ref100=None, petrified=False):
     """쫄법(자기) HP% — 예전 초창기 버전(06191252.py)의 roi_hp_pct 로직을 그대로 사용.
     가공/보정 없이 단순하게: 채움 픽셀 개수 세서 ref100(픽셀개수, 100%일때 값)으로 나눔.
     빨강뿐 아니라 독(초록)일 때도 채움으로 잡음 — 안 그러면 독 걸려서 바가
     초록으로 바뀌는 순간 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동함.
     초록 기준은 is_green_bar(독 감지)와 반드시 동일해야 함 — 기준이 서로 다르면
     "독 걸림"으로는 인식되는데 "채움"으로는 인식 안 되는 색 구간이 생겨서,
-    피가 가득 차있어도 독 상태에서 위기베르가 잘못 발동하는 문제가 있었음."""
+    피가 가득 차있어도 독 상태에서 위기베르가 잘못 발동하는 문제가 있었음.
+    석화일 때만 어두운 회색 열=채움 (독=초록과 같은 '채움 인식' 개념, 계산식만 다름)."""
     if arr.size == 0:
         return 100.0
     try:
+        if petrified:
+            return _petrify_hp_pct_from_arr(arr)
         R, G, B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
         red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
         grn = (G > 15) & (G > R * 1.03) & (G > B * 1.03)   # is_green_bar와 동일 기준
@@ -1788,7 +1813,7 @@ def _save_danger_debug(frame, roi, pct):
     except Exception:
         pass
 
-def self_hp_pct(frame, roi, ref100=None):
+def self_hp_pct(frame, roi, ref100=None, petrified=False):
     """쫄법(자기) HP% — 위기베르·자힐 전용, 파티 판정과 무관. (예전 초창기 버전 그대로)"""
     x1, y1, x2, y2 = roi
     if x1 == 0 and x2 == 0:
@@ -1797,11 +1822,11 @@ def self_hp_pct(frame, roi, ref100=None):
         r = frame[y1:y2, x1:x2]
         if r.size == 0:
             return 100.0
-        return _self_hp_pct_from_arr(r, ref100)
+        return _self_hp_pct_from_arr(r, ref100, petrified=petrified)
     except Exception:
         return 100.0
 
-def _danger_confirm_majority(danger_roi, danger_ref, first_pct, threshold):
+def _danger_confirm_majority(danger_roi, danger_ref, first_pct, threshold, petrified=False):
     """위기베르 순간오독 필터 — 최초 감지값 포함 총 3번 중 2번 이상 낮아야 최종발동.
     재확인 캡처를 못 가져오면 판단불가라 안전하게 '낮음'으로 취급(놓치는 것보다 낫음).
     진짜 위험한 상황(전투이펙트로 흔들려도)은 3개 중 대개 2개 이상 낮게 나와서 실발동엔 영향 없음.
@@ -1815,7 +1840,7 @@ def _danger_confirm_majority(danger_roi, danger_ref, first_pct, threshold):
             samples.append(None)
             low_count += 1
             continue
-        p2 = self_hp_pct(f2, danger_roi, danger_ref)
+        p2 = self_hp_pct(f2, danger_roi, danger_ref, petrified=petrified)
         samples.append(p2)
         if p2 < threshold:
             low_count += 1
@@ -1848,9 +1873,9 @@ def bar_fill_pct(frame, roi, ref100=None, strict=False):
     except Exception:
         return 100.0
 
-def roi_hp_pct(frame, roi, ref100=None):
+def roi_hp_pct(frame, roi, ref100=None, petrified=False):
     """쫄법(자기) HP% — 예전 초창기 버전 그대로, self_hp_pct와 동일(별칭)."""
-    return self_hp_pct(frame, roi, ref100)
+    return self_hp_pct(frame, roi, ref100, petrified=petrified)
 
 def roi_mna_pct(frame, roi, ref100=None):
     x1,y1,x2,y2 = roi
@@ -2219,9 +2244,9 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-03 03:20"
+PATCH_UPDATED_AT = "2026-08-03 03:30"
 LATEST_PATCH = [
-    "🪨 석화시 자힐·격수힐만 스킵 — HP% 색상계산은 빨강+초록 그대로(회색채움 넣지 않음). 석화=회색이면 %가 0으로 오독되어 자힐/격수힐만 막음. 위기베르도 석화중엔 스킵(0% 오발동 방지)",
+    "🪨 석화 HP% — 스샷 실측 기준, 석화일 때만 어두운 회색 열(열 median R<=140)=채움, 밝은 은색 빈칸 제외. 일반/독(빨강+초록) 로직은 그대로. 석화 중에도 피 닳으면 자힐·격수힐·위기베르 정상. 격수모니터 재시작 필요",
     "🛡️ 위기베르 순간오독 필터(다수결) — 한 프레임만 보고 즉시발동하던 걸, 낮은 값 감지시 2번 더 재확인해서 3번 중 2번 이상 낮아야 최종발동. 재확인 사이 25ms 대기(dxcam 동일프레임 방지). 재확인 실패시엔 안전하게 발동 쪽",
     "🩻 위기베르 오작동 진단용 스크린샷 저장 — dxcam 사용 중인데도 피가 많을 때 발동하는 문제 원인 확인용. 발동 순간 ROI 주변을 '위기베르_디버그' 폴더에 자동 저장(최근 20장 보관). 판정 로직 자체는 변경 없음",
     "🛡️ 고정(Shift) 풀림 현상 완화 — 힐 때마다 보내는 고정복구('H') 명령이 시리얼 통신 중 가끔 씹혀서 고정이 안 풀리게, 짧은 간격을 두고 한 번 더 보내도록 보강 (H는 절대상태 지정이라 중복 전송해도 안전). 힐 사이 고정 유지 방식(매 힐 직후 즉시 재고정)은 그대로 유지",
@@ -3125,21 +3150,21 @@ def expert_logic():
             frame = camera.get_latest_frame() if camera else None
             if frame is None: time.sleep(0.01); continue 
 
-            # 석화(회색 피바): HP%는 빨강/초록만 세서 0%로 오독 → 자힐·격수힐·위기베르만 스킵
-            # (회색을 %채움에 넣지 않음 — 빈칸까지 잡혀 닳아도 100% 고정되는 버그 났었음)
+            # 석화(회색 피바): 일반/독은 빨강+초록, 석화일 때만 어두운 회색 열=채움 (빈칸=밝은 은색)
             _self_petrified = is_gray_bar(frame, SELF_HP_ROI) if SELF_HP_ROI[0] != 0 else False
 
-            # 위험베르 — 최우선 (HP%만 판정, 빨강/초록 독 무관 / 석화시 스킵)
+            # 위험베르 — 최우선 (HP%만 판정, 빨강/초록 독·석화 각각 채움 인식)
             danger_roi = DANGER_HP_ROI if DANGER_HP_ROI[0] != 0 else SELF_HP_ROI
             danger_ref = DANGER_HP_100_REF if DANGER_HP_ROI[0] != 0 else SELF_HP_100_REF
-            if danger_roi[0] != 0 and not _self_petrified:
-                danger_pct = self_hp_pct(frame, danger_roi, danger_ref)   # 예전 초창기 버전 그대로
+            _danger_petrified = is_gray_bar(frame, danger_roi) if danger_roi[0] != 0 else False
+            if danger_roi[0] != 0:
+                danger_pct = self_hp_pct(frame, danger_roi, danger_ref, petrified=_danger_petrified)
                 # 예전엔 "연속 2프레임 모두 낮아야 발동"이라 전투 이펙트로 한 프레임만 튀어도
                 # 진짜 위험할 때조차 발동을 놓치는 치명적 문제가 있어서 뺐었음. 지금은 그 대신
                 # "3번 중 2번 이상 낮으면 발동"(다수결) — 순간 캡처오독 1번은 걸러내면서도,
                 # 진짜 위험하면 3개 중 대부분이 낮게 나오므로 실발동엔 거의 영향 없음.
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
-                    _confirmed, _samples = _danger_confirm_majority(danger_roi, danger_ref, danger_pct, danger_hp_threshold)
+                    _confirmed, _samples = _danger_confirm_majority(danger_roi, danger_ref, danger_pct, danger_hp_threshold, petrified=_danger_petrified)
                     _samp_str = ",".join("?" if s is None else f"{s:.0f}" for s in _samples)
                     if _confirmed:
                         focus_lineage_window()
@@ -3260,8 +3285,8 @@ def expert_logic():
             if m == "솔로(파티)":
                 healed = False
                 if SELF_HP_ROI[0] != 0:
-                    self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF)
-                    if chk_self_heal_sw.get() and not _self_petrified and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
+                    self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
+                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
                         if prob == 0: execute_keys(['E'], 1.0)
@@ -3270,7 +3295,7 @@ def expert_logic():
                             if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
                             else: execute_keys(['E'], 1.0)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
-                elif chk_self_heal_sw.get() and not _self_petrified and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
+                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
                     if prob == 0: execute_keys(['E'], 1.0)
@@ -3308,8 +3333,8 @@ def expert_logic():
             elif m == "파티":
                 healed = False
                 if SELF_HP_ROI[0] != 0:
-                    self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF)
-                    if chk_self_heal_sw.get() and not _self_petrified and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
+                    self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
+                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
                         if prob == 0: execute_keys(['E'], 0.8)
@@ -3318,7 +3343,7 @@ def expert_logic():
                             if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
                             else: execute_keys(['E'], 0.8)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
-                elif chk_self_heal_sw.get() and not _self_petrified and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
+                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
                     if prob == 0: execute_keys(['E'], 0.8)
@@ -3360,8 +3385,8 @@ def expert_logic():
             elif m == "노파티":
                 action_taken = False
                 if SELF_HP_ROI[0] != 0:
-                    self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF)
-                    if chk_self_heal_sw.get() and not _self_petrified and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
+                    self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
+                    if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
                         prob = int(current_f9_prob * 100)
                         if _mp_low: prob = 0
                         if prob == 0: execute_keys(['E'], 0.8)
@@ -3370,7 +3395,7 @@ def expert_logic():
                             if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
                             else: execute_keys(['E'], 0.8)
                         last_self_heal = now; action_taken = True
-                elif chk_self_heal_sw.get() and not _self_petrified and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 20) and (now - last_self_heal >= 0.2):
+                elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 20) and (now - last_self_heal >= 0.2):
                     prob = int(current_f9_prob * 100)
                     if _mp_low: prob = 0
                     if prob == 0: execute_keys(['E'], 0.8)
@@ -3383,7 +3408,7 @@ def expert_logic():
                 if not action_taken and (now - last_noparty_heal >= 0.2):
                     udp_ok = (time.time() - last_udp_time) < 5
                     atk_hp = attacker_hp_udp
-                    if chk_attacker_sw.get() and udp_ok and not attacker_petrified and atk_hp < attacker_hp_threshold:
+                    if chk_attacker_sw.get() and udp_ok and atk_hp < attacker_hp_threshold:
                         focus_lineage_window()
                         was_fixed, was_follow = _pause_attack_click()
                         try:

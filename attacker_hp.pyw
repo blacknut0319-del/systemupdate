@@ -334,8 +334,13 @@ def update_preview(arr):
 def _hp_bar_poisoned(red_cnt, green_cnt, total_px):
     return green_cnt > total_px * 0.05 or (green_cnt > red_cnt and green_cnt > total_px * 0.02)
 
-def hp_pct_from_bar(arr, w, h):
-    """HP바 채움% — ROI 가로폭 기준, 빨강/초록(독) 색상 무관."""
+def hp_pct_from_bar(arr, w, h, petrified=False):
+    """HP바 채움% — ROI 가로폭(열 수) 기준.
+    평소: 빨강+초록(독). 석화일 때만 어두운 회색 열=채움(빈칸=밝은 은색 제외)."""
+    if petrified and w >= 2:
+        col_med = np.median(arr[:, :, 0].astype(np.float32), axis=0)
+        filled_cols = int(np.sum(col_med <= 140))
+        return round(filled_cols / w * 100, 1)
     red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
     green = (arr[:,:,1]>15)&(arr[:,:,1]>arr[:,:,0]*1.03)&(arr[:,:,1]>arr[:,:,2]*1.03)
     bar_px = red | green
@@ -361,11 +366,14 @@ def sender():
             red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
             green = (arr[:,:,1]>15)&(arr[:,:,1]>arr[:,:,0]*1.03)&(arr[:,:,1]>arr[:,:,2]*1.03)
             green_cnt = int(np.sum(green))
+            red_cnt = int(np.sum(red))
             total_px = max(w * h, 1)
-            poisoned = _hp_bar_poisoned(int(np.sum(red)), green_cnt, total_px)
-            gray = (abs(arr[:,:,0]-arr[:,:,1])<25)&(abs(arr[:,:,1]-arr[:,:,2])<25)&(abs(arr[:,:,0]-arr[:,:,2])<25)&(arr[:,:,0]>30)
-            petrified = int(np.sum(gray)) > (total_px * 0.12)
-            hp_pct = hp_pct_from_bar(arr, w, h)
+            poisoned = _hp_bar_poisoned(red_cnt, green_cnt, total_px)
+            # 석화 판정: 빨강 거의 없고 회색이 우세할 때만 (뚱힐러 is_gray_bar와 동일 계열)
+            gray = (abs(arr[:,:,0]-arr[:,:,1])<35)&(abs(arr[:,:,1]-arr[:,:,2])<35)&(abs(arr[:,:,0]-arr[:,:,2])<35)&(arr[:,:,0]>20)&(arr[:,:,0]<170)
+            gray_cnt = int(np.sum(gray))
+            petrified = gray_cnt > total_px * 0.15 and red_cnt < total_px * 0.03
+            hp_pct = hp_pct_from_bar(arr, w, h, petrified=petrified)
             sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (ip_var.get(), TARGET_PORT))
             root.after(0, update_bar)
             root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))
