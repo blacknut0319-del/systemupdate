@@ -1757,10 +1757,11 @@ def _hp_bar_lenient_cols(arr):
     return run_end - int(idx[0]) + 1, w
 
 def _petrify_hp_pct_from_arr(arr):
-    """석화 HP% — 열 중앙값 밝기. 채움=어두운 회색, 빈칸=밝은 은색/흰색.
-    스샷 실측: 채움 medianR≈56, 빈칸≈158 → 열 median R<=140 을 채움으로 셈.
-    ROI 상·하 금테/갈색 장식이 열 중앙값을 어둡게 끌어내려 빈칸까지 채움으로
-    잡히지 않게, 세로 중앙 50% 밴드만 사용."""
+    """석화 HP% — 빨간피(빨강 마스크→열)와 같은 구조.
+    채움=어두운 회색 열, 빈칸=밝은 은색 열. 스샷 실측 채움≈56 / 빈칸≈150.
+    - 세로 중앙 50%만 사용(금테·갈색 장식 제외)
+    - HP 숫자 흰글자(R>=190)는 열 중앙값에서 제외(만땅인데 95% 되던 원인)
+    - 열 median R<=105 만 채움(140은 빈칸 은색까지 먹어 %가 안 내려갔음)"""
     if arr.size == 0:
         return 100.0
     try:
@@ -1771,9 +1772,18 @@ def _petrify_hp_pct_from_arr(arr):
         if y2 <= y1:
             y1, y2 = 0, h
         band = arr[y1:y2]
-        col_med = np.median(band[:, :, 0].astype(np.float32), axis=0)
-        filled_cols = int(np.sum(col_med <= 140))
-        return min(100.0, round(filled_cols / w * 100, 1))
+        R = band[:, :, 0].astype(np.float32)
+        G = band[:, :, 1].astype(np.float32)
+        B = band[:, :, 2].astype(np.float32)
+        text = (R >= 190) & (G >= 190) & (B >= 190)
+        R2 = R.copy()
+        R2[text] = np.nan
+        col_med = np.nanmedian(R2, axis=0)
+        bad = np.isnan(col_med)
+        if np.any(bad):
+            col_med = np.where(bad, np.median(R, axis=0), col_med)
+        filled_cols = int(np.sum(col_med <= 105))
+        return min(100.0, round(filled_cols / max(len(col_med), 1) * 100, 1))
     except Exception:
         return 100.0
 
@@ -2256,7 +2266,7 @@ def fix_mode_keys(keys, delay=0.5):
 
 PATCH_UPDATED_AT = "2026-08-03 03:30"
 LATEST_PATCH = [
-    "🪨 석화 HP% 수정 — 금색 테두리가 빨강으로 잡혀 석화판정이 실패→빨간피 경로로 가서 %고정되던 문제. 석화판정을 뚱힐러 is_gray_bar와 동일(평균 회색 폴백)로 맞춤. %는 세로 중앙50%만 보고 어두운 열=채움. 격수모니터(hp_start) 재시작 필수",
+    "🪨 석화 HP% 정확도 — 빨간피처럼 채움열만 셈. 흰 HP숫자 제외+열밝기<=105(어두움=피/밝음=빈칸). 이전 140임계는 은색 빈칸까지 먹어 석화중 %가 안 내려감. 격수모니터 hp_start 재시작 필수",
     "🛡️ 위기베르 순간오독 필터(다수결) — 한 프레임만 보고 즉시발동하던 걸, 낮은 값 감지시 2번 더 재확인해서 3번 중 2번 이상 낮아야 최종발동. 재확인 사이 25ms 대기(dxcam 동일프레임 방지). 재확인 실패시엔 안전하게 발동 쪽",
     "🩻 위기베르 오작동 진단용 스크린샷 저장 — dxcam 사용 중인데도 피가 많을 때 발동하는 문제 원인 확인용. 발동 순간 ROI 주변을 '위기베르_디버그' 폴더에 자동 저장(최근 20장 보관). 판정 로직 자체는 변경 없음",
     "🛡️ 고정(Shift) 풀림 현상 완화 — 힐 때마다 보내는 고정복구('H') 명령이 시리얼 통신 중 가끔 씹혀서 고정이 안 풀리게, 짧은 간격을 두고 한 번 더 보내도록 보강 (H는 절대상태 지정이라 중복 전송해도 안전). 힐 사이 고정 유지 방식(매 힐 직후 즉시 재고정)은 그대로 유지",

@@ -355,9 +355,18 @@ def hp_pct_from_bar(arr, w, h, petrified=False):
         if y2 <= y1:
             y1, y2 = 0, hh
         band = arr[y1:y2]
-        col_med = np.median(band[:, :, 0].astype(np.float32), axis=0)
-        filled_cols = int(np.sum(col_med <= 140))
-        return round(filled_cols / max(band.shape[1], 1) * 100, 1)
+        R = band[:, :, 0].astype(np.float32)
+        G = band[:, :, 1].astype(np.float32)
+        B = band[:, :, 2].astype(np.float32)
+        # HP 흰글자 제외 + 어두운 열만 채움(<=105). 140은 빈칸 은색까지 먹음
+        text = (R >= 190) & (G >= 190) & (B >= 190)
+        R2 = R.copy(); R2[text] = np.nan
+        col_med = np.nanmedian(R2, axis=0)
+        bad = np.isnan(col_med)
+        if np.any(bad):
+            col_med = np.where(bad, np.median(R, axis=0), col_med)
+        filled_cols = int(np.sum(col_med <= 105))
+        return round(filled_cols / max(len(col_med), 1) * 100, 1)
     red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
     green = (arr[:,:,1]>15)&(arr[:,:,1]>arr[:,:,0]*1.03)&(arr[:,:,1]>arr[:,:,2]*1.03)
     bar_px = red | green
