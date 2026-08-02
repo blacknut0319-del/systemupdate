@@ -1029,11 +1029,17 @@ def _open_admin_panel_impl():
                         pct = bar_fill_pct_from_rgb(arr, ref100, strict=True)
                         roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
                 else:
-                    # 쫄법 미리보기 — 석화면 어두운 열%, 아니면 빨강+초록 픽셀%
+                    # 쫄법 미리보기 — is_gray_bar와 동일 판정 후 석화%/일반%
                     _R, _G, _B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
+                    _tot = arr.shape[0] * arr.shape[1]
                     _gray = (abs(_R - _G) < 35) & (abs(_G - _B) < 35) & (abs(_R - _B) < 35) & (_R > 20) & (_R < 170)
                     _red = (_R > 80) & (_R > _G * 1.2) & (_R > _B * 1.2)
-                    _pet = int(np.sum(_gray)) > arr.shape[0] * arr.shape[1] * 0.15 and int(np.sum(_red)) < arr.shape[0] * arr.shape[1] * 0.03
+                    _pet = (int(np.sum(_gray)) > _tot * 0.15 and int(np.sum(_red)) < _tot * 0.03) or (
+                        abs(float(np.mean(_R)) - float(np.mean(_G))) < 25
+                        and abs(float(np.mean(_G)) - float(np.mean(_B))) < 25
+                        and abs(float(np.mean(_R)) - float(np.mean(_B))) < 25
+                        and float(np.mean(_R)) > 50 and float(np.mean(_R)) < 180
+                    )
                     pct = _self_hp_pct_from_arr(arr, ref100, petrified=_pet)
                     roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
 
@@ -1753,15 +1759,19 @@ def _hp_bar_lenient_cols(arr):
 def _petrify_hp_pct_from_arr(arr):
     """석화 HP% — 열 중앙값 밝기. 채움=어두운 회색, 빈칸=밝은 은색/흰색.
     스샷 실측: 채움 medianR≈56, 빈칸≈158 → 열 median R<=140 을 채움으로 셈.
-    (예전에 R>80 회색을 채움으로 넣으면 빈칸이 더 밝아서 닳아도 100% 고정됐음)"""
+    ROI 상·하 금테/갈색 장식이 열 중앙값을 어둡게 끌어내려 빈칸까지 채움으로
+    잡히지 않게, 세로 중앙 50% 밴드만 사용."""
     if arr.size == 0:
         return 100.0
     try:
-        R = arr[:, :, 0].astype(np.float32)
-        w = R.shape[1]
+        h, w = arr.shape[0], arr.shape[1]
         if w < 2:
             return 100.0
-        col_med = np.median(R, axis=0)
+        y1, y2 = max(0, h // 4), max(1, (3 * h) // 4)
+        if y2 <= y1:
+            y1, y2 = 0, h
+        band = arr[y1:y2]
+        col_med = np.median(band[:, :, 0].astype(np.float32), axis=0)
         filled_cols = int(np.sum(col_med <= 140))
         return min(100.0, round(filled_cols / w * 100, 1))
     except Exception:
@@ -2246,7 +2256,7 @@ def fix_mode_keys(keys, delay=0.5):
 
 PATCH_UPDATED_AT = "2026-08-03 03:30"
 LATEST_PATCH = [
-    "🪨 석화 HP% — 스샷 실측 기준, 석화일 때만 어두운 회색 열(열 median R<=140)=채움, 밝은 은색 빈칸 제외. 일반/독(빨강+초록) 로직은 그대로. 석화 중에도 피 닳으면 자힐·격수힐·위기베르 정상. 격수모니터 재시작 필요",
+    "🪨 석화 HP% 수정 — 금색 테두리가 빨강으로 잡혀 석화판정이 실패→빨간피 경로로 가서 %고정되던 문제. 석화판정을 뚱힐러 is_gray_bar와 동일(평균 회색 폴백)로 맞춤. %는 세로 중앙50%만 보고 어두운 열=채움. 격수모니터(hp_start) 재시작 필수",
     "🛡️ 위기베르 순간오독 필터(다수결) — 한 프레임만 보고 즉시발동하던 걸, 낮은 값 감지시 2번 더 재확인해서 3번 중 2번 이상 낮아야 최종발동. 재확인 사이 25ms 대기(dxcam 동일프레임 방지). 재확인 실패시엔 안전하게 발동 쪽",
     "🩻 위기베르 오작동 진단용 스크린샷 저장 — dxcam 사용 중인데도 피가 많을 때 발동하는 문제 원인 확인용. 발동 순간 ROI 주변을 '위기베르_디버그' 폴더에 자동 저장(최근 20장 보관). 판정 로직 자체는 변경 없음",
     "🛡️ 고정(Shift) 풀림 현상 완화 — 힐 때마다 보내는 고정복구('H') 명령이 시리얼 통신 중 가끔 씹혀서 고정이 안 풀리게, 짧은 간격을 두고 한 번 더 보내도록 보강 (H는 절대상태 지정이라 중복 전송해도 안전). 힐 사이 고정 유지 방식(매 힐 직후 즉시 재고정)은 그대로 유지",

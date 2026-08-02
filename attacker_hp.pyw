@@ -334,13 +334,30 @@ def update_preview(arr):
 def _hp_bar_poisoned(red_cnt, green_cnt, total_px):
     return green_cnt > total_px * 0.05 or (green_cnt > red_cnt and green_cnt > total_px * 0.02)
 
+def _is_petrified_bar(arr, red_cnt, total_px):
+    """석화 판정 — 뚱힐러 is_gray_bar와 동일.
+    금색 테두리가 빨강으로 조금 잡혀도, 평균색이 중성 회색이면 석화로 인정."""
+    r = arr[:, :, 0].astype(int); g = arr[:, :, 1].astype(int); b = arr[:, :, 2].astype(int)
+    gray = (abs(r - g) < 35) & (abs(g - b) < 35) & (abs(r - b) < 35) & (r > 20) & (r < 170)
+    gray_cnt = int(np.sum(gray))
+    if gray_cnt > total_px * 0.15 and red_cnt < total_px * 0.03:
+        return True
+    avg_r, avg_g, avg_b = float(np.mean(r)), float(np.mean(g)), float(np.mean(b))
+    return abs(avg_r - avg_g) < 25 and abs(avg_g - avg_b) < 25 and abs(avg_r - avg_b) < 25 and avg_r > 50 and avg_r < 180
+
 def hp_pct_from_bar(arr, w, h, petrified=False):
     """HP바 채움% — ROI 가로폭(열 수) 기준.
-    평소: 빨강+초록(독). 석화일 때만 어두운 회색 열=채움(빈칸=밝은 은색 제외)."""
+    평소: 빨강+초록(독). 석화일 때만 어두운 회색 열=채움(빈칸=밝은 은색 제외).
+    석화%는 상·하 장식(금테/갈색)을 피하려고 ROI 세로 중앙 50%만 사용."""
     if petrified and w >= 2:
-        col_med = np.median(arr[:, :, 0].astype(np.float32), axis=0)
+        hh = arr.shape[0]
+        y1, y2 = max(0, hh // 4), max(1, (3 * hh) // 4)
+        if y2 <= y1:
+            y1, y2 = 0, hh
+        band = arr[y1:y2]
+        col_med = np.median(band[:, :, 0].astype(np.float32), axis=0)
         filled_cols = int(np.sum(col_med <= 140))
-        return round(filled_cols / w * 100, 1)
+        return round(filled_cols / max(band.shape[1], 1) * 100, 1)
     red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
     green = (arr[:,:,1]>15)&(arr[:,:,1]>arr[:,:,0]*1.03)&(arr[:,:,1]>arr[:,:,2]*1.03)
     bar_px = red | green
@@ -369,10 +386,7 @@ def sender():
             red_cnt = int(np.sum(red))
             total_px = max(w * h, 1)
             poisoned = _hp_bar_poisoned(red_cnt, green_cnt, total_px)
-            # 석화 판정: 빨강 거의 없고 회색이 우세할 때만 (뚱힐러 is_gray_bar와 동일 계열)
-            gray = (abs(arr[:,:,0]-arr[:,:,1])<35)&(abs(arr[:,:,1]-arr[:,:,2])<35)&(abs(arr[:,:,0]-arr[:,:,2])<35)&(arr[:,:,0]>20)&(arr[:,:,0]<170)
-            gray_cnt = int(np.sum(gray))
-            petrified = gray_cnt > total_px * 0.15 and red_cnt < total_px * 0.03
+            petrified = _is_petrified_bar(arr, red_cnt, total_px)
             hp_pct = hp_pct_from_bar(arr, w, h, petrified=petrified)
             sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (ip_var.get(), TARGET_PORT))
             root.after(0, update_bar)
