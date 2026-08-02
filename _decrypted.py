@@ -1804,10 +1804,12 @@ def self_hp_pct(frame, roi, ref100=None):
 def _danger_confirm_majority(danger_roi, danger_ref, first_pct, threshold):
     """위기베르 순간오독 필터 — 최초 감지값 포함 총 3번 중 2번 이상 낮아야 최종발동.
     재확인 캡처를 못 가져오면 판단불가라 안전하게 '낮음'으로 취급(놓치는 것보다 낫음).
-    진짜 위험한 상황(전투이펙트로 흔들려도)은 3개 중 대개 2개 이상 낮게 나와서 실발동엔 영향 없음."""
+    진짜 위험한 상황(전투이펙트로 흔들려도)은 3개 중 대개 2개 이상 낮게 나와서 실발동엔 영향 없음.
+    dxcam get_latest_frame은 대기 없이 부르면 같은 프레임이 다시 올 수 있어, 재확인 사이 짧게 쉼."""
     samples = [first_pct]
     low_count = 1
     for _ in range(2):
+        time.sleep(0.025)  # ~60fps 기준 다음 프레임이 올 시간
         f2 = camera.get_latest_frame() if camera else None
         if f2 is None:
             samples.append(None)
@@ -3133,13 +3135,16 @@ def expert_logic():
                 # 진짜 위험하면 3개 중 대부분이 낮게 나오므로 실발동엔 거의 영향 없음.
                 if chk_danger_sw.get() and danger_pct < danger_hp_threshold:
                     _confirmed, _samples = _danger_confirm_majority(danger_roi, danger_ref, danger_pct, danger_hp_threshold)
+                    _samp_str = ",".join("?" if s is None else f"{s:.0f}" for s in _samples)
                     if _confirmed:
                         focus_lineage_window()
                         _cap = 'dx' if getattr(camera, '_dx_ok', False) else 'mss'   # 다음에 또 오작동하면 캡처백엔드까지 로그로 바로 확인 가능
                         ser.write(b'C')
                         _save_danger_debug(frame, danger_roi, danger_pct)
-                        _samp_str = ",".join("?" if s is None else f"{s:.0f}" for s in _samples)
                         log_event(f"🛡️ 위험베르 (HP:{danger_pct:.0f}%, 확인:{_samp_str}, cap:{_cap})"); stop_everything(f"🚨 위기 베르 감지 (HP:{danger_pct:.0f}%)"); continue
+                    else:
+                        # 순간 오독으로 걸러진 경우 — 실제로 필터가 작동하는지 확인용
+                        log_event(f"🛡️ 위기베르 오독걸러짐 (확인:{_samp_str})")
 
             # 채팅 등 실제 타이핑 중엔 "생명과 무관한" 동작(버프·줍기·해독·파랭이)만 일시정지.
             # 자힐·파티힐(A/7)·위기베르는 절대 여기서 안 막음 — 채팅 중이라도 실제로
