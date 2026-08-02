@@ -335,11 +335,12 @@ def _hp_bar_poisoned(red_cnt, green_cnt, total_px):
     return green_cnt > total_px * 0.05 or (green_cnt > red_cnt and green_cnt > total_px * 0.02)
 
 def hp_pct_from_bar(arr, w, h):
-    """HP바 채움% — ROI 가로폭 기준, 빨강/초록(독)/회색(석화) 색상 무관."""
+    """HP바 채움% — ROI 가로폭 기준, 빨강/초록(독)/회색(석화) 색상 무관.
+    석화 회색은 독 초록처럼 '채움'만 잡음. 밝기 R>80(빨강 채움과 동일)이라 어두운 빈칸은 제외."""
     r = arr[:,:,0].astype(int); g = arr[:,:,1].astype(int); b = arr[:,:,2].astype(int)
     red = (r>80)&(r>g*1.2)&(r>b*1.2)
     green = (g>15)&(g>r*1.03)&(g>b*1.03)
-    gray = (abs(r-g)<25)&(abs(g-b)<25)&(abs(r-b)<25)&(r>30)&(r<170)  # 석화 채움 (빈칸 어두운색 제외)
+    gray = (abs(r-g)<25)&(abs(g-b)<25)&(abs(r-b)<25)&(r>80)&(r<170)  # 석화 채움만 (빈칸 R낮음)
     bar_px = red | green | gray
     if w >= 2:
         filled_cols = int(np.sum(np.any(bar_px, axis=0)))
