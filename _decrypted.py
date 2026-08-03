@@ -2296,8 +2296,9 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-03 03:30"
+PATCH_UPDATED_AT = "2026-08-03 12:40"
 LATEST_PATCH = [
+    "⚡ 파티/격수힐 반응 개선 — 힐 후대기 랜덤 0.6~0.9→0.45~0.7(사람처럼 랜덤 유지·평균만 단축). 격수UDP 0.3→0.1초로 피감지 빠르게. 자힐 랜덤대기는 그대로. 격수모니터 재시작 필요",
     "🪨 석화 HP% 경계분할 — 고정밝기(105)가 빈칸이 덜 밝을 때 64%→85%로 부풀리던 문제. 열밝기에서 채움|빈칸 경계를 찾아 %계산(빨간피 좌→우 채움과 동일 개념). 격수모니터 hp_start 재시작 필수",
     "🛡️ 위기베르 순간오독 필터(다수결) — 한 프레임만 보고 즉시발동하던 걸, 낮은 값 감지시 2번 더 재확인해서 3번 중 2번 이상 낮아야 최종발동. 재확인 사이 25ms 대기(dxcam 동일프레임 방지). 재확인 실패시엔 안전하게 발동 쪽",
     "🩻 위기베르 오작동 진단용 스크린샷 저장 — dxcam 사용 중인데도 피가 많을 때 발동하는 문제 원인 확인용. 발동 순간 ROI 주변을 '위기베르_디버그' 폴더에 자동 저장(최근 20장 보관). 판정 로직 자체는 변경 없음",
@@ -3376,7 +3377,7 @@ def expert_logic():
                                     ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
                                 else:
                                     ser.write(b'A')
-                                time.sleep(human_delay(0.6, 0.9)); healed = True
+                                time.sleep(human_delay(0.45, 0.7)); healed = True
                             finally:
                                 _resume_attack_click(was_fixed, was_follow)
                     if healed: continue
@@ -3466,9 +3467,9 @@ def expert_logic():
                         try:
                             use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
                             if use_strong:
-                                ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.6, 0.9))
+                                ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
                             elif random.randint(1, 100) <= 85:
-                                ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.6, 0.9))
+                                ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
                             else:
                                 time.sleep(human_delay(0.2, 0.3))
                         finally:

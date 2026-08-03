@@ -428,7 +428,7 @@ def sender():
             root.after(0, lambda p=poisoned, s=petrified: lbl_poison.config(
                 text="중독!" if p else ("석화!" if s else ""), fg="#ef4444" if p else ("#8b5cf6" if s else "#10b981")))
             root.after(0, update_preview, arr.copy())
-            time.sleep(0.3)
+            time.sleep(0.1)
         except Exception as e:
             import traceback; traceback.print_exc()
             time.sleep(0.5)
