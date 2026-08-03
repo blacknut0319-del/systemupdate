@@ -2282,7 +2282,11 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
         for k in keys:
             if not running: break
             ser.write(k.encode()); time.sleep(random.uniform(0.04, 0.15))
-        if running: time.sleep(random.uniform(max(0.15, end_delay*0.7), max(0.5, end_delay*1.8)))
+        # end_delay 작은 호출(파티힐 0.15 등)이 max(0.5,…) 때문에 느려지지 않게
+        if running:
+            lo = max(0.05, end_delay * 0.7)
+            hi = max(end_delay, end_delay * 1.8)
+            time.sleep(random.uniform(lo, hi))
     finally:
         if not ser or not getattr(ser, "is_open", False): return
         if not skip_follow_toggle:
