@@ -3427,7 +3427,7 @@ def expert_logic():
                             human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
                             use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                             heal_key = '7' if use_strong else 'A'
-                            execute_keys(['K', heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
+                            execute_keys([heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
                             human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
                             _resume_attack_click(was_fixed, was_follow)
                             last_party_heal = now; healed = True
