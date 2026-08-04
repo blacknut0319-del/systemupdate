@@ -192,6 +192,173 @@ class Collapsible(ctk.CTkFrame):
             top.after(50, lambda: top.update_idletasks())
 
 
+
+# ── UI 반응성: 팝업/오버레이 중 topmost·리사이즈·제어판 갱신 일시정지 ──
+_ui_popup_depth = 0
+_admin_ui_pause = False
+
+def _ui_busy():
+    return _ui_popup_depth > 0 or _admin_ui_pause
+
+def _ui_popup_enter():
+    global _ui_popup_depth
+    _ui_popup_depth += 1
+
+def _ui_popup_leave():
+    global _ui_popup_depth
+    _ui_popup_depth = max(0, _ui_popup_depth - 1)
+
+def _set_admin_ui_pause(v):
+    global _admin_ui_pause
+    _admin_ui_pause = bool(v)
+
+def open_scroll_pick(anchor, values, on_pick, width=None, max_h=220, current=None):
+    """CTk 기본 드롭다운 대신 스크롤 픽 팝업."""
+    if not values:
+        return
+    _ui_popup_enter()
+    try:
+        pop = ctk.CTkToplevel(root)
+    except Exception:
+        _ui_popup_leave()
+        return
+    pop.withdraw()
+    try:
+        pop.overrideredirect(True)
+        pop.attributes("-topmost", True)
+    except Exception:
+        pass
+    pop.configure(fg_color="#0b0b10")
+    try:
+        w = int(width or max(100, anchor.winfo_width()))
+    except Exception:
+        w = int(width or 100)
+    h = min(int(max_h), max(44, 30 * len(values) + 16))
+    try:
+        ax = anchor.winfo_rootx()
+        ay = anchor.winfo_rooty() + anchor.winfo_height() + 2
+    except Exception:
+        ax, ay = 100, 100
+    pop.geometry(f"{w}x{h}+{ax}+{ay}")
+    closed = {"v": False}
+
+    def close():
+        if closed["v"]:
+            return
+        closed["v"] = True
+        try:
+            pop.grab_release()
+        except Exception:
+            pass
+        try:
+            pop.destroy()
+        except Exception:
+            pass
+        _ui_popup_leave()
+
+    shell = ctk.CTkFrame(
+        pop, fg_color="#14141c", corner_radius=10,
+        border_width=1, border_color="#3d3a2f",
+    )
+    shell.pack(fill="both", expand=True, padx=1, pady=1)
+    sf = ctk.CTkScrollableFrame(
+        shell, fg_color="#14141c", width=max(80, w - 14), height=max(32, h - 14),
+        corner_radius=8,
+    )
+    sf.pack(fill="both", expand=True, padx=4, pady=4)
+
+    def pick(v):
+        try:
+            on_pick(v)
+        finally:
+            close()
+
+    cur = str(current) if current is not None else ""
+    for v in values:
+        sel = (str(v) == cur)
+        ctk.CTkButton(
+            sf, text=str(v), height=28,
+            fg_color="#2a2118" if sel else "#1a1a22",
+            hover_color="#3d2e1f",
+            text_color="#f0d9a8" if sel else "#c8c3b8",
+            border_width=1,
+            border_color="#c9a84c" if sel else "#2a2a32",
+            font=("Malgun Gothic", 10, "bold" if sel else "normal"),
+            anchor="w", corner_radius=6,
+            command=lambda vv=v: pick(vv),
+        ).pack(fill="x", pady=2, padx=1)
+
+    try:
+        pop.deiconify()
+        pop.lift()
+        pop.focus_force()
+        pop.grab_set()
+    except Exception:
+        pass
+    pop.bind("<Escape>", lambda e: close())
+
+def make_pick_btn(parent, values, textvariable, command=None, width=80, height=22, font=("Malgun Gothic", 9),
+                  fg_color=None, hover_color=None, border_color=None, text_color=None, premium=False):
+    """콤보 대체: 현재값 버튼 + 스크롤 픽 팝업."""
+    if premium:
+        # 고급: 딥차콜 + 뮤트골드
+        fg_color = "#16161f"
+        hover_color = "#22222c"
+        border_color = "#c9a84c"
+        text_color = "#f0d9a8"
+        corner = 8
+        bwidth = 1
+        font = ("Malgun Gothic", 10, "bold")
+    else:
+        corner = 6
+        bwidth = 1
+        fg_color = fg_color or "#1e1e2e"
+        hover_color = hover_color or "#45475a"
+        border_color = border_color or "#45475a"
+        text_color = text_color or "#cdd6f4"
+
+    def _label():
+        return f"{textvariable.get()} ▾"
+
+    btn = ctk.CTkButton(
+        parent, text=_label(), width=width, height=height, font=font,
+        fg_color=fg_color, hover_color=hover_color, border_width=bwidth, border_color=border_color,
+        text_color=text_color, corner_radius=corner,
+    )
+    state = {"cmd": command}
+
+    def _sync(*a):
+        try:
+            btn.configure(text=_label())
+        except Exception:
+            pass
+
+    try:
+        textvariable.trace_add("write", _sync)
+    except Exception:
+        pass
+
+    def _on_pick(v):
+        textvariable.set(v)
+        cmd = state["cmd"]
+        if cmd:
+            try:
+                cmd(v)
+            except TypeError:
+                cmd()
+
+    def _open():
+        open_scroll_pick(btn, list(values), _on_pick, width=max(width, 100), current=textvariable.get())
+
+    btn.configure(command=_open)
+
+    def set_command(cmd):
+        state["cmd"] = cmd
+
+    btn.set_pick_command = set_command
+    return btn
+
+
 BUFF_SLOT_LABELS = ["F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
 BUFF_SLOT_KEYS = {"F5": "5", "F6": "6", "F7": "7", "F8": "8", "F9": "9", "F10": "X", "F11": "Y", "F12": "Z"}
 BUFF_HOTBARS = ["F1", "F2", "F3"]
@@ -947,6 +1114,8 @@ def _open_admin_panel_impl():
 
     def update_admin_live():
         if not admin.winfo_exists(): return
+        if _admin_ui_pause:
+            admin.after(2000, update_admin_live); return
         if camera:
             try:
                 if not admin.winfo_exists(): return
@@ -975,7 +1144,7 @@ def _open_admin_panel_impl():
                                 if name_diag is not None:
                                     name_diag.configure(text=f"검정{black_pct:.0f}% B{black}/T{t} RGB{ar},{ag},{ab}")
             except: pass
-        admin.after(500, update_admin_live)
+        admin.after(2000, update_admin_live)
 
 
 
@@ -1045,6 +1214,7 @@ def _open_admin_panel_impl():
 
     def open_self_hp_overlay():
         ov = tk.Toplevel(admin); ov.overrideredirect(True)
+        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
         sx = ctypes.windll.user32.GetSystemMetrics(76); sy = ctypes.windll.user32.GetSystemMetrics(77)
         sw = ctypes.windll.user32.GetSystemMetrics(78); sh = ctypes.windll.user32.GetSystemMetrics(79)
         ov.geometry(f"{sw}x{sh}+{sx}+{sy}"); ov.attributes("-alpha",0.35)
@@ -1087,6 +1257,7 @@ def _open_admin_panel_impl():
 
     def open_mna_roi_overlay():
         ov=tk.Toplevel(admin); ov.overrideredirect(True)
+        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
         sx3 = ctypes.windll.user32.GetSystemMetrics(76); sy3 = ctypes.windll.user32.GetSystemMetrics(77)
         sw3 = ctypes.windll.user32.GetSystemMetrics(78); sh3 = ctypes.windll.user32.GetSystemMetrics(79)
         ov.geometry(f"{sw3}x{sh3}+{sx3}+{sy3}"); ov.attributes("-alpha",0.35)
@@ -1141,6 +1312,7 @@ def _open_admin_panel_impl():
 
     def open_party_roi_overlay(pi):
         ov = tk.Toplevel(admin); ov.attributes("-fullscreen",True); ov.attributes("-alpha",0.35)
+        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
         ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
         cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
         d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
@@ -1171,6 +1343,7 @@ def _open_admin_panel_impl():
         아이콘은 실제 그림이라 반투명 이름글자와 달리 배경(나무 패널)과 뚜렷이 구분됨.
         배경이 우연히 HP바 모양으로 오탐되는 걸 이중으로 막는 용도."""
         ov = tk.Toplevel(admin); ov.attributes("-fullscreen",True); ov.attributes("-alpha",0.35)
+        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
         ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
         cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
         d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
@@ -1276,13 +1449,13 @@ def _open_admin_panel_impl():
 
     def auto_refresh():
         if not admin.winfo_exists(): return
-        if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF, strict=False)
-        if MNA_ROI[0] != 0: refresh_preview(mna_roi_preview, mna_roi_lbl, MNA_ROI, MNA_100_REF, True)
-        for pi in range(8):
-            if PARTY_ROIS[pi][0] != 0:
+        if not _admin_ui_pause:
+            if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF, strict=False)
+            if MNA_ROI[0] != 0: refresh_preview(mna_roi_preview, mna_roi_lbl, MNA_ROI, MNA_100_REF, True)
+            for pi in range(8):
                 pv = entries.get(f"P{pi+1}_PREVIEW")
                 if pv: refresh_preview(pv, None, PARTY_ROIS[pi], PARTY_HP_100_REF[pi])
-        admin.after(1000, auto_refresh)
+        admin.after(3000, auto_refresh)
     auto_refresh()
 
     def save_and_close():
@@ -1344,8 +1517,8 @@ def open_guide_panel():
     add_d("확률(%)", "0%: 물약만 / 100%: 힐만 / 그 외: 섞어서 확률 시전")
     add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐")
     add_d("위기% 슬라이더", "위험한 피통 이하일 때 위험베르 자동 사용")
-    add_d("격수% 슬라이더", "노파티 모드 UDP로 받은 격수 체력 기준")
-    add_d("격수 HP", "UDP로 받은 격수 체력을 폼에서 HP%/수신상태로 표시")
+    add_d("격수% 슬라이더", "노파티 모드에서 격수 체력이 몇% 이하일 때 힐")
+    add_d("격수 HP", "격수 모니터에서 보낸 체력%/연결 상태를 폼에 표시")
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
     add_t("🚨 주의사항 (필독)")
     add_w("파티 모드 시 쫄법사는 파티창이 활성화된 상태여야 합니다 (안 그러면 베르)")
@@ -2300,107 +2473,35 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-03 12:40"
+PATCH_UPDATED_AT = "2026-08-04 18:30"
 LATEST_PATCH = [
-    "⚡ 파티/격수힐 반응 개선 — 힐 후대기 랜덤 0.6~0.9→0.45~0.7(사람처럼 랜덤 유지·평균만 단축). 격수UDP 0.3→0.1초로 피감지 빠르게. 자힐 랜덤대기는 그대로. 격수모니터 재시작 필요",
-    "🪨 석화 HP% 경계분할 — 고정밝기(105)가 빈칸이 덜 밝을 때 64%→85%로 부풀리던 문제. 열밝기에서 채움|빈칸 경계를 찾아 %계산(빨간피 좌→우 채움과 동일 개념). 격수모니터 hp_start 재시작 필수",
-    "🛡️ 위기베르 순간오독 필터(다수결) — 한 프레임만 보고 즉시발동하던 걸, 낮은 값 감지시 2번 더 재확인해서 3번 중 2번 이상 낮아야 최종발동. 재확인 사이 25ms 대기(dxcam 동일프레임 방지). 재확인 실패시엔 안전하게 발동 쪽",
-    "🩻 위기베르 오작동 진단용 스크린샷 저장 — dxcam 사용 중인데도 피가 많을 때 발동하는 문제 원인 확인용. 발동 순간 ROI 주변을 '위기베르_디버그' 폴더에 자동 저장(최근 20장 보관). 판정 로직 자체는 변경 없음",
-    "🛡️ 고정(Shift) 풀림 현상 완화 — 힐 때마다 보내는 고정복구('H') 명령이 시리얼 통신 중 가끔 씹혀서 고정이 안 풀리게, 짧은 간격을 두고 한 번 더 보내도록 보강 (H는 절대상태 지정이라 중복 전송해도 안전). 힐 사이 고정 유지 방식(매 힐 직후 즉시 재고정)은 그대로 유지",
-    "🖼️ 파티 유령힐 이중체크 — 이름표(글자)→아이콘(초상화) 방식으로 교체, 표준편차 방식도 디테일한 배경엔 안 통해 검은 뒤판 픽셀비율로 재변경. 야외배경(항상 따뜻한 톤)엔 검정이 거의 없어 뚜렷이 구분됨 (제어판 '🖼️아이콘' 버튼, 선택사항)",
-    "🏷️ 파티 유령힐 이름표 이중체크(구버전) — 캐릭터 움직이면 배경(나무 등)이 바뀌면서 아무 슬롯이나 우연히 HP바 모양으로 오탐되던 문제. 제어판에서 HP바 위 '이름표' ROI를 추가로 지정하면, 그 자리에 흰 글자(이름)까지 있어야 진짜 파티원으로 인정 (선택사항, 미설정이면 기존과 동일)",
-    "💙 파랭이(엠약) 10분 쿨 원복 — 직전 패치에서 5초 재시도로 잘못 바꿔서 계속 처묵처묵하던 버그. 원래 설계대로 10분마다 체크 + 채팅 중 대기로 원복",
-    "🚫 파티 유령힐 재차단 — HP바 오탐 기준 강화 + 연속 15프레임 확인 후에만 파티힐. 미파티/창없음에 마우스 이동 방지",
-    "🕹️ 뚱박스 드롭다운 응답없음 복구 — 장치만 바꿔도 kmNet.init 하던 퇴화 제거(연결은 Insert때만). init 2초 타임아웃 복구",
-    "🚫 파티창 없을 때 파티힐 차단 — 미파티/창닫힘인데 ROI 배경·직전홀드값으로 마우스만 이동하던 유령힐 방지. 이번 프레임에 HP바가 보이는 슬롯만 타겟",
-    "🩹 파랭이(엠약)·버프 안 먹히던 버그 — 클릭/고정 시 Shift 키반복이 '채팅 중'으로 오인되어 파랭이·줍기·버프·해독이 영구정지되던 문제. 수정자키는 타이핑으로 안 침. 고정 중 힐 후 클릭 안 되던 복구도 같이 수정",
-    "🔌 펌업 로그 txt 제거 — 바탕화면 '뚱힐러_펌업로그.txt' 더 이상 안 만듦",
-    "🔌 펌업 WDT3 — 시스템WDT가 1200자동리셋을 깨서 인터럽트WDT로 교체(멈춤시 키해제+재부팅 유지). hex TEMP고착(20312) 강제갱신. 확인응답 DDONG-WDT3",
-    "🔌 펌업 WDT2 — WDT 때문에 1200bps 자동리셋이 깨짐(로그확정). 시리얼 '!'로 부트로더 진입. 확인응답 DDONG-WDT2. 옛WDT는 버튼보드에서 1회 수동만",
-    "🔌 펌업 자동리셋 강화 — 리셋버튼 없이 1200bps 다중방식+arduino-cli 자동설치 업로드. 수동리셋은 최후수단",
-    "🔌 펌업 모듈 강제갱신 — 옛 flash_arduino 캐시 때문에 ask_manual_reset 오류나던 문제 수정",
-    "🔌 펌업 수정 — 로그상 자동리셋이 부트로더(2341:0036)로 안 들어감. 리셋버튼 2번 수동진입 후 업로드로 변경",
-    "🔌 펌업 실패 시 바탕화면 '뚱힐러_펌업로그.txt'에 COM/명령/avrdude 전체 출력 저장 — 원인 진단용",
-    "✨ 버프 자동 OFF 저장 수정 — 체크 풀어도 껏다 키면 다시 켜지던 버그(OFF인데 예전 ON값을 다시 저장하던 문제)",
-    "🔌 펌업 [확인] — 뚱USB에 'V' 조회 → DDONG-WDT/WDT2 응답이면 워치독 펌 확인. 펌업 직후에도 자동 확인",
-    "🔌 펌업 COM 자동인식 수정 — 연결에 쓰는 포트/검색방식과 통일. '연결은 되는데 펌업만 포트 못찾음' 해결",
-    "🔌 제어판 [펌업] 버튼 — 뚱USB(아두이노)에 최신 펌웨어를 한 번에 업로드. 멈춤(hang) 시 키 눌린 채 고정되던 문제용 워치독(4초 자동재부팅) 포함",
-    "💙 \"엠약\" 명칭 → \"파랭이\"로 변경 (UI 버튼·슬라이더·로그·가이드 전부)",
-    "💙 파랭이 위치 커스텀 — 핫바/슬롯을 UI에서 직접 지정 가능(기본 F2+F8 유지). F1 슬롯에 두면 핫바전환 자체가 없어져서, 전환 타이밍이 어긋나 다른 슬롯(예: 귀환주문서)이 잘못 눌리는 사고를 원천 차단",
-    "📡 UDP 원격명령(Insert/Home/PageUp/F4 등) 수신 시 어느 IP에서 왔는지 로그에 남김 — 원인모를 정지/멍때림 추적용",
-    "⏰ 예약종료 자동 베르+정지 시 로그에 표시 — 위험베르와 구분 안 되던 문제",
-    "💬 채팅 중 일시정지 범위 수정 — 자힐·파티힐은 생명과 직결이라 채팅 중에도 절대 안 멈추게 원복(이전 패치가 이것까지 막아서 위험했음). 버프·줍기·해독·파랭이처럼 안 죽는 동작만 타이핑 중 1.5초 대기. 위기베르는 항상 예외로 계속 보호됨",
-    "💬 채팅 중 자힐 난사 방지 — 타이핑(문자/숫자키) 감지 시 일반동작 일시정지. 뚱힐러 매크로 키(F1~F12)는 타이핑으로 안 침(오탐 방지)",
-    "⌨️ Insert/Home/PageUp 먹통 수정 — Insert(시작)가 아두이노연결·인증확인(네트워크)을 키보드 후킹 콜백 안에서 직접 처리해서, 느릴 때 Windows가 후킹 자체를 끊어버려 세 키가 전부 안 먹히던 문제. 이제 후킹은 즉시 반환하고 실제 처리는 백그라운드로 분리 + 연타해도 중복연결 안 되게 처리중 가드 추가",
-    "🛡️ 위기베르 독 오발동 수정 — 위기베르 %계산의 초록(독) 판정 기준이 독 감지 기준보다 빡빡해서, 독 걸리면 피가 가득해도 채움으로 안 잡혀 귀환하던 문제. 두 기준을 동일하게 통일",
-    "📋 실시간 로그창 표시 수정 — 위기베르 등으로 정지된 순간 running이 바로 꺼져서 하단 로그창에 안 뜨던 문제, 정지 여부와 무관하게 항상 표시",
-    "💾 힐·물약 체크 저장 — 자힐/위기/상위힐/격수/파랭이 ON·OFF를 껏다 켜도 유지. 토글 즉시 license.dat에 저장",
-    "🟢 파티 독해독 — F2→F10→클릭→F1 순서로 수정 (큐어포이즌 후 파티원 클릭으로 대상지정)",
-    "🎮 리니지클래식 창 자동 포커스 — 힐/키 전에 'Lineage Classic' 창만 앞으로. 뚱힐러 폼은 topmost로 위에 유지(뒤로 안 넘어감). 포커스 빠져서 키가 안 먹히던 문제 완화",
-    "🩹 파티창 깜빡임 무시 — 한 명 죽는 직전 창이 깜빡여도 직전 HP값을 2초간 유지해서, 그 때문에 나머지 파티원 힐까지 같이 멈추던 문제 완화. 2초 넘게 바 없으면 사망/빈칸으로 처리",
-    "🩹 파티 독(초록)바 힐 복구 — 빨간바·독초록바 둘 다 힐 대상. 빈칸 오힐 막는 구조판정은 유지하고, 초록은 넓은 연속바만 인정해서 배경 오탐은 차단",
-    "🧹 격수 모니터 스위치·하단 피바 제거 — HP%/수신상태는 상단에 항상 표시",
-    "📡 격수 UDP 수신 안정화 — 예전엔 포트오류/예외 1번에 수신스레드가 바로 죽어서 재시작 전까지 '수신안됨'만 뜨던 문제. 죽지 않고 재시도, 상태(포트오류/수신대기/수신중+송신IP) 표시",
-    "🔌 장치연결실패 오표시 수정 — 시작버튼과 백그라운드 재연결이 동시에 COM을 열어 한쪽만 실패해도 라벨이 실패로 남던 문제. 연결 Lock+라벨 세대번호로 최신 결과만 표시, UI초기화 때 재연결 오발동 제거",
-    "🔒 인증 ERROR(네트워크 일시장애)는 강제종료하지 않음 — 만료/코드없음/중복사용일 때만 종료. USB·뚱박스 연결 로직은 건드리지 않음",
-    "🔒 인증 만료 시 프로그램 강제 종료 — 예전엔 '인증 만료' 문구만 띄우고 사냥만 멈춰서, 다시 시작하면 다음 5분 검사 전까지 잠깐 더 돌릴 수 있었음. 이제 만료/코드없음/중복사용이면 메시지 띄운 뒤 프로세스 완전 종료. 시작 버튼 누를 때도 즉시 재검증",
-    "🔒 인증 만료 실시간 반영 — 5분 재검증 때는 시트의 만료값이 '0'일 때만 정지시켰고, 절대날짜/일수로 넣은 만료는 프로그램 켜놓은 채로 기간이 지나도 안 걸리던 문제 수정. 시작 시점과 동일한 만료판정(_is_code_expired)을 5분마다도 적용",
-    "🚨 쫄법 피통·위기베르 — 독(초록바) 걸리면 빨강 픽셀이 0에 가까워져 위기베르가 잘못 발동(귀환)하던 문제 수정. 빨강뿐 아니라 초록(독)도 채움으로 인식하도록 변경. 100%기준 재보정 필요",
-    "⚡ 파티힐 클릭속도 개선 — 힐키 전 좌클릭(타겟선택) 2번→1번으로 줄여서 힐이 더 빠르게 들어가게 함(뒤쪽 클릭 2번은 그대로 유지)",
-    "🩹 파티 HP바 감지 — 정확히 '빨간 HP바'가 있을 때만 힐 감지하도록 변경(독/초록 배경 오인식으로 빈 슬롯에 힐 시도하던 문제 방지)",
-    "🚨 쫄법 피통ROI·위기베르 — 예전 초창기 버전 로직으로 완전 원복. 그동안 추가됐던 보정(행밴드탐지·좌측런·색마스크·디바운스·직접캡처 등)을 전부 제거하고, frame에서 ROI를 잘라 빨강픽셀(R>80,R>G*1.2,R>B*1.2) 개수를 세어 100%기준으로 나누는 단순 방식으로 복귀. 100%기준 보정도 동일 방식으로 재설정 필요(다시 보정해주세요)",
-    "🎥 캡처 dxcam 우선으로 복귀(mss는 실패시 자동대체) — GDI(mss)가 게임의 실제 피통 렌더링을 못 보던 게 위기베르 오작동의 근본원인이었음. dxcam 크래시 방지용 자동복구(연속실패시 mss전환→10초마다 dxcam 재시도) 추가",
-    "🚨 쫄법 HP 상대밝기 계산버그 수정 — 흰 배경(채도없음)이 채도필터 적용 전에 기준밝기(peak)를 끌어올려서, 정작 진짜 빨간 채움이 그 기준에 못미쳐 통째로 탈락하던 문제. peak는 이미 채도조건 통과한 픽셀 중에서만 계산하도록 수정",
-    "🚨 쫄법 HP 근본원인 수정 — 빈 피통(트랙)이 어두운 빨강/자주색이면 채움으로 같이 잡혀서 항상 100%로 고정되던 치명적 버그, 상대밝기 비교로 진짜 채움만 인식하도록 수정 (실전투 중 위기베르 전혀 반응 안 하던 근본원인)",
-    "🩻 HP급락 진단정보를 화면 로그에 직접 표시 — 배포판/다른 컴퓨터에서도 파일없이 화면 캡처만으로 원인 확인 가능하게 변경",
-    "🩻 쫄법 HP·위기베르 — 전체화면 캡처를 잘라쓰지 않고 ROI만 직접 캡처하도록 변경(미리보기와 100% 동일 경로) + HP급락시 실제픽셀 자동저장 진단기능 추가",
-    "🚨 위험베르 연속2프레임 확인(디바운스) 제거 — 전투이펙트로 매프레임 흔들리면 연속확인이 오히려 실발동을 막던 치명적 문제, 즉시발동으로 복귀",
-    "🔧 쫄법 HP% 행(row) 자동탐지 제거 — 잘못된 행을 고르면 전체가 틀어지는 위험요소였음, 예전 초기버전처럼 단순하게 복귀",
-    "🛡️ 위험베르 오발동 방지 — 캡처 한프레임 순간오독 걸러내는 연속2프레임 확인 로직 추가",
-    "🎨 쫄법 HP% 위험경고색(주황·노랑 등)으로 바뀌어도 채움 인식 — 색상 전환시 %가 훅 떨어지던 문제 대응",
-    "🚨 쫄법 HP% 40% 밑으로 안 내려가던 바닥값 버그 수정 — 틈허용을 폭비례에서 고정 2px로 축소(숫자와 이어붙는 것 차단)",
-    "🚨 쫄법 HP% 피격시 90%대에서도 0%로 오인식하던 버그 수정 — 좌측시작 강제 조건 제거(피격플래시 대응)",
-    "🚨 쫄법 HP% 저피통일수록 실제보다 훨씬 높게 뻥튀기되던 문제 수정 — 바 중앙 숫자표시 오염 차단(좌측 연속구간만 인정)",
-    "🎯 쫄법 HP% 정밀도 개선 — 바가 있는 행만 자동으로 좁혀서 셈 (ROI 여유분에 걸린 숫자·장식 오염 감소)",
-    "🔧 쫄법 HP·위기베르 완전 독립화 — 파티 판정 로직과 100% 분리, 피 닳으면 그만큼만 단순·정확하게 반영",
-    "🚨 위기베르 20%까지 피 빠져도 미발동 치명적 버그 수정 — 관대계산이 우측 잔상픽셀로 %를 뻥튀기하던 문제",
-    "🖥️ 제어판 쫄법 피통 미리보기 — 피 깎이면 '없음(사망)' 오표시 수정 (실제 힐판정과 동일 계산식으로 통일)",
-    "🛡️ 쫄법 HP·위기베르 한대맞고 오발동 수정 — 파티용 엄격판정과 분리, 관대한 계산으로 복귀",
-    "🚫 빈 파티칸(게임배경만 있는 슬롯) 힐 차단 강화 — 세로로 꽉 찬 좌측시작 막대만 HP바로 인정",
-    "🖱️ 마우스 좌측하단(시작버튼) 튐 방지 — 이동 좌표 화면경계 clamp 적용",
-    "🛡️ 캡처 백엔드 mss 전용 전환 — dxcam 네이티브 크래시(전체화면 전환 등) 제거",
-    "🎯 파티 HP 바행 자동탐지 — 선택 시 노란 테두리로 100% 오독되던 문제 해결",
-    "🎯 HP 감지 색무관 재설계 — 밝기+채도로 채움 판정 (독=초록도 정상%, 0% 오독 해결)",
-    "🚫 빈칸·사망만 힐 차단 — 채움 0일 때만 '없음' (독바를 사망으로 오인하던 버그 수정)",
-    "🎯 파티 HP% 보정 수정 — 100%ref=채움컬럼 수 연동, ROI 테두리 오독(50%→93%) 차단",
-    "👁 제어판 미리보기 = 실제 힐 판정 동일 계산식",
-    "🩹 HP% 색상무관 — 빨강/초록(독) 모두 ROI 가로폭%로 계산 (위기·상위힐·익힐 오발동 차단)",
-    "🟢 독·힐 분리 — 독은 해독용, 노파티 격수힐은 독 무관 HP% 임계값만 (상위힐 오발동 차단)",
-    "🩹 격수 독 시 상위힐 오발동 수정 — 초록바는 가로폭%로 계산 (빨강 100% ref 오차 제거)",
-    "⏱️ 버프 간격 랜덤화 — 1200초 고정 아님, 설정값 ±14% 흔들림 (사람처럼)",
-    "🎯 노파티 격수 — 독(초록바) UDP HP% 정상 인식 + 독 걸려도 힐 우선",
-    "✨ 버프 그리드 — F1/F2/F3 단축창 × F5~F12 체크 (뚱헌터 방식), F10/F11/2-F5 등 삭제",
-    "▶ 접이식 UI — 옵션/버프/힐 섹션 펼침·접기 (폼 커짐 방지)",
-    "💚 파티 해독 — 파티창 초록바 클릭 후 큐어포이즌 (F2→F10→F1)",
-    "📅 상단 [업데이트] 날짜·시간으로 패치 반영 여부 확인 (이 줄 보이면 최신)",
-    "👁 제어판 쫄법 피통/엠통 미리보기 글자 — 흰색·크게 (가독성)",
-    "🖼️ 파티 ROI 미리보기 — 제어판 다시 열어도 유지·1초 자동 갱신",
-    "🟢 독(초록 HP바)에서도 힐·위험베르 정상 — HP% 빨강/초록 자동 판별",
-    "🩹 독 걸려도 HP% 기준으로 자힐·파티힐 동작 (해독과 분리)",
-    "🔄 파티힐 원본 방식으로 복구 — 키 다섯개를 끊지 않고 한번에 눌러서 힐 지연 없앰",
-    "🔄 키입력 내부 대기시간 원래대로 복구",
-    "🔄 전체 감지 간격 0.25초로 원복",
-    "✨ 이름이 '뚱힐러'로 바뀌었어요 — 힐 전용 시스템",
-    "🖼️ 뚱박스 화면 로고를 뚱힐러 로고로 새단장",
-    "🖱️ 뚱박스 마우스 이동 부드럽게 — 힐하러 갈 때 뚝뚝 끊겨 움직이던 것 없애고 자연스럽게 미끄러지듯 이동",
-    "🎮 장치 선택 추가 — 상단에서 뚱USB(기존)와 뚱박스 중 골라 사용",
-    "📡 뚱박스 지원 — 박스 화면의 IP·포트·UUID만 입력하면 바로 연결",
-    "📌 사용법: 상단 [장치]에서 뚱박스 선택 → IP·포트·UUID 입력 → 설정저장 → 시작",
-    "🖼️ 뚱박스 화면에 로고 표시 — 사냥 중엔 움직이는 로고, 멈추면 박스 정보 확인",
-    "⬇️ 뚱박스 처음 연결 시 필요한 파일 자동 설치 (안 보이게 숨김)",
-    "🛡️ 뚱박스 미연결 시 시작(Insert)해도 크래시 안 남 — 연결실패 메시지만 표시",
-    "💾 장치·접속정보 설정저장하면 다음부터 자동 기억",
-    "🔌 기존 뚱USB 사용자는 그대로 — 설정 안 바꿔도 예전과 똑같이 작동",
+    "⚡ 파티힐·격수힐이 조금 더 빠르게 들어가도록 반응을 다듬었어요",
+    "🪨 석화 걸려도 피통 %가 제대로 깎이도록 수정했어요",
+    "🛡️ 위기 귀환(베르) — 한 번 잘못 보고 바로 나가는 일을 줄였어요 (몇 번 확인 후 발동)",
+    "🖼️ 파티창 없는데 배경만 보고 힐하려 가던 문제 줄였어요 (아이콘 설정은 선택)",
+    "💙 파랭이(파란 물약) — 10분마다 먹도록 원래대로 돌렸어요 (너무 자주 먹던 버그)",
+    "🚫 파티창이 닫혀 있으면 파티힐이 나가지 않게 막았어요",
+    "🩹 클릭/고정 켜 둬도 파랭이·버프·줍기·해독이 멈추던 문제 고쳤어요",
+    "✨ 버프 자동 끄고 다시 켜도 OFF 상태가 유지되게 고쳤어요",
+    "💙 파랭이 위치를 단축창/슬롯에서 직접 고를 수 있어요",
+    "⏰ 예약 종료로 멈출 때 로그에 표시돼요 (위기 귀환과 구분)",
+    "💬 채팅 칠 때 — 자힐·파티힐·위기귀환은 계속, 버프·줍기·해독·파랭이만 잠깐 쉬어요",
+    "⌨️ 시작(Insert)·따라다니기(Home)·고정(PgUp)이 가끔 안 먹히던 문제 고쳤어요",
+    "🛡️ 독 걸려도 위기 귀환이 잘못 나가던 문제 고쳤어요",
+    "💾 자힐/위기/상위힐/격수/파랭이 스위치를 껐다 켜도 그대로 기억해요",
+    "🟢 파티 해독 — 독 걸린 파티원 지정 후 해독이 나가도록 맞춤",
+    "🎮 힐할 때 리니지 창으로 포커스가 가도록 해서 키가 안 먹히는 일을 줄였어요",
+    "🩹 파티원 한 명 죽을 때 창이 깜빡여도 나머지 힐이 같이 멈추지 않게 했어요",
+    "🩹 독(초록 피통) 걸린 파티원도 정상적으로 힐해요",
+    "🔌 뚱USB 연결 상태가 대기 중에도 바로 보이도록 했어요",
+    "⚡ 파티힐이 더 빨리 들어가도록 타겟 클릭을 줄였어요",
+    "🎥 피통 인식이 흔들리지 않게 캡처 방식을 안정화했어요",
+    "✨ 버프는 단축창(F1~F3) × 슬롯(F5~F12)으로 골라 켜요",
+    "▶ 옵션/버프/힐 칸을 접었다 펼 수 있어요",
+    "📅 상단 업데이트 날짜로 최신인지 확인할 수 있어요",
+    "🟢 독 걸려도 피% 기준으로 자힐·파티힐이 동작해요 (해독과 따로)",
+    "🎮 장치에서 뚱USB / 뚱박스 중 고를 수 있어요",
+    "📡 격수 모니터와 연결되면 격수 피%가 폼에 보여요",
 ]
 PAST_PATCHES = [
     "0703 - 화면캡처 GPU가속 복원 · 상위힐(F7) 추가 · 자동클릭 중 힐/물약 즉시동작 · 독 걸리면 위기귀환 방지 · 연결 자동인식 개선",
@@ -3140,6 +3241,32 @@ def on_fw_flash_click():
 
     Thread(target=_worker, daemon=True).start()
 
+def refresh_device_status():
+    """대기 중 장치 라벨 갱신. 뚱USB는 포트 탐색만(연결은 Insert), 뚱박스는 Insert 안내.
+    드롭다운 변경으로 kmNet.init 하지 않음(응답없음 방지)."""
+    global SERIAL_PORT
+    if globals().get('_fw_flash_busy'):
+        return
+    globals()['_hw_status_gen'] = int(globals().get('_hw_status_gen', 0)) + 1
+    gen = globals()['_hw_status_gen']
+    try:
+        _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
+    except Exception:
+        _hw = HW_MODE
+    if _hw in ("뚱박스", "KMBox"):
+        if ser is not None and getattr(ser, "is_open", False) and ser.__class__.__name__ == "KmBox":
+            _set_hw_label("● 박스OK", '#3fb950', gen)
+        else:
+            _set_hw_label("○ 박스대기", '#f9e2af', gen)
+        return
+    # 뚱USB: 포트 다시 찾기 → 라벨 표시 (시리얼 open은 Insert 때)
+    found = auto_find_arduino()
+    if found:
+        SERIAL_PORT = found
+        _set_hw_label(f"● {found}", '#3fb950', gen)
+    else:
+        _set_hw_label("○ USB없음", '#f85149', gen)
+
 def connect_hardware():
     """하드웨어 연결 (드롭다운 선택에 따라 아두이노/KMBox). 재연결에도 재사용.
     시작버튼과 워커가 동시에 부르면 COM포트 충돌로 한쪽만 실패→라벨만 실패로 남는
@@ -3173,6 +3300,9 @@ def connect_hardware():
                 except Exception: pass
                 _set_hw_label(f"● 뚱박스 {_kip}", '#3fb950', gen)
             else:
+                found = auto_find_arduino()
+                if found:
+                    globals()['SERIAL_PORT'] = found
                 ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
                 _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)
             return bool(ser and getattr(ser, "is_open", False))
@@ -3495,10 +3625,15 @@ root = ctk.CTk()
 root.geometry("195x380+0+0")
 root.attributes("-topmost", True)
 def auto_resize_height():
-    if root and root.winfo_exists():
-        h = root.winfo_reqheight()
-        if h > 200: x = root.winfo_x(); y = root.winfo_y(); root.geometry(f"195x{h}+{x}+{y}")
-    root.after(500, auto_resize_height)
+    try:
+        if root and root.winfo_exists() and not _ui_busy():
+            h = root.winfo_reqheight()
+            if h > 200:
+                x = root.winfo_x(); y = root.winfo_y(); root.geometry(f"195x{h}+{x}+{y}")
+    except Exception:
+        pass
+    if root:
+        root.after(500, auto_resize_height)
 root.after(1000, auto_resize_height)
 root.configure(fg_color="#141420") 
 root.overrideredirect(True) 
@@ -3536,7 +3671,13 @@ title_bar.bind("<ButtonPress-1>", start_move); title_bar.bind("<ButtonRelease-1>
 title_lbl.bind("<ButtonPress-1>", start_move); title_lbl.bind("<ButtonRelease-1>", stop_move); title_lbl.bind("<B1-Motion>", do_move)
 
 def keep_on_top():
-    if root: root.attributes("-topmost", True); root.lift(); root.after(2000, keep_on_top)
+    try:
+        if root and root.winfo_exists() and not _ui_busy():
+            root.attributes("-topmost", True)  # lift() 제거: 드롭다운 포커스 뺏김 방지
+    except Exception:
+        pass
+    if root:
+        root.after(2000, keep_on_top)
 keep_on_top()
 
 chk_fix = ctk.BooleanVar(value=False)
@@ -3559,37 +3700,38 @@ def set_f9_prob(val):
 # ─── 상단 헤더바 (업데이트 + COM포트) ───
 header = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=8, height=22)
 header.pack(pady=(2,1), padx=2, fill='x')
-ctk.CTkLabel(header, text=f"업데이트: {PATCH_UPDATED_AT}", text_color="#e2e8f0",
-             font=("Malgun Gothic", 8, "bold")).pack(side="left", padx=8, pady=2)
-lbl_ard = ctk.CTkLabel(header, text="장치 확인 중...", text_color="#a6adc8",
-                        font=("Malgun Gothic", 8, "bold"))
-lbl_ard.pack(side="right", padx=8, pady=2)
+ctk.CTkLabel(header, text=f"업:{PATCH_UPDATED_AT}", text_color="#e2e8f0",
+             font=("Malgun Gothic", 7, "bold")).pack(side="left", padx=(6,2), pady=2)
+lbl_ard = ctk.CTkLabel(header, text="확인중", text_color="#a6adc8",
+                        font=("Malgun Gothic", 7, "bold"))
+lbl_ard.pack(side="right", padx=(2,6), pady=2)
 
 # ─── 하드웨어 선택 (아두이노/KMBox) + KMBox 접속입력 ───
 frame_hw = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=6)
 frame_hw.pack(pady=(1,1), padx=2, fill='x')
-ctk.CTkLabel(frame_hw, text="장치", text_color="#f9e2af", font=("Malgun Gothic", 8, "bold")).pack(side="left", padx=(6,3))
+frame_hw.grid_columnconfigure(1, weight=1)
+ctk.CTkLabel(frame_hw, text="장치", text_color="#f9e2af", font=("Malgun Gothic", 8, "bold"), width=28).grid(row=0, column=0, padx=(4,2), pady=4, sticky="w")
 hw_var = tk.StringVar(value=HW_MODE)
-hw_combo = ctk.CTkComboBox(frame_hw, values=["뚱USB", "뚱박스"], variable=hw_var, width=110, height=22,
-                           font=("Malgun Gothic", 9), dropdown_font=("Malgun Gothic", 9),
-                           fg_color="#1e1e2e", button_color="#800020", border_width=1, border_color="#45475a",
-                           command=lambda v: _on_hw_mode_change(v))
-hw_combo.pack(side="left", padx=2)
+hw_combo = make_pick_btn(
+    frame_hw, ["뚱USB", "뚱박스"], hw_var, command=lambda v: _on_hw_mode_change(v),
+    width=100, height=26, premium=True,
+)
+hw_combo.configure(font=("Malgun Gothic", 9, "bold"))
+hw_combo.grid(row=0, column=1, padx=(1, 4), pady=3, sticky="ew")
 btn_fw_flash = ctk.CTkButton(
-    frame_hw, text="펌업", width=52, height=22,
+    frame_hw, text="펌업", width=42, height=26,
     font=("Malgun Gothic", 9, "bold"),
-    fg_color="#1f6feb", hover_color="#388bfd",
+    fg_color="#1f6feb", hover_color="#388bfd", corner_radius=8,
     command=on_fw_flash_click,
 )
-btn_fw_flash.pack(side="left", padx=(6, 2))
+btn_fw_flash.grid(row=0, column=2, padx=(0, 2), pady=3, sticky="e")
 btn_fw_check = ctk.CTkButton(
-    frame_hw, text="확인", width=52, height=22,
-    font=("Malgun Gothic", 9, "bold"),
-    fg_color="#238636", hover_color="#2ea043",
+    frame_hw, text="확인", width=36, height=26,
+    font=("Malgun Gothic", 8, "bold"),
+    fg_color="#238636", hover_color="#2ea043", corner_radius=8,
     command=on_fw_check_click,
 )
-btn_fw_check.pack(side="left", padx=(2, 2))
-ctk.CTkLabel(frame_hw, text="뚱USB 펌웨어", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(side="left", padx=(0, 4))
+btn_fw_check.grid(row=0, column=3, padx=(0, 4), pady=3, sticky="e")
 
 frame_kmfields = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=6)
 _kmr1 = ctk.CTkFrame(frame_kmfields, fg_color="transparent"); _kmr1.pack(fill='x', pady=1)
@@ -3613,25 +3755,62 @@ def _toggle_km_fields():
         frame_kmfields.pack_forget()
 
 def _on_hw_mode_change(v=None):
-    """장치 드롭다운 변경 — 입력칸만 토글. 여기서 재연결하지 않음.
-    (없는 뚱박스로 잘못 고르면 kmNet.init 이 GIL을 잡고 폼이 '응답 없음'이 됨.
-     실제 연결은 Insert 시작 시에만.)"""
+    """장치 드롭다운 변경 — 입력칸 토글 + 상태 라벨 갱신.
+    뚱박스 kmNet.init 는 여기서 안 함(없는 박스로 고르면 UI 응답없음).
+    실제 연결은 Insert 시작 시에만."""
     try:
         globals()['HW_MODE'] = hw_var.get() if hw_var else HW_MODE
     except Exception:
         pass
     _toggle_km_fields()
+    try:
+        refresh_device_status()
+    except Exception:
+        pass
 
 _toggle_km_fields()
 globals()['_hw_ui_ready'] = True
+try:
+    root.after(200, refresh_device_status)
+except Exception:
+    pass
 
 frame_mode = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
 frame_mode.pack(pady=(2,1), padx=2, fill='x')
-mode_seg = ctk.CTkComboBox(frame_mode, values=["파티", "솔로(파티)", "노파티"], variable=mode_var, width=82, height=32, font=('Malgun Gothic', 11, 'bold'), dropdown_font=('Malgun Gothic', 10), corner_radius=8, fg_color="#1e1e2e", button_color="#800020", border_width=1, border_color="#45475a")
-mode_seg.pack(side='left', pady=2, padx=4)
-prob_combo = ctk.CTkComboBox(frame_mode, values=["0%", "30%", "50%", "70%", "100%"], command=set_f9_prob, width=82, height=32, font=('Malgun Gothic', 11, 'bold'), dropdown_font=('Malgun Gothic', 10), fg_color="#1e1e2e", button_color="#800020", corner_radius=6, border_width=1, border_color="#45475a")
-prob_combo.pack(side='right', pady=2, padx=4)
-prob_combo.set("30%")
+frame_mode.grid_columnconfigure(0, weight=1, uniform="mode50")
+frame_mode.grid_columnconfigure(1, weight=1, uniform="mode50")
+_pick_sel = dict(width=86, height=28, premium=True)
+mode_seg = make_pick_btn(
+    frame_mode, ["파티", "솔로(파티)", "노파티"], mode_var, **_pick_sel,
+)
+mode_seg.grid(row=0, column=0, padx=(4, 3), pady=3, sticky="ew")
+_prob_var = ctk.StringVar(value="30%")
+def _on_prob_pick(v):
+    set_f9_prob(v)
+prob_combo = make_pick_btn(
+    frame_mode, ["0%", "30%", "50%", "70%", "100%"], _prob_var,
+    command=_on_prob_pick, **_pick_sel,
+)
+prob_combo.grid(row=0, column=1, padx=(3, 4), pady=3, sticky="ew")
+_on_prob_pick("30%")
+
+def _sync_equal_btns(frame, left, right, reserve=14, min_w=48, left_bias=0.5):
+    def _go(_e=None):
+        try:
+            fw = int(frame.winfo_width())
+            if fw < 40:
+                return
+            avail = max(60, fw - reserve)
+            w_l = max(min_w, int(avail * left_bias))
+            w_r = max(min_w, avail - w_l)
+            left.configure(width=w_l)
+            right.configure(width=w_r)
+        except Exception:
+            pass
+    frame.bind("<Configure>", _go)
+    frame.after(80, _go)
+
+_sync_equal_btns(frame_mode, mode_seg, prob_combo, reserve=18, min_w=80, left_bias=0.5)
 
 # ─── 접이식: 옵션 ───
 coll_opt = Collapsible(root, "옵션", start_open=False)
@@ -3665,9 +3844,7 @@ buff_hotbar_var = tk.StringVar(value="F1")
 buff_bar_row = ctk.CTkFrame(buff_body, fg_color="transparent")
 buff_bar_row.pack(fill="x", padx=4, pady=2)
 ctk.CTkLabel(buff_bar_row, text="단축창", text_color="#a6adc8", font=("Malgun Gothic", 8, "bold")).pack(side="left", padx=(0, 4))
-buff_hotbar_combo = ctk.CTkComboBox(buff_bar_row, values=BUFF_HOTBARS, variable=buff_hotbar_var, width=52, height=22,
-                                    font=("Malgun Gothic", 9), dropdown_font=("Malgun Gothic", 9),
-                                    fg_color="#1e1e2e", button_color="#800020")
+buff_hotbar_combo = make_pick_btn(buff_bar_row, BUFF_HOTBARS, buff_hotbar_var, width=52, height=22, font=("Malgun Gothic", 9))
 buff_hotbar_combo.pack(side="left")
 
 buff_page_host = ctk.CTkFrame(buff_body, fg_color="transparent")
@@ -3710,7 +3887,7 @@ def _show_buff_page(choice=None):
         else:
             page.pack_forget()
 
-buff_hotbar_combo.configure(command=_show_buff_page)
+buff_hotbar_combo.set_pick_command(_show_buff_page)
 _show_buff_page("F1")
 
 # ─── 접이식: 힐·물약 ───
@@ -3820,26 +3997,27 @@ frame_mna_slot = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_mna_slot.pack(pady=(0,1), padx=2, fill='x')
 ctk.CTkLabel(frame_mna_slot, text="　위치:", text_color="#89b4fa", font=('Malgun Gothic', 9)).pack(side='left', padx=(4,0))
 mna_hotbar_var = ctk.StringVar(value=MNA_HOTBAR)
-mna_hotbar_combo = ctk.CTkComboBox(frame_mna_slot, values=BUFF_HOTBARS, variable=mna_hotbar_var, width=48, height=18, font=('Malgun Gothic', 9))
+mna_hotbar_combo = make_pick_btn(frame_mna_slot, BUFF_HOTBARS, mna_hotbar_var, width=48, height=18, font=('Malgun Gothic', 9))
 mna_hotbar_combo.pack(side='left', padx=2)
 mna_slot_var = ctk.StringVar(value=MNA_SLOT)
-mna_slot_combo = ctk.CTkComboBox(frame_mna_slot, values=BUFF_SLOT_LABELS, variable=mna_slot_var, width=56, height=18, font=('Malgun Gothic', 9))
+mna_slot_combo = make_pick_btn(frame_mna_slot, BUFF_SLOT_LABELS, mna_slot_var, width=56, height=18, font=('Malgun Gothic', 9))
 mna_slot_combo.pack(side='left', padx=2)
 def update_mna_slot(*a):
     global MNA_HOTBAR, MNA_SLOT
     MNA_HOTBAR = mna_hotbar_var.get(); MNA_SLOT = mna_slot_var.get()
     log_event(f"💙 파랭이 위치 변경 → {MNA_HOTBAR}+{MNA_SLOT}")
     if loaded_pwd: save_hidden_config(loaded_pwd)
-mna_hotbar_combo.configure(command=update_mna_slot)
-mna_slot_combo.configure(command=update_mna_slot)
+mna_hotbar_combo.set_pick_command(update_mna_slot)
+mna_slot_combo.set_pick_command(update_mna_slot)
 
 
 
 frame_timer_mini = ctk.CTkFrame(root, fg_color="#313244")
 frame_timer_mini.pack(pady=1, padx=2, fill='x')
 ctk.CTkLabel(frame_timer_mini, text="⏰ 예약종료:", text_color="#ffffff", font=('Malgun Gothic', 10, 'bold')).pack(side="left", padx=4)
-combo_timer = ctk.CTkComboBox(frame_timer_mini, values=["예약OFF", "1시간", "2시간", "3시간", "5시간", "10시간"], width=84, height=19, font=('Malgun Gothic', 10), command=set_shutdown_timer)
-combo_timer.pack(side="right", padx=4, pady=2); combo_timer.set("예약OFF")
+_timer_var = ctk.StringVar(value="예약OFF")
+combo_timer = make_pick_btn(frame_timer_mini, ["예약OFF", "1시간", "2시간", "3시간", "5시간", "10시간"], _timer_var, command=set_shutdown_timer, width=84, height=19, font=('Malgun Gothic', 10))
+combo_timer.pack(side="right", padx=4, pady=2)
 
 btn_frame = ctk.CTkFrame(root, fg_color="transparent")
 btn_frame.pack(fill='x', padx=2, pady=1)
@@ -3884,17 +4062,17 @@ frame_ontop_ctrl.pack(pady=1, padx=2, fill='x')
 row1 = ctk.CTkFrame(frame_ontop_ctrl, fg_color="transparent"); row1.pack(fill='x', padx=2, pady=(3,0))
 ctk.CTkLabel(row1, text="📡", text_color="#f9e2af", font=('', 9)).pack(side='left')
 udp_ip_var = ctk.StringVar(value=udp_target_ip)
-udp_ip_entry = ctk.CTkEntry(row1, textvariable=udp_ip_var, width=95, height=22, fg_color="#1e1e2e", text_color="#cdd6f4", font=('Consolas', 9))
+udp_ip_entry = ctk.CTkEntry(row1, textvariable=udp_ip_var, width=78, height=22, fg_color="#1e1e2e", text_color="#cdd6f4", font=('Consolas', 9))
 udp_ip_entry.pack(side='left', padx=2)
 ctk.CTkButton(row1, text="저장", width=32, height=22, fg_color="#800020", hover_color="#9e1a3a", font=('Malgun Gothic', 8, 'bold'), command=save_udp_config).pack(side='left', padx=1)
-udp_hp_lbl = ctk.CTkLabel(row1, text="HP: --", text_color="#ef4444", font=('Malgun Gothic', 10, 'bold'))
-udp_hp_lbl.pack(side='right', padx=1)
 
 row2 = ctk.CTkFrame(frame_ontop_ctrl, fg_color="transparent"); row2.pack(fill='x', padx=2, pady=(0,3))
 lbl_my_ip = ctk.CTkLabel(row2, text=f"내IP:{get_my_ip()}", text_color="#a6e3a1", font=('Consolas', 8, 'bold'))
 lbl_my_ip.pack(side='left', padx=4)
-lbl_ontop_status = ctk.CTkLabel(row2, text="○ 대기중", text_color="#6c7086", font=('Malgun Gothic', 10, 'bold'))
-lbl_ontop_status.pack(side="right", padx=10)
+udp_hp_lbl = ctk.CTkLabel(row2, text="격수: --", text_color="#ef4444", font=('Malgun Gothic', 10, 'bold'))
+udp_hp_lbl.pack(side='right', padx=4)
+lbl_ontop_status = ctk.CTkLabel(row2, text="○ 대기", text_color="#6c7086", font=('Malgun Gothic', 9, 'bold'))
+lbl_ontop_status.pack(side="right", padx=2)
 
 udp_listen_ok = False          # 포트 9999 바인드 성공 여부
 udp_last_from = ""             # 마지막 송신측 IP (진단용)
@@ -3903,14 +4081,14 @@ def update_udp_hp_label():
     try:
         if root and root.winfo_exists():
             if not udp_listen_ok:
-                udp_hp_lbl.configure(text="HP: 포트오류", text_color="#ef4444")
-                lbl_ontop_status.configure(text=f"○ {UDP_ATTACKER_PORT}번 실패", text_color="#f38ba8")
+                udp_hp_lbl.configure(text="격수: 오류", text_color="#ef4444")
+                lbl_ontop_status.configure(text="○ 대기", text_color="#f38ba8")
             elif last_udp_time == 0 or time.time() - last_udp_time > 2.0:
-                udp_hp_lbl.configure(text="HP: 수신안됨", text_color="#ef4444")
-                lbl_ontop_status.configure(text="○ 수신대기", text_color="#f9e2af")
+                udp_hp_lbl.configure(text="격수: 끊김", text_color="#ef4444")
+                lbl_ontop_status.configure(text="○ 대기", text_color="#f9e2af")
             else:
-                udp_hp_lbl.configure(text=f"HP: {attacker_hp_udp:.0f}%", text_color="#ef4444")
-                lbl_ontop_status.configure(text="✅ 수신중", text_color="#a6e3a1")
+                udp_hp_lbl.configure(text=f"격수: {attacker_hp_udp:.0f}%", text_color="#ef4444")
+                lbl_ontop_status.configure(text="✅ 연결", text_color="#a6e3a1")
             root.after(300, update_udp_hp_label)
     except: pass
 
@@ -3952,18 +4130,12 @@ def udp_listener():
                 sock.bind(("0.0.0.0", UDP_ATTACKER_PORT))
                 sock.settimeout(1.0)
                 udp_listen_ok = True
-                try: log_event(f"📡 UDP {UDP_ATTACKER_PORT} 수신대기 (격수모니터→내IP)")
-                except Exception: pass
             data, addr = sock.recvfrom(1024)
             udp_last_from = addr[0] if addr else ""
             if len(data) == 1:
                 if data in UDP_CMD_MAP:
                     func_name = UDP_CMD_MAP[data]
                     f = globals().get(func_name)
-                    # 원격 토글(특히 'I'=시작/정지)은 어디서 왔는지 몰라 멍때림 버그 원인 추적이 안 됐음 —
-                    # 발신 IP까지 로그에 남겨서 다음에 또 그러면 바로 확인 가능하게
-                    try: log_event(f"📡 UDP원격명령 '{data.decode()}' ({func_name}) from {addr[0] if addr else '?'}")
-                    except Exception: pass
                     if f: root.after(0, f)
                 elif data in (b'1',b'2',b'3',b'4',b'5',b'6',b'7',b'8'):
                     n = int(data.decode())
@@ -3985,8 +4157,6 @@ def udp_listener():
                 if sock: sock.close()
             except Exception: pass
             sock = None
-            try: log_event(f"📡 UDP오류 재시도: {e}")
-            except Exception: pass
             time.sleep(2.0)
         except Exception:
             # 패킷 파싱 등 기타 오류 — 리스너 유지
