@@ -1,6 +1,7 @@
-"""_decrypted.py → data.txt (AES-GCM, ddong_loader.py와 동일)."""
+"""_decrypted.py → data.txt (AES-GCM, ddong_loader.py와 동일) + version.txt 동기화."""
 import base64
 import os
+import re
 import zlib
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -9,6 +10,7 @@ KEY = base64.b64decode("W5EwW1vV8EFoNKQsgTCrKmfZzbflm0JDU7MuNG8izu4=")
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, "_decrypted.py")
 DST = os.path.join(ROOT, "data.txt")
+VER = os.path.join(ROOT, "version.txt")
 
 
 def main():
@@ -20,7 +22,13 @@ def main():
     b64 = base64.b64encode(nonce + enc).decode("ascii")
     with open(DST, "w", encoding="utf-8") as f:
         f.write(b64)
-    print(f"완료 {DST} ({len(b64)//1024}KB)")
+    m = re.search(r'PATCH_UPDATED_AT\s*=\s*"([^"]+)"', code)
+    if m:
+        with open(VER, "w", encoding="utf-8") as f:
+            f.write(m.group(1).strip() + "\n")
+        print(f"완료 {DST} ({len(b64)//1024}KB) / version.txt={m.group(1).strip()}")
+    else:
+        print(f"완료 {DST} ({len(b64)//1024}KB) — PATCH_UPDATED_AT 없음")
 
 
 if __name__ == "__main__":

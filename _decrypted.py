@@ -2473,8 +2473,72 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-04 20:00"
+PATCH_UPDATED_AT = "2026-08-04 20:05"
+_VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
+_last_update_check = 0.0
+_update_available = False
+_update_notified = False
+lbl_update = None
+
+def fetch_remote_version():
+    """GitHub version.txt 조회. 실패하면 None."""
+    try:
+        import ssl as _ssl
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+        req = urllib.request.Request(
+            _VERSION_URL + "?t=%d" % int(time.time()),
+            headers={"User-Agent": "ddong-healer", "Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
+            return r.read().decode("utf-8", errors="replace").strip().splitlines()[0].strip()
+    except Exception:
+        return None
+
+def check_for_update(force=False):
+    """원격 버전이 지금 실행 중인 PATCH_UPDATED_AT 와 다르면 알림.
+    (뚱시작.bat 으로 다시 켜야 최신 data.txt 가 받아짐 — 켜둔 채로는 자동적용 안 됨)"""
+    global _last_update_check, _update_available, _update_notified
+    now = time.time()
+    if not force and (now - _last_update_check) < 600:  # 10분
+        return
+    _last_update_check = now
+    remote = fetch_remote_version()
+    if not remote:
+        return
+    if remote == PATCH_UPDATED_AT:
+        _update_available = False
+        return
+    _update_available = True
+    def _ui():
+        global _update_notified
+        try:
+            if lbl_update:
+                lbl_update.configure(text="⚠️업데이트있음", text_color="#f9e2af")
+        except Exception:
+            pass
+        if not _update_notified:
+            _update_notified = True
+            try:
+                log_event("📢 새 업데이트 있음 — 종료 후 뚱시작.bat 다시 실행")
+            except Exception:
+                pass
+            try:
+                messagebox.showinfo(
+                    "업데이트 안내",
+                    "새 업데이트가 있어요.\n\n뚱힐러를 종료한 뒤\n뚱시작.bat 으로 다시 켜주세요.",
+                )
+            except Exception:
+                pass
+    try:
+        if root:
+            root.after(0, _ui)
+    except Exception:
+        pass
+
 LATEST_PATCH = [
+    "📢 새 업데이트가 있으면 폼에 알려줘요 — 껏다 안 키고 오래 켜둔 분도 확인 가능",
     "⚡ 파티힐·격수힐이 조금 더 빠르게 들어가도록 반응을 다듬었어요",
     "🪨 석화 걸려도 피통 %가 제대로 깎이도록 수정했어요",
     "🛡️ 위기 귀환(베르) — 한 번 잘못 보고 바로 나가는 일을 줄였어요 (몇 번 확인 후 발동)",
@@ -2597,6 +2661,7 @@ def update_ui_timer():
     global last_buff_seq, BUFF_SEQ_GAP, last_auth_check, loaded_pwd, last_log, lbl_log
     global shutdown_time, lbl_auth, saved_expire_start, saved_expire_days
     global chk_buff_on, _buff_cfg, buff_next_due, last_buff_global
+    _upd_boot = True
     while True:
         if root and lbl_auth:
             auth_text = ""
@@ -2620,9 +2685,22 @@ def update_ui_timer():
                 lbl_log.see("end")
                 lbl_log.configure(state="disabled")
             root.after(0, _upd)
+        # 업데이트 확인: 시작 15초 후 1회, 이후 10분마다
+        now_ts = time.time()
+        if _upd_boot:
+            _upd_boot = False
+            try:
+                if root:
+                    root.after(15000, lambda: check_for_update(force=True))
+            except Exception:
+                pass
+        else:
+            try:
+                check_for_update(force=False)
+            except Exception:
+                pass
         # 5분마다 구글시트 재검증 (실행 중이 아니어도 만료되면 프로그램 강제 종료)
         # ERROR(네트워크 일시장애)는 만료가 아니므로 강제종료하지 않음 — USB/뚱박스와 무관
-        now_ts = time.time()
         if loaded_pwd and (now_ts - last_auth_check > 300):
             last_auth_check = now_ts
             cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
@@ -3702,8 +3780,9 @@ header = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=8, height=24)
 header.pack(pady=(2,1), padx=2, fill='x')
 header.grid_columnconfigure(1, weight=1)
 _upd_short = PATCH_UPDATED_AT[5:] if len(PATCH_UPDATED_AT) > 5 else PATCH_UPDATED_AT  # "08-04 18:30"
-ctk.CTkLabel(header, text=f"업데이트 {_upd_short}", text_color="#e2e8f0",
-             font=("Malgun Gothic", 8, "bold")).grid(row=0, column=0, padx=(6,2), pady=2, sticky="w")
+lbl_update = ctk.CTkLabel(header, text=f"업데이트 {_upd_short}", text_color="#e2e8f0",
+             font=("Malgun Gothic", 8, "bold"))
+lbl_update.grid(row=0, column=0, padx=(6,2), pady=2, sticky="w")
 lbl_ard = ctk.CTkLabel(header, text="확인중", text_color="#a6adc8",
                         font=("Malgun Gothic", 8, "bold"))
 lbl_ard.grid(row=0, column=2, padx=(2,6), pady=2, sticky="e")
