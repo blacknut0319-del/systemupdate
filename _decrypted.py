@@ -2473,7 +2473,7 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-04 18:30"
+PATCH_UPDATED_AT = "2026-08-04 20:00"
 LATEST_PATCH = [
     "⚡ 파티힐·격수힐이 조금 더 빠르게 들어가도록 반응을 다듬었어요",
     "🪨 석화 걸려도 피통 %가 제대로 깎이도록 수정했어요",
@@ -3697,14 +3697,16 @@ def set_f9_prob(val):
     try: current_f9_prob = float(val.replace("%", "").strip()) / 100.0
     except: current_f9_prob = 0.3
 
-# ─── 상단 헤더바 (업데이트 + COM포트) ───
-header = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=8, height=22)
+# ─── 상단 헤더바 (업데이트 + 장치상태) ───
+header = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=8, height=24)
 header.pack(pady=(2,1), padx=2, fill='x')
-ctk.CTkLabel(header, text=f"업:{PATCH_UPDATED_AT}", text_color="#e2e8f0",
-             font=("Malgun Gothic", 7, "bold")).pack(side="left", padx=(6,2), pady=2)
+header.grid_columnconfigure(1, weight=1)
+_upd_short = PATCH_UPDATED_AT[5:] if len(PATCH_UPDATED_AT) > 5 else PATCH_UPDATED_AT  # "08-04 18:30"
+ctk.CTkLabel(header, text=f"업데이트 {_upd_short}", text_color="#e2e8f0",
+             font=("Malgun Gothic", 8, "bold")).grid(row=0, column=0, padx=(6,2), pady=2, sticky="w")
 lbl_ard = ctk.CTkLabel(header, text="확인중", text_color="#a6adc8",
-                        font=("Malgun Gothic", 7, "bold"))
-lbl_ard.pack(side="right", padx=(2,6), pady=2)
+                        font=("Malgun Gothic", 8, "bold"))
+lbl_ard.grid(row=0, column=2, padx=(2,6), pady=2, sticky="e")
 
 # ─── 하드웨어 선택 (아두이노/KMBox) + KMBox 접속입력 ───
 frame_hw = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=6)

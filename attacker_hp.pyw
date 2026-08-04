@@ -95,7 +95,7 @@ for i in range(1, 9):
 # ============================================================
 root = tk.Tk()
 root.overrideredirect(True)
-root.geometry("340x100+0+0")
+root.geometry("340x100+80+80")
 root.attributes("-topmost", True)
 root.configure(bg="#0d0f14")  # header UI v14 - final - CDN refresh
 
