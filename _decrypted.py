@@ -2473,8 +2473,9 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-04 20:05"
+PATCH_UPDATED_AT = "2026-08-04 20:15"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
+_LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _last_update_check = 0.0
 _update_available = False
 _update_notified = False
@@ -2496,39 +2497,113 @@ def fetch_remote_version():
     except Exception:
         return None
 
-def check_for_update(force=False):
+def restart_with_update():
+    """뚱시작.bat 과 같이 로더를 받아 새 프로세스로 켠 뒤, 지금 창은 종료."""
+    try:
+        import ssl as _ssl
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+        dest = os.path.join(os.environ.get("TEMP") or os.environ.get("TMP") or ".", "dloader.py")
+        req = urllib.request.Request(
+            _LOADER_URL + "?t=%d" % int(time.time()),
+            headers={"User-Agent": "ddong-healer", "Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
+            data = r.read()
+        with open(dest, "wb") as f:
+            f.write(data)
+        exe = sys.executable
+        if exe.lower().endswith("python.exe"):
+            pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+            if os.path.isfile(pyw):
+                exe = pyw
+        subprocess.Popen([exe, dest], close_fds=True)
+        time.sleep(0.4)
+    except Exception as e:
+        try:
+            messagebox.showerror(
+                "업데이트 실패",
+                f"다시 켜기에 실패했어요.\n뚱시작.bat 으로 실행해 주세요.\n\n{e}",
+            )
+        except Exception:
+            pass
+        return
+    try:
+        exit_app()
+    except Exception:
+        try:
+            keyboard.unhook_all()
+        except Exception:
+            pass
+        os._exit(0)
+
+def check_for_update(force=False, manual=False):
     """원격 버전이 지금 실행 중인 PATCH_UPDATED_AT 와 다르면 알림.
-    (뚱시작.bat 으로 다시 켜야 최신 data.txt 가 받아짐 — 켜둔 채로는 자동적용 안 됨)"""
+    예(확인) → 로더로 다시 켜서 최신 data.txt 적용 / 아니요 → 창만 유지.
+    manual=True: 버튼 클릭 — 최신이면/실패여도 바로 안내."""
     global _last_update_check, _update_available, _update_notified
     now = time.time()
-    if not force and (now - _last_update_check) < 600:  # 10분
+    if not force and not manual and (now - _last_update_check) < 600:  # 10분
         return
     _last_update_check = now
     remote = fetch_remote_version()
+    _short = PATCH_UPDATED_AT[5:] if len(PATCH_UPDATED_AT) > 5 else PATCH_UPDATED_AT
+
+    def _set_lbl(text, color="#e2e8f0"):
+        try:
+            if lbl_update:
+                lbl_update.configure(text=text, text_color=color)
+        except Exception:
+            pass
+
     if not remote:
+        if manual:
+            def _fail():
+                _set_lbl(f"업데이트 {_short}", "#e2e8f0")
+                try:
+                    messagebox.showwarning("업데이트 확인", "확인 실패.\n인터넷 연결을 확인해 주세요.")
+                except Exception:
+                    pass
+            try:
+                if root:
+                    root.after(0, _fail)
+            except Exception:
+                pass
         return
     if remote == PATCH_UPDATED_AT:
         _update_available = False
+        if manual:
+            def _ok():
+                _set_lbl(f"업데이트 {_short}", "#a6e3a1")
+                try:
+                    messagebox.showinfo("업데이트 확인", "최신이에요.\n다시 받을 필요 없어요.")
+                except Exception:
+                    pass
+            try:
+                if root:
+                    root.after(0, _ok)
+            except Exception:
+                pass
         return
     _update_available = True
+    if manual:
+        _update_notified = False  # 수동 확인이면 안내창 다시 띄움
     def _ui():
         global _update_notified
-        try:
-            if lbl_update:
-                lbl_update.configure(text="⚠️업데이트있음", text_color="#f9e2af")
-        except Exception:
-            pass
+        _set_lbl("⚠️업데이트있음", "#f9e2af")
         if not _update_notified:
             _update_notified = True
             try:
-                log_event("📢 새 업데이트 있음 — 종료 후 뚱시작.bat 다시 실행")
+                log_event("📢 새 업데이트 있음 — 확인 시 자동으로 다시 켜짐")
             except Exception:
                 pass
             try:
-                messagebox.showinfo(
-                    "업데이트 안내",
-                    "새 업데이트가 있어요.\n\n뚱힐러를 종료한 뒤\n뚱시작.bat 으로 다시 켜주세요.",
-                )
+                if messagebox.askyesno(
+                    "업데이트",
+                    "업데이트가 있습니다.\n업데이트하시겠습니까?",
+                ):
+                    restart_with_update()
             except Exception:
                 pass
     try:
@@ -2537,7 +2612,19 @@ def check_for_update(force=False):
     except Exception:
         pass
 
+
+def on_update_check_click():
+    """헤더 [업데이트] 버튼 — 지금 바로 GitHub version.txt 확인."""
+    try:
+        if lbl_update:
+            lbl_update.configure(text="확인중...", text_color="#f9e2af")
+    except Exception:
+        pass
+    Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
+
 LATEST_PATCH = [
+    "🔄 업데이트 있으면 '예' 누르면 자동으로 껏다 켜져요 (최신 바로 적용)",
+    "🔄 상단 [업데이트] 버튼 눌러서 지금 바로 확인 가능",
     "📢 새 업데이트가 있으면 폼에 알려줘요 — 껏다 안 키고 오래 켜둔 분도 확인 가능",
     "⚡ 파티힐·격수힐이 조금 더 빠르게 들어가도록 반응을 다듬었어요",
     "🪨 석화 걸려도 피통 %가 제대로 깎이도록 수정했어요",
@@ -3780,9 +3867,13 @@ header = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=8, height=24)
 header.pack(pady=(2,1), padx=2, fill='x')
 header.grid_columnconfigure(1, weight=1)
 _upd_short = PATCH_UPDATED_AT[5:] if len(PATCH_UPDATED_AT) > 5 else PATCH_UPDATED_AT  # "08-04 18:30"
-lbl_update = ctk.CTkLabel(header, text=f"업데이트 {_upd_short}", text_color="#e2e8f0",
-             font=("Malgun Gothic", 8, "bold"))
-lbl_update.grid(row=0, column=0, padx=(6,2), pady=2, sticky="w")
+lbl_update = ctk.CTkButton(
+    header, text=f"업데이트 {_upd_short}", command=on_update_check_click,
+    fg_color="#21262d", hover_color="#30363d", border_width=1, border_color="#30363d",
+    text_color="#e2e8f0", font=("Malgun Gothic", 8, "bold"),
+    height=20, width=118, corner_radius=6,
+)
+lbl_update.grid(row=0, column=0, padx=(4,2), pady=2, sticky="w")
 lbl_ard = ctk.CTkLabel(header, text="확인중", text_color="#a6adc8",
                         font=("Malgun Gothic", 8, "bold"))
 lbl_ard.grid(row=0, column=2, padx=(2,6), pady=2, sticky="e")
