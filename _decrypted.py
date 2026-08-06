@@ -2377,28 +2377,30 @@ def _clamp_to_screen(x, y, margin=4):
     return x, y
 
 def human_mouse_move(tx, ty, fast=False):
-    """fast=True: 파티힐용 — 스텝/이동ms만 짧게 (해독 등 다른 경로는 기본)."""
+    """fast=True: 파티힐용 — 기본보다 조금 빠르되, 텔포처럼 안 보이게 중간 속도."""
     global ser
     if not ser or not ser.is_open: return
     pt = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     cx, cy = pt.x, pt.y
     tx += random.randint(-2, 2); ty += random.randint(-2, 2)
     tx, ty = _clamp_to_screen(tx, ty)    # 화면 밖/핫코너 진입 차단 (목표·복귀 좌표 모두 경유)
-    steps = random.randint(8, 12) if fast else random.randint(20, 30)
+    # fast: 8~12는 너무 칼같아서 14~22로 (기본 20~30보다는 살짝만 빠름)
+    steps = random.randint(14, 22) if fast else random.randint(20, 30)
     _km = (hw_var.get() in ("뚱박스", "KMBox")) if ('hw_var' in globals() and hw_var) else (HW_MODE in ("뚱박스", "KMBox"))
     # KMBox: 하드웨어가 ms 동안 직선을 부드럽게 보간(1패킷) → 네트워크 뚝뚝거림 제거, 아두이노 느낌.
     if _km and hasattr(ser, "move_smooth"):
         total_dx, total_dy = tx - cx, ty - cy
         dist = (total_dx * total_dx + total_dy * total_dy) ** 0.5
         if fast:
-            ms = int(max(30, min(90, dist * 0.45)) * random.uniform(0.85, 1.15))
+            ms = int(max(50, min(140, dist * 0.6)) * random.uniform(0.85, 1.15))
         else:
             ms = int(max(60, min(180, dist * 0.7)) * random.uniform(0.85, 1.15))
         if ser.move_smooth(total_dx, total_dy, ms):
             return
         # move_auto 미지원 pyd → 아래 기존 스텝방식으로 폴백
     px, py = cx, cy   # KMBox용 계산상 위치 추적 (박스 1:1 → 네트워크 지연 영향 제거)
-    step_sleep = (0.001, 0.002) if fast else (0.002, 0.004)
+    # fast여도 스텝 sleep은 기본과 동일 — 1ms는 거의 텔포처럼 보임
+    step_sleep = (0.002, 0.004)
     for i in range(1, steps + 1):
         t = i / steps; sc = (1 - float(math.cos(t * math.pi))) / 2 
         nx = int(cx + (tx - cx) * sc); ny = int(cy + (ty - cy) * sc)
@@ -2480,7 +2482,7 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-07 01:00"
+PATCH_UPDATED_AT = "2026-08-07 01:15"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _last_update_check = 0.0
@@ -2630,7 +2632,8 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
-    "⚡ 파티힐 더 빠르게 — 키간격·마우스·후대기 줄이고 클릭 1회로",
+    "🖱️ 파티힐 마우스 — 너무 빨랐던 이동을 사람처럼 중간 속도로 맞춤 (텔포 느낌 제거)",
+    "⚡ 파티힐 더 빠르게 — 키간격·후대기 줄이고 클릭 1회 (마우스는 사람 속도)",
     "🔄 업데이트 있으면 '예' 누르면 자동으로 껏다 켜져요 (최신 바로 적용)",
     "🔄 상단 [업데이트] 버튼 눌러서 지금 바로 확인 가능",
     "📢 새 업데이트가 있으면 폼에 알려줘요 — 껏다 안 키고 오래 켜둔 분도 확인 가능",
