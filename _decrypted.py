@@ -2376,24 +2376,29 @@ def _clamp_to_screen(x, y, margin=4):
         pass
     return x, y
 
-def human_mouse_move(tx, ty):
+def human_mouse_move(tx, ty, fast=False):
+    """fast=True: 파티힐용 — 스텝/이동ms만 짧게 (해독 등 다른 경로는 기본)."""
     global ser
     if not ser or not ser.is_open: return
     pt = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     cx, cy = pt.x, pt.y
     tx += random.randint(-2, 2); ty += random.randint(-2, 2)
     tx, ty = _clamp_to_screen(tx, ty)    # 화면 밖/핫코너 진입 차단 (목표·복귀 좌표 모두 경유)
-    steps = random.randint(20, 30) 
+    steps = random.randint(8, 12) if fast else random.randint(20, 30)
     _km = (hw_var.get() in ("뚱박스", "KMBox")) if ('hw_var' in globals() and hw_var) else (HW_MODE in ("뚱박스", "KMBox"))
     # KMBox: 하드웨어가 ms 동안 직선을 부드럽게 보간(1패킷) → 네트워크 뚝뚝거림 제거, 아두이노 느낌.
     if _km and hasattr(ser, "move_smooth"):
         total_dx, total_dy = tx - cx, ty - cy
         dist = (total_dx * total_dx + total_dy * total_dy) ** 0.5
-        ms = int(max(60, min(180, dist * 0.7)) * random.uniform(0.85, 1.15))
+        if fast:
+            ms = int(max(30, min(90, dist * 0.45)) * random.uniform(0.85, 1.15))
+        else:
+            ms = int(max(60, min(180, dist * 0.7)) * random.uniform(0.85, 1.15))
         if ser.move_smooth(total_dx, total_dy, ms):
             return
         # move_auto 미지원 pyd → 아래 기존 스텝방식으로 폴백
     px, py = cx, cy   # KMBox용 계산상 위치 추적 (박스 1:1 → 네트워크 지연 영향 제거)
+    step_sleep = (0.001, 0.002) if fast else (0.002, 0.004)
     for i in range(1, steps + 1):
         t = i / steps; sc = (1 - float(math.cos(t * math.pi))) / 2 
         nx = int(cx + (tx - cx) * sc); ny = int(cy + (ty - cy) * sc)
@@ -2405,11 +2410,11 @@ def human_mouse_move(tx, ty):
             sx, sy = max(-100, min(100, dx)), max(-100, min(100, dy))
             try: ser.write(f"<{sx},{sy}>".encode())
             except: break
-            time.sleep(human_delay(0.002, 0.004)); dx -= sx; dy -= sy
+            time.sleep(human_delay(*step_sleep)); dx -= sx; dy -= sy
         if dx != 0 or dy != 0:
             try: ser.write(f"<{dx},{dy}>".encode())
             except: break
-            time.sleep(human_delay(0.002, 0.004))
+            time.sleep(human_delay(*step_sleep))
 
 def _pause_attack_click():
     """고정(Shift+클릭) / 따라다니기(클릭) 잠시 해제. 복구용 상태 반환."""
@@ -2440,7 +2445,8 @@ def _resume_attack_click(was_fixed, was_follow):
     except Exception:
         pass
 
-def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
+def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False, key_gap=None):
+    """key_gap=(lo,hi): 키 사이 대기. None이면 기본 0.04~0.15."""
     global ser, running
     if not running: return
     if not ser or not getattr(ser, "is_open", False): return
@@ -2451,11 +2457,12 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False):
     was_fixed, was_follow = (False, False)
     if not skip_follow_toggle:
         was_fixed, was_follow = _pause_attack_click()
+    gap_lo, gap_hi = key_gap if key_gap else (0.04, 0.15)
     try:
         for k in keys:
             if not running: break
-            ser.write(k.encode()); time.sleep(random.uniform(0.04, 0.15))
-        # end_delay 작은 호출(파티힐 0.15 등)이 max(0.5,…) 때문에 느려지지 않게
+            ser.write(k.encode()); time.sleep(random.uniform(gap_lo, gap_hi))
+        # end_delay 작은 호출(파티힐 등)이 max(0.5,…) 때문에 느려지지 않게
         if running:
             lo = max(0.05, end_delay * 0.7)
             hi = max(end_delay, end_delay * 1.8)
@@ -2473,7 +2480,7 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-04 20:15"
+PATCH_UPDATED_AT = "2026-08-07 01:00"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _last_update_check = 0.0
@@ -2623,6 +2630,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "⚡ 파티힐 더 빠르게 — 키간격·마우스·후대기 줄이고 클릭 1회로",
     "🔄 업데이트 있으면 '예' 누르면 자동으로 껏다 켜져요 (최신 바로 적용)",
     "🔄 상단 [업데이트] 버튼 눌러서 지금 바로 확인 가능",
     "📢 새 업데이트가 있으면 폼에 알려줘요 — 껏다 안 키고 오래 켜둔 분도 확인 가능",
@@ -3723,11 +3731,12 @@ def expert_logic():
                         if best_pi >= 0:
                             was_fixed, was_follow = _pause_attack_click()
                             focus_lineage_window()
-                            human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2)); time.sleep(0.02)
+                            human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2), fast=True); time.sleep(0.02)
                             use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                             heal_key = '7' if use_strong else 'A'
-                            execute_keys([heal_key, 'K', 'K'], 0.15, skip_follow_toggle=True)
-                            human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
+                            # 힐→K (클릭 1회) + 키간격/후대기 단축 — 파티모드만
+                            execute_keys([heal_key, 'K'], 0.08, skip_follow_toggle=True, key_gap=(0.03, 0.08))
+                            human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2), fast=True)
                             _resume_attack_click(was_fixed, was_follow)
                             last_party_heal = now; healed = True
                             if use_strong:
