@@ -2384,15 +2384,15 @@ def human_mouse_move(tx, ty, fast=False):
     cx, cy = pt.x, pt.y
     tx += random.randint(-2, 2); ty += random.randint(-2, 2)
     tx, ty = _clamp_to_screen(tx, ty)    # 화면 밖/핫코너 진입 차단 (목표·복귀 좌표 모두 경유)
-    # fast: 8~12는 너무 칼같아서 14~22로 (기본 20~30보다는 살짝만 빠름)
-    steps = random.randint(14, 22) if fast else random.randint(20, 30)
+    # fast: 기본(20~30)보다 빠르되 텔포급(8~12)은 피함 → 12~18
+    steps = random.randint(12, 18) if fast else random.randint(20, 30)
     _km = (hw_var.get() in ("뚱박스", "KMBox")) if ('hw_var' in globals() and hw_var) else (HW_MODE in ("뚱박스", "KMBox"))
     # KMBox: 하드웨어가 ms 동안 직선을 부드럽게 보간(1패킷) → 네트워크 뚝뚝거림 제거, 아두이노 느낌.
     if _km and hasattr(ser, "move_smooth"):
         total_dx, total_dy = tx - cx, ty - cy
         dist = (total_dx * total_dx + total_dy * total_dy) ** 0.5
         if fast:
-            ms = int(max(50, min(140, dist * 0.6)) * random.uniform(0.85, 1.15))
+            ms = int(max(40, min(120, dist * 0.55)) * random.uniform(0.85, 1.15))
         else:
             ms = int(max(60, min(180, dist * 0.7)) * random.uniform(0.85, 1.15))
         if ser.move_smooth(total_dx, total_dy, ms):
@@ -2482,9 +2482,16 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-07 01:15"
+PATCH_UPDATED_AT = "2026-08-07 23:01"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
+# 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
+_KMBOX_ZIP_URL = (
+    "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+    "%EB%9A%B1%EB%B0%95%EC%8A%A4_%EC%85%8B%ED%8C%85/"
+    "%EB%9A%B1%EB%B0%95%EC%8A%A4_%EC%85%8B%ED%8C%85_%EC%98%AC%EC%9D%B8%EC%9B%90.zip"
+)
+_kmbox_setup_busy = False
 _last_update_check = 0.0
 _update_available = False
 _update_notified = False
@@ -2632,7 +2639,8 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
-    "🖱️ 파티힐 마우스 — 너무 빨랐던 이동을 사람처럼 중간 속도로 맞춤 (텔포 느낌 제거)",
+    "🕹️ 뚱박스 선택 시 [랜드라이버][Net설정도구][메뉴얼] — 폼 안에서 셋팅 (뚱헌터와 동일)",
+    "🖱️ 파티힐 마우스 — 기본보다 조금 빠르게 (텔포급은 아님, 사람 곡선 이동 유지)",
     "⚡ 파티힐 더 빠르게 — 키간격·후대기 줄이고 클릭 1회 (마우스는 사람 속도)",
     "🔄 업데이트 있으면 '예' 누르면 자동으로 껏다 켜져요 (최신 바로 적용)",
     "🔄 상단 [업데이트] 버튼 눌러서 지금 바로 확인 가능",
@@ -3009,6 +3017,139 @@ def ensure_kmnet():
         return kmNet is not None
     except Exception:
         return False
+
+# ── 뚱박스 셋팅 도우미 (뚱헌터와 동일: 랜드라이버 / Net설정도구 / 메뉴얼) ──
+_KMBOX_SETUP_ZIP_URL = (
+    "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+    "%EB%9A%B1%EB%B0%95%EC%8A%A4_%EC%85%8B%ED%8C%85/"
+    "%EB%9A%B1%EB%B0%95%EC%8A%A4_%EC%85%8B%ED%8C%85_%EC%98%AC%EC%9D%B8%EC%9B%90.zip"
+)
+_kmbox_setup_busy = False
+
+def _kmbox_runtime_dir():
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    d = os.path.join(base, "ddong_healer", "kmbox_runtime")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def _kmbox_find_file(*names):
+    """런타임/하위폴더에서 파일 찾기."""
+    rd = _kmbox_runtime_dir()
+    for root_dir, _, files in os.walk(rd):
+        lower = {f.lower(): f for f in files}
+        for name in names:
+            hit = lower.get(name.lower())
+            if hit:
+                return os.path.join(root_dir, hit)
+    return None
+
+def ensure_kmbox_setup_pack():
+    """GitHub 올인원 zip을 받아 %LOCALAPPDATA%\\ddong_healer\\kmbox_runtime 에 풀어둔다."""
+    import zipfile
+    import ssl as _ssl
+    rd = _kmbox_runtime_dir()
+    driver = _kmbox_find_file("WCHUSBNIC.EXE")
+    setup = _kmbox_find_file("kmboxNet_setup.exe")
+    if driver and setup:
+        return True, rd
+    zip_path = os.path.join(rd, "뚱박스_셋팅_올인원.zip")
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    req = urllib.request.Request(
+        _KMBOX_SETUP_ZIP_URL + "?t=%d" % int(time.time()),
+        headers={"User-Agent": "ddong-healer", "Cache-Control": "no-cache"},
+    )
+    with urllib.request.urlopen(req, timeout=120, context=ctx) as r:
+        data = r.read()
+    if len(data) < 100000:
+        return False, "셋팅 파일 다운로드 실패 (용량 이상)"
+    with open(zip_path, "wb") as f:
+        f.write(data)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(rd)
+    driver = _kmbox_find_file("WCHUSBNIC.EXE")
+    setup = _kmbox_find_file("kmboxNet_setup.exe")
+    if not driver or not setup:
+        return False, "셋팅 파일 압축 해제 후 실행파일을 찾지 못했어요"
+    try:
+        open(os.path.join(rd, "kmbox_ready.flag"), "w", encoding="utf-8").write("ok")
+    except Exception:
+        pass
+    return True, rd
+
+def _kmbox_setup_action(kind):
+    """kind: driver | setup | manual — 백그라운드에서 zip확보 후 실행."""
+    global _kmbox_setup_busy
+    if _kmbox_setup_busy:
+        try:
+            messagebox.showinfo("뚱박스 셋팅", "이미 준비 중이에요. 잠시만 기다려 주세요.")
+        except Exception:
+            pass
+        return
+    _kmbox_setup_busy = True
+    try:
+        log_event("⬇ 뚱박스 셋팅 준비중...")
+    except Exception:
+        pass
+
+    def _work():
+        global _kmbox_setup_busy
+        try:
+            ok, info = ensure_kmbox_setup_pack()
+            if not ok:
+                def _fail():
+                    messagebox.showerror("뚱박스 셋팅", str(info))
+                if root:
+                    root.after(0, _fail)
+                return
+            if kind == "driver":
+                path = _kmbox_find_file("WCHUSBNIC.EXE")
+                if not path:
+                    raise RuntimeError("WCHUSBNIC.EXE 없음")
+                subprocess.Popen([path], cwd=os.path.dirname(path), shell=True)
+                msg = "랜드라이버 설치를 실행했어요.\n설치 후 PC 재부팅을 권장합니다."
+            elif kind == "setup":
+                path = _kmbox_find_file("kmboxNet_setup.exe")
+                if not path:
+                    raise RuntimeError("kmboxNet_setup.exe 없음")
+                subprocess.Popen([path], cwd=os.path.dirname(path), shell=True)
+                msg = "Net 설정도구를 실행했어요."
+            else:
+                path = _kmbox_find_file("랜설정_메뉴얼.html", "랜설정_메뉴얼.txt")
+                if not path:
+                    raise RuntimeError("메뉴얼 파일 없음")
+                os.startfile(path)
+                msg = "랜설정 메뉴얼을 열었어요."
+            def _ok():
+                try:
+                    log_event(f"✅ 뚱박스 셋팅: {kind}")
+                except Exception:
+                    pass
+                messagebox.showinfo("뚱박스 셋팅", msg)
+            if root:
+                root.after(0, _ok)
+        except Exception as e:
+            def _err():
+                messagebox.showerror("뚱박스 셋팅", f"실패: {e}")
+            try:
+                if root:
+                    root.after(0, _err)
+            except Exception:
+                pass
+        finally:
+            _kmbox_setup_busy = False
+
+    Thread(target=_work, daemon=True).start()
+
+def on_kmbox_driver_click():
+    _kmbox_setup_action("driver")
+
+def on_kmbox_setup_click():
+    _kmbox_setup_action("setup")
+
+def on_kmbox_manual_click():
+    _kmbox_setup_action("manual")
 
 def ensure_logo():
     """뚱박스 LCD 로고(뚱힐러.gif) 없으면 GitHub에서 자동 다운로드(숨김) 후 프레임 로드."""
@@ -3930,6 +4071,20 @@ _kmr3 = ctk.CTkFrame(frame_kmfields, fg_color="transparent"); _kmr3.pack(fill='x
 ctk.CTkLabel(_kmr3, text="UUID", width=34, anchor="w", text_color="#a6adc8", font=("Malgun Gothic", 8, "bold")).pack(side="left", padx=(6,2))
 ent_km_mac = ctk.CTkEntry(_kmr3, width=132, height=20, font=("Malgun Gothic", 9))
 ent_km_mac.pack(side="left"); ent_km_mac.insert(0, KM_MAC)
+# 뚱헌터와 동일 셋팅 버튼 — 한 줄, 폼 폭에 맞게 균등 확장
+_kmr_tools = ctk.CTkFrame(frame_kmfields, fg_color="transparent")
+_kmr_tools.pack(fill='x', pady=(2, 3), padx=2)
+_kmr_tools.grid_columnconfigure(0, weight=1)
+_kmr_tools.grid_columnconfigure(1, weight=1)
+_kmr_tools.grid_columnconfigure(2, weight=1)
+_km_btn_kw = dict(
+    height=22, font=("Malgun Gothic", 8, "bold"), corner_radius=6,
+    fg_color="#21262d", hover_color="#30363d", border_width=1, border_color="#30363d",
+    text_color="#e2e8f0",
+)
+ctk.CTkButton(_kmr_tools, text="드라이버", command=on_kmbox_driver_click, **_km_btn_kw).grid(row=0, column=0, padx=(2, 1), sticky="ew")
+ctk.CTkButton(_kmr_tools, text="설정도구", command=on_kmbox_setup_click, **_km_btn_kw).grid(row=0, column=1, padx=1, sticky="ew")
+ctk.CTkButton(_kmr_tools, text="메뉴얼", command=on_kmbox_manual_click, **_km_btn_kw).grid(row=0, column=2, padx=(1, 2), sticky="ew")
 
 def _toggle_km_fields():
     """뚱박스 입력칸 보이기/숨기기만 — 재연결 요청은 여기서 안 함."""
@@ -3937,6 +4092,14 @@ def _toggle_km_fields():
         frame_kmfields.pack(pady=(0,1), padx=2, fill='x', after=frame_hw)
     else:
         frame_kmfields.pack_forget()
+    # 높이 다시 맞춤 (버튼 줄 가려지지 않게)
+    try:
+        root.update_idletasks()
+        h = root.winfo_reqheight()
+        if h > 50:
+            root.geometry(f"195x{h}+{root.winfo_x()}+{root.winfo_y()}")
+    except Exception:
+        pass
 
 def _on_hw_mode_change(v=None):
     """장치 드롭다운 변경 — 입력칸 토글 + 상태 라벨 갱신.
