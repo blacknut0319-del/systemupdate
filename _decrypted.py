@@ -127,7 +127,10 @@ _toggle_busy = False         # Insert 시작/정지 처리 중 — 연타해도 
 _logo_frames = []            # 뚱박스 LCD 로고 프레임 (BGR flatten)
 _logo_delay = 0.08           # 프레임 간격(초)
 _party_alive_streak = 0      # 파티창 연속 감지 카운트 (배경 오탐 유령힐 방지)
+_party_dead_streak = 0       # 바 없음 연속 카운트 (깜빡임에 바로 안 끊기게)
+_party_window_ok = False     # 파티창 인정 상태 (켜짐=엄격, 꺼짐=여유)
 PARTY_ALIVE_NEED = 15        # 연속 N프레임 바가 보여야 파티창으로 인정
+PARTY_DEAD_NEED = 8          # 연속 N프레임 바 없어야 파티창 닫힘으로 확정
 _party_poison_first_seen = {}  # pi -> 초록(독)바 최초 감지 시각 (해독 반응지연 진단용)
 
 # ── KMBox Net 접속 설정 (아두이노 대체 하드웨어) ──
@@ -456,6 +459,7 @@ ICON_BLACK_PCT_THRESHOLD = 0.15  # 임시값 — 실측 진단수치(검은픽�
 # 슬롯별로 직전 정상 HP%를 잠시 유지(홀드). 진짜 사망/빈칸은 시간 지나면 폐기.
 _party_hp_hold = {}          # pi -> (hp_pct, last_ok_time)
 PARTY_HP_HOLD_SEC = 2.0
+PARTY_HEAL_HOLD_SEC = 0.4    # 힐 타겟용 짧은 홀드 — 깜빡임에 타겟 놓치지 않게 (유령클릭은 짧게만)
 MAIN_ATTACKER_COORD = PARTY_COORDS[1] 
 
 SELF_HP_COORD = [512, 591] 
@@ -2224,24 +2228,30 @@ def count_live_party_bars(frame, flags):
 
 def party_window_alive(frame, flags):
     """파티창이 실제로 떠 있는지.
-    한 프레임 배경 오탐으로 유령힐이 나가지 않게, 연속 N프레임 바가 보여야 인정.
-    바가 사라지면 즉시 홀드 폐기 + 스트릭 리셋."""
-    global _party_alive_streak
+    켜질 때: 연속 PARTY_ALIVE_NEED 프레임 바 보여야 인정 (배경 오탐 유령힐 방지).
+    꺼질 때: 연속 PARTY_DEAD_NEED 프레임 없어야 닫힘으로 확정 (한두 프레임 깜빡임에 힐 안 멈추게)."""
+    global _party_alive_streak, _party_dead_streak, _party_window_ok
     n = count_live_party_bars(frame, flags)
-    if n <= 0:
+    if n > 0:
+        _party_dead_streak = 0
+        _party_alive_streak += 1
+        if _party_alive_streak >= PARTY_ALIVE_NEED:
+            _party_window_ok = True
+    else:
         _party_alive_streak = 0
-        _party_hp_hold.clear()
-        return False
-    _party_alive_streak += 1
-    if _party_alive_streak < PARTY_ALIVE_NEED:
-        return False
-    return True
+        _party_dead_streak += 1
+        if _party_dead_streak >= PARTY_DEAD_NEED:
+            if _party_window_ok:
+                _party_hp_hold.clear()
+            _party_window_ok = False
+    return _party_window_ok
 
-def scan_party_hp(frame, pi, require_live=False):
+def scan_party_hp(frame, pi, require_live=False, hold_sec=None):
     """파티원 HP%. 사망 직전 파티창 깜빡임으로 잠깐 바 인식이 실패해도
     직전 정상값을 짧게 유지해서, 한 명 죽는 깜빡임 때문에 나머지 전체 힐이
-    같이 멈추는 걸 완화한다. 2초 넘게 바가 안 보이면 홀드 폐기(진짜 사망/빈칸).
-    require_live=True 이면 이번 프레임에 바가 보일 때만 값 반환(힐 타겟 선정용)."""
+    같이 멈추는 걸 완화한다.
+    require_live=True 이면 이번 프레임에 바가 보일 때만 값 반환.
+    hold_sec: 홀드 허용 초(None이면 PARTY_HP_HOLD_SEC). 힐 타겟은 PARTY_HEAL_HOLD_SEC 권장."""
     roi = PARTY_ROIS[pi]
     if roi[0] == 0 and roi[2] == 0:
         return None
@@ -2255,7 +2265,8 @@ def scan_party_hp(frame, pi, require_live=False):
     held = _party_hp_hold.get(pi)
     if held is not None:
         last_pct, last_t = held
-        if (now - last_t) <= PARTY_HP_HOLD_SEC:
+        max_hold = PARTY_HP_HOLD_SEC if hold_sec is None else hold_sec
+        if (now - last_t) <= max_hold:
             return last_pct   # 깜빡임 무시: 직전값 유지
         _party_hp_hold.pop(pi, None)   # 오래 안 보임 → 사망/빈칸으로 확정
     return None
@@ -2482,7 +2493,7 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-07 23:01"
+PATCH_UPDATED_AT = "2026-08-11 07:15"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2639,6 +2650,8 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🩹 파티힐 멈칫 — 파티창 깜빡여도 바로 안 끊기게, 타겟 짧은 홀드",
+    "⌨️ 격수 Insert/Home/PgUp — 힐 중에도 UDP 명령이 바로 먹히게",
     "🕹️ 뚱박스 선택 시 [랜드라이버][Net설정도구][메뉴얼] — 폼 안에서 셋팅 (뚱헌터와 동일)",
     "🖱️ 파티힐 마우스 — 기본보다 조금 빠르게 (텔포급은 아님, 사람 곡선 이동 유지)",
     "⚡ 파티힐 더 빠르게 — 키간격·후대기 줄이고 클릭 1회 (마우스는 사람 속도)",
@@ -3815,8 +3828,8 @@ def expert_logic():
                         best_i = -1; best_hp = 999
                         for i in range(8):
                             if selected_party_flags[i] and PARTY_ROIS[i][0] != 0:
-                                # 힐 타겟은 이번 프레임에 바가 보이는 슬롯만 (홀드값으로 빈곳 클릭 금지)
-                                hp_pct = scan_party_hp(frame, i, require_live=True)
+                                # 힐 타겟: 짧은 홀드(0.4초) — 깜빡임에 놓치지 않되 빈곳 유령클릭은 짧게만
+                                hp_pct = scan_party_hp(frame, i, hold_sec=PARTY_HEAL_HOLD_SEC)
                                 if hp_pct is not None and hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[i]:
                                     if hp_pct < best_hp:
                                         best_hp = hp_pct; best_i = i
@@ -3866,7 +3879,8 @@ def expert_logic():
                         for pi in range(1, 8):
                             if not party_mode_flags[pi]: continue
                             if PARTY_ROIS[pi][0] > 0:
-                                hp_pct = scan_party_hp(frame, pi, require_live=True)
+                                # 힐 타겟: 짧은 홀드(0.4초) — 깜빡임에 놓치지 않되 빈곳 유령클릭은 짧게만
+                                hp_pct = scan_party_hp(frame, pi, hold_sec=PARTY_HEAL_HOLD_SEC)
                                 if hp_pct is not None and hp_pct > 1.0 and hp_pct < PARTY_HP_THRESHOLDS[pi]:
                                     if hp_pct < best_hp:
                                         best_hp = hp_pct; best_pi = pi
@@ -4481,12 +4495,19 @@ def udp_listener():
             udp_last_from = addr[0] if addr else ""
             if len(data) == 1:
                 if data in UDP_CMD_MAP:
+                    # UI after 대기 없이 수신 스레드에서 즉시 처리.
+                    # (힐 중 ser 사용 중에도 after 큐에 안 쌓이게 — 따라/고정/시작 반응 개선)
+                    # 체크박스 갱신은 각 핸들러가 이미 root.after 로 넘김.
                     func_name = UDP_CMD_MAP[data]
                     f = globals().get(func_name)
-                    if f: root.after(0, f)
+                    if f:
+                        try:
+                            f()
+                        except Exception:
+                            pass
                 elif data in (b'1',b'2',b'3',b'4',b'5',b'6',b'7',b'8'):
                     n = int(data.decode())
-                    root.after(0, lambda s=n: udp_macro_slot(s))
+                    Thread(target=lambda s=n: udp_macro_slot(s), daemon=True).start()
             elif len(data) == 4:
                 attacker_hp_udp = struct.unpack('f', data)[0]; last_udp_time = time.time()
             elif len(data) == 5:
