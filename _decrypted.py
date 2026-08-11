@@ -714,7 +714,7 @@ def _on_any_keypress(e):
             last_typing_time = time.time()
     except Exception:
         pass
-current_f9_prob = 0.3
+current_f9_prob = 0.3  # 예전 확률% — 자힐은 do_self_heal로 대체됨 (호환용 잔존)
 last_self_heal = 0
 last_party_heal = 0
 last_party_cure = 0
@@ -1518,8 +1518,8 @@ def open_guide_panel():
     add_d("격수 해독", "격수 독 걸리면 큐어포이즌 자동 시전 (두번째단축키 F10)")
     add_d("파티 해독", "파티원 HP바 초록(독)이면 F2→F10→파티창클릭→F1")
     add_d("파랭이", "지정한 핫바+슬롯(기본 F2+F8) · 엠통% 이하 시 10분마다 자동 복용")
-    add_d("확률(%)", "0%: 물약만 / 100%: 힐만 / 그 외: 섞어서 확률 시전")
-    add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐")
+    add_d("자힐", "평소엔 힐만 · 피 50% 이하(위험)일 때 물약+힐 같이 (타이밍만 사람처럼 미세 랜덤)")
+    add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐 시작")
     add_d("위기% 슬라이더", "위험한 피통 이하일 때 위험베르 자동 사용")
     add_d("격수% 슬라이더", "노파티 모드에서 격수 체력이 몇% 이하일 때 힐")
     add_d("격수 HP", "격수 모니터에서 보낸 체력%/연결 상태를 폼에 표시")
@@ -2493,7 +2493,27 @@ def fix_mode_keys(keys, delay=0.5):
     # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
     execute_keys(keys, delay)
 
-PATCH_UPDATED_AT = "2026-08-11 07:15"
+# 자힐: 확률% 제거 — 평소 힐만, 위험(<=50%)일 때만 물약+힐
+SELF_POTION_COMBO_PCT = 50.0
+
+def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
+    """쫄법 자힐.
+    - 평소: 힐(B)만
+    - 피 <= 50%: 물약(E)+힐(B) 같이 (위험할 때만 물약)
+    - 마나부족: 물약만
+    타이밍만 가우스로 미세 흔들림 (사람처럼)."""
+    ed = human_delay(end_delay * 0.88, end_delay * 1.12)
+    if mp_low:
+        execute_keys(['E'], ed, key_gap=(0.05, 0.12))
+        return "물약(마나)"
+    if self_hp is not None and self_hp <= SELF_POTION_COMBO_PCT:
+        # 물약→힐 사이 간격만 살짝 흔들림
+        execute_keys(['E', 'B'], ed, key_gap=(0.07, 0.16))
+        return "물약+힐"
+    execute_keys(['B'], ed, key_gap=(0.05, 0.12))
+    return "힐"
+
+PATCH_UPDATED_AT = "2026-08-11 19:35"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2650,6 +2670,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🔴 자힐 — 확률% 제거, 평소 힐만 / 피50%↓ 위험 시 물약+힐 같이 (타이밍만 사람처럼)",
     "🩹 파티힐 멈칫 — 파티창 깜빡여도 바로 안 끊기게, 타겟 짧은 홀드",
     "⌨️ 격수 Insert/Home/PgUp — 힐 중에도 UDP 명령이 바로 먹히게",
     "🕹️ 뚱박스 선택 시 [랜드라이버][Net설정도구][메뉴얼] — 폼 안에서 셋팅 (뚱헌터와 동일)",
@@ -3644,7 +3665,7 @@ def connect_hardware():
 def expert_logic():
     global ser, running, last_buff_seq, BUFF_SEQ_GAP
     global last_loot, last_loot_sent_time, loot_interval
-    global camera, root, lbl_ard, mode_var, chk_follow, current_f9_prob
+    global camera, root, lbl_ard, mode_var, chk_follow
     global chk_loot, chk_poison, chk_target_poison, chk_party_poison, chk_buff_on
     global SELF_HP_COORD, SELF_HP_RGB, NOPARTY_HP_COORD, NOPARTY_RGB, PARTY_COORDS, MAIN_ATTACKER_COORD
     global DANGER_HP_COORD, DANGER_HP_RGB, SELF_POISON_COORD, SELF_POISON_RGB, TARGET_POISON_COORD, TARGET_POISON_RGB
@@ -3804,23 +3825,11 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
-                        prob = int(current_f9_prob * 100)
-                        if _mp_low: prob = 0
-                        if prob == 0: execute_keys(['E'], 1.0)
-                        elif prob >= 100: execute_keys(['B'], 0.5)
-                        else:
-                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
-                            else: execute_keys(['E'], 1.0)
-                        last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
+                        tag = do_self_heal(self_hp, end_delay=1.0, mp_low=_mp_low)
+                        last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
-                    prob = int(current_f9_prob * 100)
-                    if _mp_low: prob = 0
-                    if prob == 0: execute_keys(['E'], 1.0)
-                    elif prob >= 100: execute_keys(['B'], 0.5)
-                    else:
-                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
-                        else: execute_keys(['E'], 1.0)
-                    last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
+                    tag = do_self_heal(None, end_delay=1.0, mp_low=_mp_low)
+                    last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag}')
 
                 if not healed:
                     # 파티창이 실제로 떠 있을 때만 파티원 힐 (미파티/창닫힘 → 마우스 유령이동 차단)
@@ -3852,23 +3861,11 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
-                        prob = int(current_f9_prob * 100)
-                        if _mp_low: prob = 0
-                        if prob == 0: execute_keys(['E'], 0.8)
-                        elif prob >= 100: execute_keys(['B'], 0.5)
-                        else:
-                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
-                            else: execute_keys(['E'], 0.8)
-                        last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
+                        tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low)
+                        last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
-                    prob = int(current_f9_prob * 100)
-                    if _mp_low: prob = 0
-                    if prob == 0: execute_keys(['E'], 0.8)
-                    elif prob >= 100: execute_keys(['B'], 0.5)
-                    else:
-                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
-                        else: execute_keys(['E'], 0.8)
-                    last_self_heal = now; healed = True; log_event(f'🔴 자힐 ({int(self_hp)}%)')
+                    tag = do_self_heal(None, end_delay=0.8, mp_low=_mp_low)
+                    last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag}')
 
                 if not healed:
                     # 파티창 없음/미파티면 파티힐 자체 스킵 (ROI 배경 오탐·홀드값 유령이동 방지)
@@ -3906,23 +3903,13 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
-                        prob = int(current_f9_prob * 100)
-                        if _mp_low: prob = 0
-                        if prob == 0: execute_keys(['E'], 0.8)
-                        elif prob >= 100: execute_keys(['B'], 0.5)
-                        else:
-                            if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
-                            else: execute_keys(['E'], 0.8)
+                        tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low)
                         last_self_heal = now; action_taken = True
+                        log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 20) and (now - last_self_heal >= 0.2):
-                    prob = int(current_f9_prob * 100)
-                    if _mp_low: prob = 0
-                    if prob == 0: execute_keys(['E'], 0.8)
-                    elif prob >= 100: execute_keys(['B'], 0.5)
-                    else:
-                        if random.randint(1, 100) <= prob: execute_keys(['B'], 0.5)
-                        else: execute_keys(['E'], 0.8)
+                    tag = do_self_heal(None, end_delay=0.8, mp_low=_mp_low)
                     last_self_heal = now; action_taken = True
+                    log_event(f'🔴 자힐 {tag}')
                 
                 if not action_taken and (now - last_noparty_heal >= 0.2):
                     udp_ok = (time.time() - last_udp_time) < 5
@@ -4021,13 +4008,6 @@ chk_poison = ctk.BooleanVar(value=False)
 chk_target_poison = ctk.BooleanVar(value=False)
 chk_party_poison = ctk.BooleanVar(value=False)
 chk_loot = ctk.BooleanVar(value=False) 
-f9_prob_var = ctk.DoubleVar(value=0.3) 
-
-prob_combo = None
-def set_f9_prob(val):
-    global current_f9_prob
-    try: current_f9_prob = float(val.replace("%", "").strip()) / 100.0
-    except: current_f9_prob = 0.3
 
 # ─── 상단 헤더바 (업데이트 + 장치상태) ───
 header = ctk.CTkFrame(root, fg_color="#161b22", corner_radius=8, height=24)
@@ -4138,40 +4118,12 @@ except Exception:
 
 frame_mode = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
 frame_mode.pack(pady=(2,1), padx=2, fill='x')
-frame_mode.grid_columnconfigure(0, weight=1, uniform="mode50")
-frame_mode.grid_columnconfigure(1, weight=1, uniform="mode50")
+frame_mode.grid_columnconfigure(0, weight=1)
 _pick_sel = dict(width=86, height=28, premium=True)
 mode_seg = make_pick_btn(
     frame_mode, ["파티", "솔로(파티)", "노파티"], mode_var, **_pick_sel,
 )
-mode_seg.grid(row=0, column=0, padx=(4, 3), pady=3, sticky="ew")
-_prob_var = ctk.StringVar(value="30%")
-def _on_prob_pick(v):
-    set_f9_prob(v)
-prob_combo = make_pick_btn(
-    frame_mode, ["0%", "30%", "50%", "70%", "100%"], _prob_var,
-    command=_on_prob_pick, **_pick_sel,
-)
-prob_combo.grid(row=0, column=1, padx=(3, 4), pady=3, sticky="ew")
-_on_prob_pick("30%")
-
-def _sync_equal_btns(frame, left, right, reserve=14, min_w=48, left_bias=0.5):
-    def _go(_e=None):
-        try:
-            fw = int(frame.winfo_width())
-            if fw < 40:
-                return
-            avail = max(60, fw - reserve)
-            w_l = max(min_w, int(avail * left_bias))
-            w_r = max(min_w, avail - w_l)
-            left.configure(width=w_l)
-            right.configure(width=w_r)
-        except Exception:
-            pass
-    frame.bind("<Configure>", _go)
-    frame.after(80, _go)
-
-_sync_equal_btns(frame_mode, mode_seg, prob_combo, reserve=18, min_w=80, left_bias=0.5)
+mode_seg.grid(row=0, column=0, padx=4, pady=3, sticky="ew")
 
 # ─── 접이식: 옵션 ───
 coll_opt = Collapsible(root, "옵션", start_open=False)
