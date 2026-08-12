@@ -384,12 +384,15 @@ def buff_time_key(hb, slot):
 
 
 def cast_buff(hb_label, slot_label):
+    """버프 시전. F2/F3이면 시전 후 반드시 F1로 복귀.
+    (복귀 실패 시 이후 자힐 B=F9 가 F3의 F9로 먹히는 사고 방지 — 자힐 쪽에서도 F1 재확인)"""
     hb = hb_label.replace("F", "")
     sk = BUFF_SLOT_KEYS[slot_label]
     if hb == "1":
         execute_keys([sk], 0.5)
     else:
-        execute_keys([hb, sk, "1"], 0.5)
+        # 슬롯→F1 사이 간격을 조금 여유 있게 (핫바 전환 씹힘 완화)
+        execute_keys([hb, sk, "1"], 0.55, key_gap=(0.08, 0.18))
 
 
 def mna_potion_keys():
@@ -2498,22 +2501,24 @@ SELF_POTION_COMBO_PCT = 50.0
 
 def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     """쫄법 자힐.
-    - 평소: 힐(B)만
-    - 피 <= 50%: 물약(E)+힐(B) 같이 (위험할 때만 물약)
+    - 평소: 힐(B=F9)만
+    - 피 <= 50%: 물약(E=F5)+힐(B) 같이 (위험할 때만 물약)
     - 마나부족: 물약만
-    타이밍만 가우스로 미세 흔들림 (사람처럼)."""
+    반드시 F1 단축창으로 전환 후 키 입력 — F2/F3 버프 직후 F1 복귀가 씹히면
+    F3의 F9가 눌리는 사고 방지."""
     ed = human_delay(end_delay * 0.88, end_delay * 1.12)
+    # F1 전환 간격을 조금 여유 있게 (게임 핫바 전환 인식 시간)
+    gap_f1 = (0.10, 0.20)
     if mp_low:
-        execute_keys(['E'], ed, key_gap=(0.05, 0.12))
+        execute_keys(['1', 'E'], ed, key_gap=gap_f1)
         return "물약(마나)"
     if self_hp is not None and self_hp <= SELF_POTION_COMBO_PCT:
-        # 물약→힐 사이 간격만 살짝 흔들림
-        execute_keys(['E', 'B'], ed, key_gap=(0.07, 0.16))
+        execute_keys(['1', 'E', 'B'], ed, key_gap=(0.09, 0.18))
         return "물약+힐"
-    execute_keys(['B'], ed, key_gap=(0.05, 0.12))
+    execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-11 19:35"
+PATCH_UPDATED_AT = "2026-08-12 13:40"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2670,6 +2675,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🩹 F3 버프 직후 자힐이 F3의 F9를 누르던 문제 — 힐 전 반드시 F1 단축창으로 복귀",
     "🔴 자힐 — 확률% 제거, 평소 힐만 / 피50%↓ 위험 시 물약+힐 같이 (타이밍만 사람처럼)",
     "🩹 파티힐 멈칫 — 파티창 깜빡여도 바로 안 끊기게, 타겟 짧은 홀드",
     "⌨️ 격수 Insert/Home/PgUp — 힐 중에도 UDP 명령이 바로 먹히게",
@@ -3846,6 +3852,8 @@ def expert_logic():
                             focus_lineage_window()
                             was_fixed, was_follow = _pause_attack_click()
                             try:
+                                # F1 보장 — F3 버프 직후 잘못된 단축창 키 방지
+                                ser.write(b'1'); time.sleep(human_delay(0.08, 0.16))
                                 if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
                                     ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
                                 else:
@@ -3889,8 +3897,8 @@ def expert_logic():
                             human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2), fast=True); time.sleep(0.02)
                             use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                             heal_key = '7' if use_strong else 'A'
-                            # 힐→K (클릭 1회) + 키간격/후대기 단축 — 파티모드만
-                            execute_keys([heal_key, 'K'], 0.08, skip_follow_toggle=True, key_gap=(0.03, 0.08))
+                            # F1 보장 후 힐→K — F2/F3 버프 직후 잘못된 단축창 F9 방지
+                            execute_keys(['1', heal_key, 'K'], 0.08, skip_follow_toggle=True, key_gap=(0.05, 0.12))
                             human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2), fast=True)
                             _resume_attack_click(was_fixed, was_follow)
                             last_party_heal = now; healed = True
@@ -3919,6 +3927,8 @@ def expert_logic():
                         was_fixed, was_follow = _pause_attack_click()
                         try:
                             use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
+                            # F1 보장 — F3 버프 직후 잘못된 단축창 키 방지
+                            ser.write(b'1'); time.sleep(human_delay(0.08, 0.16))
                             if use_strong:
                                 ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
                             elif random.randint(1, 100) <= 85:
