@@ -1,9 +1,9 @@
 {
-  "version": "0.1.24",
-  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v0.1.24/ddungmage.exe",
-  "url_kr": "https://github.com/blacknut0319-del/systemupdate/releases/download/v0.1.24/ddungmage.exe",
+  "version": "0.1.26",
+  "url": "https://github.com/blacknut0319-del/systemupdate/releases/download/v0.1.26/ddungmage.exe",
+  "url_kr": "https://github.com/blacknut0319-del/systemupdate/releases/download/v0.1.26/ddungmage.exe",
   "app": "ddungmage",
-  "size": 84559360,
+  "size": 84590592,
   "builder": "nuitka-onefile",
   "kind": "exe"
 }
