@@ -2537,7 +2537,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-13 16:35"
+PATCH_UPDATED_AT = "2026-08-13 17:00"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2694,7 +2694,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
-    "🕹️ 뚱박스 — [IP설정] 한글 안내, [설정도구] 누르면 중국어 프로그램+한글 통역 창 같이 열림",
+    "🕹️ 뚱박스 [설정도구] — 한글 통역 창이 앱 안에서 같이 뜨게 수정 (옛 캐시도 zip 재다운)",
     "🔑 만료일 — 구글시트 D열(만료일) 기준으로 표시·판정 (license.dat 안 씀, 1분마다 동기화)",
     "🩹 F3 버프 직후 자힐이 F3의 F9를 누르던 문제 — 힐 전 반드시 F1 단축창으로 복귀",
     "🔴 자힐 — 확률% 제거, 평소 힐만 / 피50%↓ 위험 시 물약+힐 같이 (타이밍만 사람처럼)",
@@ -3076,7 +3076,13 @@ _KMBOX_SETUP_ZIP_URL = (
     "%EB%9A%B1%EB%B0%95%EC%8A%A4_%EC%85%8B%ED%8C%85/"
     "%EB%9A%B1%EB%B0%95%EC%8A%A4_%EC%85%8B%ED%8C%85_%EC%98%AC%EC%9D%B8%EC%9B%90.zip"
 )
+_KMBOX_GUIDE_URL = (
+    "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+    "%EB%9A%B1%EB%B0%95%EC%8A%A4_%EC%85%8B%ED%8C%85/"
+    "%EC%84%A4%EC%A0%95%EB%8F%84%EA%B5%AC_%ED%95%9C%EA%B8%80%ED%86%B5%EC%97%AD.html"
+)
 _kmbox_setup_busy = False
+_kmbox_translator_dlg = None
 
 def _kmbox_runtime_dir():
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
@@ -3102,7 +3108,8 @@ def ensure_kmbox_setup_pack():
     rd = _kmbox_runtime_dir()
     driver = _kmbox_find_file("WCHUSBNIC.EXE")
     setup = _kmbox_find_file("kmboxNet_setup.exe")
-    if driver and setup:
+    guide = _kmbox_find_file("설정도구_한글통역.html")
+    if driver and setup and guide:
         return True, rd
     zip_path = os.path.join(rd, "뚱박스_셋팅_올인원.zip")
     ctx = _ssl.create_default_context()
@@ -3191,15 +3198,90 @@ def _kmbox_setup_action(kind):
 
     Thread(target=_work, daemon=True).start()
 
+def open_kmbox_setup_translator_dlg():
+    """설정도구 한글 통역 — 앱 안 창 (파일 없어도 항상 뜸)."""
+    global root, _kmbox_translator_dlg
+    if not root:
+        return
+    try:
+        if _kmbox_translator_dlg and _kmbox_translator_dlg.winfo_exists():
+            _kmbox_translator_dlg.lift()
+            _kmbox_translator_dlg.focus_force()
+            return
+    except Exception:
+        pass
+    dlg = ctk.CTkToplevel(root)
+    _kmbox_translator_dlg = dlg
+    dlg.title("뚱박스 설정도구 — 한글 통역")
+    dlg.attributes("-topmost", True)
+    dlg.configure(fg_color="#1e1e2e")
+    sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+    dlg.geometry(f"440x560+{max(0, sw-460)}+{max(0, (sh-560)//2)}")
+    ctk.CTkLabel(dlg, text="설정도구 한글 통역", font=("Malgun Gothic", 14, "bold"), text_color="#cba6f7").pack(pady=(10, 4))
+    ctk.CTkLabel(dlg, text="옆 중국어 프로그램 보면서 이 창만 보세요", font=("Malgun Gothic", 10), text_color="#a6adc8").pack(pady=(0, 8))
+    txt = ctk.CTkTextbox(dlg, width=410, height=430, font=("Malgun Gothic", 10), fg_color="#181825", text_color="#cdd6f4")
+    txt.pack(padx=12, pady=4)
+    body = (
+        "【① 가장 먼저】\n"
+        "  连接盒子  =  뚱박스 연결 버튼 (클릭!)\n"
+        "  IP / Port / UUID = 뚱박스 LCD 숫자 그대로\n\n"
+        "【② 뚱힐러 사용자 필수】\n"
+        "  禁用Bypass  =  Bypass 끄기 (체크!) ← KM 모드\n"
+        "  启用Bypass  =  Bypass 켜기 (건드리지 마세요)\n\n"
+        "【자주 보는 글자】\n"
+        "  网络畅通     =  연결 OK\n"
+        "  网络不通     =  연결 실패 → 드라이버·PC IP 확인\n"
+        "  键鼠功能测试  =  키·마우스 테스트 (안 써도 됨)\n"
+        "  硬件曲线修正  =  마우스 궤적 보정 (체크 해제 유지)\n"
+        "  盒子固件升级  =  펌웨어 업그레이드 (필요할 때만)\n\n"
+        "【뚱박스 LCD 아이콘】\n"
+        "  游戏机口 ✓  =  게임 PC 연결됨\n"
+        "  网口 ✓      =  뚱힐러/설정도구 연결됨\n"
+        "  打叉 ✗      =  끊김\n\n"
+        "뚱힐러만 쓸 때: 연결 + 禁用Bypass 후\n"
+        "뚱힐러 IP/포트/UUID 입력 → 설정저장 → 시작"
+    )
+    txt.insert("1.0", body)
+    txt.configure(state="disabled")
+
+    def _open_html():
+        guide = _kmbox_find_file("설정도구_한글통역.html")
+        if guide:
+            try:
+                os.startfile(guide)
+                return
+            except Exception:
+                pass
+        try:
+            import webbrowser
+            webbrowser.open(_KMBOX_GUIDE_URL)
+        except Exception:
+            pass
+
+    row = ctk.CTkFrame(dlg, fg_color="transparent")
+    row.pack(fill="x", padx=12, pady=6)
+    ctk.CTkButton(row, text="상세 통역(브라우저)", command=_open_html, height=28, font=("Malgun Gothic", 10, "bold"), fg_color="#313244", hover_color="#45475a").pack(side="left", expand=True, fill="x", padx=(0, 4))
+    ctk.CTkButton(row, text="닫기", command=dlg.destroy, height=28, font=("Malgun Gothic", 10, "bold"), fg_color="#45475a", hover_color="#585b70").pack(side="left", expand=True, fill="x", padx=(4, 0))
+    dlg.protocol("WM_DELETE_WINDOW", lambda: (dlg.destroy(), globals().__setitem__("_kmbox_translator_dlg", None)))
+
 def launch_kmbox_official_setup_with_guide():
-    """중국어 kmboxNet_setup.exe 실행 + 한글 통역 창 동시 오픈."""
+    """중국어 kmboxNet_setup.exe + 한글 통역 창(앱 내) 동시 오픈."""
+    if root:
+        root.after(0, open_kmbox_setup_translator_dlg)
     path = _kmbox_find_file("kmboxNet_setup.exe")
     if not path:
         raise RuntimeError("kmboxNet_setup.exe 없음")
     subprocess.Popen([path], cwd=os.path.dirname(path), shell=True)
     guide = _kmbox_find_file("설정도구_한글통역.html")
     if guide:
-        os.startfile(guide)
+        try:
+            os.startfile(guide)
+        except Exception:
+            try:
+                import webbrowser
+                webbrowser.open("file:///" + guide.replace("\\", "/"))
+            except Exception:
+                pass
 
 def _kmbox_suggest_pc_ip(box_ip):
     """박스 IP와 같은 대역의 PC용 IP 제안."""
