@@ -600,7 +600,7 @@ saved_chk_strong_heal = "1"
 saved_chk_attacker = "1"
 saved_chk_mna = "0"
 saved_chk_end_bert = "0"
-saved_chk_wheel_heal = "0"
+saved_chk_wheel_heal = "1"
 
 LOG_FILE = os.path.join(APP_DIR, "ddong.log")
 last_log = ""
@@ -1042,7 +1042,7 @@ def load_hidden_config():
     saved_chk_attacker = "1"
     saved_chk_mna = "0"
     saved_chk_end_bert = "0"
-    saved_chk_wheel_heal = "0"
+    saved_chk_wheel_heal = "1"
     
     if os.path.exists(AUTH_FILE):
         ctypes.windll.kernel32.SetFileAttributesW(AUTH_FILE, 2)
@@ -1737,63 +1737,90 @@ def _open_admin_panel_impl():
 def open_guide_panel():
     guide = ctk.CTkToplevel(root)
     guide.title("📖 뚱시스템 사용 가이드")
-    w, h = 420, 520
+    w, h = 440, 600
     sw = guide.winfo_screenwidth(); sh = guide.winfo_screenheight()
     guide.geometry(f"{w}x{h}+{int((sw-w)/2)}+{int((sh-h)/2)}")
     guide.attributes("-topmost", True); guide.focus_force(); guide.grab_set()
     guide.configure(fg_color="#181825")
-    sf = ctk.CTkScrollableFrame(guide, fg_color="#1e1e2e", corner_radius=8)
-    sf.pack(fill="both", expand=True, padx=10, pady=10)
 
-    ctk.CTkLabel(sf, text="⚠️ 본 프로그램 사용 시 책임은 사용자에게 있습니다.",
-                 text_color="#f38ba8", font=("Malgun Gothic", 10, "bold")).pack(anchor="w", padx=8, pady=(4,0))
-    ctk.CTkLabel(sf, text="감수하시고 사용하시고 6개월째 제것만 정지 없습니다.",
-                 text_color="#a6adc8", font=("Malgun Gothic", 9)).pack(anchor="w", padx=8, pady=(0,0))
-    ctk.CTkLabel(sf, text="항상 후원 감사합니다. ❤️",
-                 text_color="#f9e2af", font=("Malgun Gothic", 9)).pack(anchor="w", padx=8, pady=(0,8))
+    hdr = ctk.CTkFrame(guide, fg_color="#1e1e2e", corner_radius=0)
+    hdr.pack(fill="x", padx=0, pady=0)
+    ctk.CTkLabel(hdr, text="📖 뚱시스템 가이드", text_color="#f9e2af",
+                 font=("Malgun Gothic", 15, "bold")).pack(pady=(10, 2))
+    ctk.CTkLabel(hdr, text="⚠️ 사용 책임은 사용자에게 있습니다 · 항상 후원 감사합니다 ❤️",
+                 text_color="#a6adc8", font=("Malgun Gothic", 9)).pack(pady=(0, 8))
 
-    def add_t(txt): ctk.CTkLabel(sf, text=txt, text_color="#ffffff", font=("Malgun Gothic", 14, "bold")).pack(anchor="w", pady=(10, 5))
-    def add_d(t1, t2):
-        f = ctk.CTkFrame(sf, fg_color="transparent"); f.pack(fill="x", pady=2)
-        ctk.CTkLabel(f, text=t1, text_color="#ffffff", font=("Malgun Gothic", 11, "bold"), width=60, anchor="w").pack(side="left")
-        ctk.CTkLabel(f, text=t2, text_color="#ffffff", font=("Malgun Gothic", 11, "bold"), justify="left").pack(side="left")
+    sf = ctk.CTkScrollableFrame(guide, fg_color="#181825", corner_radius=0)
+    sf.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+
+    def add_sep():
+        ctk.CTkFrame(sf, fg_color="#313244", height=1).pack(fill="x", padx=4, pady=10)
+    def add_t(txt, color="#89b4fa"):
+        ctk.CTkLabel(sf, text=txt, text_color=color, font=("Malgun Gothic", 12, "bold")).pack(anchor="w", padx=6, pady=(4, 6))
+    def add_d(key, desc):
+        row = ctk.CTkFrame(sf, fg_color="#1e1e2e", corner_radius=8)
+        row.pack(fill="x", padx=4, pady=3)
+        ctk.CTkLabel(row, text=key, text_color="#f9e2af", font=("Malgun Gothic", 10, "bold"),
+                     width=78, anchor="w").pack(side="left", padx=(10, 4), pady=7)
+        ctk.CTkLabel(row, text=desc, text_color="#cdd6f4", font=("Malgun Gothic", 10),
+                     justify="left", wraplength=300).pack(side="left", padx=(0, 10), pady=7)
     def add_w(txt):
-        ctk.CTkLabel(sf, text="• " + txt, text_color="#ffffff", font=("Malgun Gothic", 11, "bold"), justify="left", wraplength=350).pack(anchor="w", pady=2, padx=5)
-    add_t("⌨️ 단축키 안내")
-    add_d("[Insert]", "시작 / 종료만 (클릭은 켜지지 않음)")
-    add_d("[Home]", "따라클릭 ↔ 고정 토글 (가동 중, sooplive Insert 클릭/고정과 동일)")
-    add_d("[Delete]", "폼창 숨기기 / 다시 보이기")
-    add_d("[ F4 ]", "주변 줍기 켜기 / 끄기 (토글)")
-    ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
-    add_t("🛡️ 스위치 및 설정")
-    add_d("버프", "▶ 버프 펼침 → F1/F2/F3 단축창 선택 후 F5~F12 체크·초 설정")
-    add_d("독 해독", "본인 독 걸리면 엔줄 자동 섭취 (두번째단축키 F9)")
-    add_d("격수 해독", "격수 독 걸리면 큐어포이즌 자동 시전 (두번째단축키 F10)")
-    add_d("파티 해독", "파티원 HP바 초록(독)이면 F2→F10→파티창클릭→F1")
-    add_d("파랭이", "지정한 핫바+슬롯(기본 F2+F8) · 엠통% 이하 시 10분마다 자동 복용")
-    add_d("자힐", "평소엔 힐만 · 피 50% 이하(위험)일 때 물약+힐 같이 (타이밍만 사람처럼 미세 랜덤)")
-    add_d("자힐% 슬라이더", "본인 체력이 몇% 이하일 때 자동 힐 시작")
-    add_d("위기% 슬라이더", "위험한 피통 이하일 때 위험베르 자동 사용")
-    add_d("격수% 슬라이더", "노파티 모드에서 격수 체력이 몇% 이하일 때 힐")
-    add_d("격수 HP", "격수 모니터에서 보낸 체력%/연결 상태를 폼에 표시")
-    ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
-    add_t("🚨 주의사항 (필독)")
-    add_w("파티 모드 시 쫄법사는 파티창이 활성화된 상태여야 합니다 (안 그러면 베르)")
-    add_w("Home 1번=따라클릭 ON / Home 2번=고정(제자리·클릭 없음)")
-    add_w("휠힐(힐만) — 타겟 힐만 M, 버프·해독은 K")
-    add_w("제어판에서 파티원 HP바를 드래그로 설정 후 💯 100% 기준을 꼭 저장하세요")
-    add_w("🖼️아이콘 ROI(선택) — HP바 옆 캐릭터 아이콘을 지정하면, 파티 없을 때 배경(나무 등)이 HP바로 오탐돼 유령힐 나가는 것을 이중으로 차단")
-    ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
-    add_t("🕹️ 장치 (뚱USB / 뚱박스)")
-    add_w("상단 [장치]에서 뚱USB(기존) 또는 뚱박스 중 선택합니다")
-    add_w("뚱USB: 꽂으면 자동 인식, 설정 필요 없음 (기존 사용자는 그대로)")
-    add_w("펌업 버튼: 뚱USB(아두이노)에 최신 펌웨어를 한 번에 구워 넣음 (워치독 포함). 작업 중엔 정지 상태여야 함")
-    add_w("확인 버튼: 연결된 뚱USB가 워치독 펌인지 조회 (응답 DDONG-WDT3 이면 OK)")
-    add_w("뚱박스: 박스 화면에 뜬 IP·포트·UUID를 입력칸에 넣고 [설정저장] 후 시작")
-    add_w("뚱박스 처음 쓸 때 필요한 파일은 자동으로 받아집니다 (인터넷 연결 필요)")
-    add_w("뚱박스 화면에 로고가 뜹니다 — 사냥 중엔 움직이고, 멈추면 박스 정보가 다시 보입니다")
-    add_w("박스 정보(IP 등) 다시 보려면 멈춘 상태에서 마우스를 뺐다 끼우세요")
-    ctk.CTkButton(guide, text="닫기", command=guide.destroy, fg_color="#313244", hover_color="#45475a", text_color="#ffffff", font=("Malgun Gothic", 12, "bold")).pack(pady=10)
+        ctk.CTkLabel(sf, text="• " + txt, text_color="#bac2de", font=("Malgun Gothic", 10),
+                     justify="left", wraplength=380).pack(anchor="w", padx=14, pady=2)
+
+    add_t("🚀 시작하기", "#a6e3a1")
+    add_w("Insert 로 시작 · 다시 누르면 정지 (시작할 때 자동클릭은 안 켜짐)")
+    add_w("시작 전 제어판에서 파티원 HP바·100% 기준 저장 필수")
+    add_sep()
+
+    add_t("⌨️ 단축키")
+    add_d("Insert", "시작 / 정지")
+    add_d("Home", "따라클릭 ↔ 고정 (사냥 중에만)")
+    add_d("Delete", "창 숨기기 / 다시 보이기")
+    add_d("F4", "주변 줍기 켜기 / 끄기")
+    add_sep()
+
+    add_t("🖱️ Home — 따라클릭 / 고정", "#cba6f7")
+    add_d("1번 누름", "따라클릭 ON — 몹 따라가며 자동 공격")
+    add_d("2번 누름", "고정 — 제자리에서 Shift만 (자동공격 끔, 힐하기 좋음)")
+    add_d("다시 Home", "따라클릭으로 복귀")
+    add_w("옵션 칸의 [클릭]·[고정] 스위치로도 같은 동작")
+    add_w("격수 모니터 [클릭]·[고정] 버튼도 동일")
+    add_sep()
+
+    add_t("💚 힐 · 휠힐 설정", "#94e2d5")
+    add_w("게임 단축창: 휠(마우스 가운데) 슬롯에 일반힐(F9) 고정")
+    add_w("최신 펌웨어: 일반 파티힐·격수힐 → 가운데 휠클릭으로 대상 지정 (항상 켜짐)")
+    add_w("상위힐(F7)은 휠이 아니라 좌클릭으로 대상 지정 (더 정확함)")
+    add_w("버프·해독·줍기는 항상 좌클릭")
+    add_sep()
+
+    add_t("🛡️ 옵션 설명")
+    add_d("버프", "▶ 버프 펼침 → 단축창(F1~F3) · 슬롯(F5~F12) 체크·초 설정")
+    add_d("자힐", "평소 힐만 · 피 50% 이하면 물약+힐")
+    add_d("상위힐", "설정% 이하일 때 강한 힐 자동 (좌클릭 대상)")
+    add_d("독 해독", "본인 독 → 엔틸독트 자동")
+    add_d("격수 해독", "격수 독 → 큐어포이즌 자동")
+    add_d("파티 해독", "파티원 HP바 초록(독)이면 해독 시전")
+    add_d("파랭이", "엠통% 이하 시 10분마다 파란물약")
+    add_d("격수 HP", "격수 모니터 연결 시 체력% 표시")
+    add_sep()
+
+    add_t("🚨 주의사항")
+    add_w("파티 모드: 쫄법사 파티창이 켜져 있어야 함 (안 그러면 베르)")
+    add_w("노파티: 파티창 없을 때 배경 오탐 방지 — 아이콘 ROI 설정 권장")
+    add_w("채팅 중: 힐·귀환은 계속, 버프·줍기·해독만 잠깐 쉼")
+    add_sep()
+
+    add_t("🕹️ 장치")
+    add_w("뚱USB: USB 꽂으면 자동 인식")
+    add_w("뚱박스: IP·포트·UUID 입력 후 Insert로 연결")
+    add_w("[펌업]: 뚱USB 최신 펌웨어 설치 (정지 상태에서)")
+    add_w("[확인]: 워치독 펌웨어인지 조회")
+
+    ctk.CTkButton(guide, text="닫기", command=guide.destroy, fg_color="#313244",
+                  hover_color="#45475a", text_color="#ffffff", font=("Malgun Gothic", 12, "bold"),
+                  height=32).pack(pady=10)
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -2780,7 +2807,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:00"
+PATCH_UPDATED_AT = "2026-08-14 05:15"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3028,62 +3055,55 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
-    "🖱️ 클릭 좌표 jitter 10% — 힐 이동·자동클릭마다 좌표 살짝 흔들림",
-    "⌨️ Home 고정 — U로 클릭만 끄고 Shift는 PC키 (H 안 씀, 펌업 없음)",
-    "✨ 버프 클릭 — Home(클릭) 꺼져 있으면 버프키 후 K로 대상 지정",
-    "💚 휠힐(힐만) — F9와 M 분리 전송, 버프/해독은 K 그대로",
-    "✨ 버프·자버프 초 설정 저장 — 슬롯 체크/초 입력 바꿀 때마다 저장, 껐다 켜도 유지",
-    "🖱️ 휠힐 — WDT4 펌웨어+옵션 ON일 때만 파티힐 M, 구펌은 K 그대로",
-    "🏃 강제베르(end) — 옵션 체크 후 END키로 귀환 즉시 (쫄·격수 키보드 모두)",
-    "⚡ 자기 버프 — 버프 칸에 헤이스트(자신) 추가, 슬롯 키 2번 연타 + 초 설정",
-    "🔄 업데이트 반복 알림 수정 — 예 눌러도 버전 안 바뀌면 뚱시작.bat 안내 후 알림 숨김",
-    "📐 접이식 접으면 창 높이 자동 축소 — 저장된 높이(WIN_H) 안 씀, 너비만 저장",
-    "🔌 펌웨어 WDT4 — 휠클릭·우클릭·Alt/Ctrl·Delete/End/PgDn / 자기버프 3칸",
-    "🔌 펌업 — 리셋버튼 없어도 DTR+1200 자동진입, WDT4 보드는 수동리셋 안내 안 뜸",
-    "📐 접이식(옵션/버프/힐) 접으면 창 높이 자동으로 줄어들게 복구",
-    "🔄 격수도 상단 [업데이트] — 뚱힐러처럼 확인 후 껐다 켜서 최신 적용",
-    "📐 창 크기 — 오른쪽 아래 ◢ 드래그로 뚱힐러·격수 창 조절 (크기 저장)",
-    "🔑 PC ID 고정 — 윈도우 기기 ID로 등록 (WiFi/VPN 바뀌어도 같은 PC면 B열 안 흔들림) / B열 ANY=여러 PC",
-    "🔄 업데이트 반복 알림 — '아니요' 누르면 같은 버전은 다시 안 뜸 / '예' 후 최신 적용 캐시 문제 수정",
-    "🕹️ 뚱박스 [설정도구] — 한글 통역 창이 앱 안에서 같이 뜨게 수정 (옛 캐시도 zip 재다운)",
-    "🔑 만료일 — 구글시트 D열(만료일) 기준으로 표시·판정 (license.dat 안 씀, 1분마다 동기화)",
-    "🩹 F3 버프 직후 자힐이 F3의 F9를 누르던 문제 — 힐 전 반드시 F1 단축창으로 복귀",
-    "🔴 자힐 — 확률% 제거, 평소 힐만 / 피50%↓ 위험 시 물약+힐 같이 (타이밍만 사람처럼)",
-    "🩹 파티힐 멈칫 — 파티창 깜빡여도 바로 안 끊기게, 타겟 짧은 홀드",
-    "⌨️ 격수 Insert/Home/PgUp — 힐 중에도 UDP 명령이 바로 먹히게",
-    "🕹️ 뚱박스 선택 시 [랜드라이버][Net설정도구][메뉴얼] — 폼 안에서 셋팅 (뚱헌터와 동일)",
-    "🖱️ 파티힐 마우스 — 기본보다 조금 빠르게 (텔포급은 아님, 사람 곡선 이동 유지)",
-    "⚡ 파티힐 더 빠르게 — 키간격·후대기 줄이고 클릭 1회 (마우스는 사람 속도)",
-    "🔄 업데이트 있으면 '예' 누르면 자동으로 껏다 켜져요 (최신 바로 적용)",
-    "🔄 상단 [업데이트] 버튼 눌러서 지금 바로 확인 가능",
-    "📢 새 업데이트가 있으면 폼에 알려줘요 — 껏다 안 키고 오래 켜둔 분도 확인 가능",
-    "⚡ 파티힐·격수힐이 조금 더 빠르게 들어가도록 반응을 다듬었어요",
-    "🪨 석화 걸려도 피통 %가 제대로 깎이도록 수정했어요",
-    "🛡️ 위기 귀환(베르) — 한 번 잘못 보고 바로 나가는 일을 줄였어요 (몇 번 확인 후 발동)",
-    "🖼️ 파티창 없는데 배경만 보고 힐하려 가던 문제 줄였어요 (아이콘 설정은 선택)",
-    "💙 파랭이(파란 물약) — 10분마다 먹도록 원래대로 돌렸어요 (너무 자주 먹던 버그)",
-    "🚫 파티창이 닫혀 있으면 파티힐이 나가지 않게 막았어요",
-    "🩹 클릭/고정 켜 둬도 파랭이·버프·줍기·해독이 멈추던 문제 고쳤어요",
-    "✨ 버프 자동 끄고 다시 켜도 OFF 상태가 유지되게 고쳤어요",
-    "💙 파랭이 위치를 단축창/슬롯에서 직접 고를 수 있어요",
-    "⏰ 예약 종료로 멈출 때 로그에 표시돼요 (위기 귀환과 구분)",
-    "💬 채팅 칠 때 — 자힐·파티힐·위기귀환은 계속, 버프·줍기·해독·파랭이만 잠깐 쉬어요",
-    "⌨️ 시작(Insert)·따라다니기(Home)·고정(PgUp)이 가끔 안 먹히던 문제 고쳤어요",
-    "🛡️ 독 걸려도 위기 귀환이 잘못 나가던 문제 고쳤어요",
-    "💾 자힐/위기/상위힐/격수/파랭이 스위치를 껐다 켜도 그대로 기억해요",
-    "🟢 파티 해독 — 독 걸린 파티원 지정 후 해독이 나가도록 맞춤",
-    "🎮 힐할 때 리니지 창으로 포커스가 가도록 해서 키가 안 먹히는 일을 줄였어요",
-    "🩹 파티원 한 명 죽을 때 창이 깜빡여도 나머지 힐이 같이 멈추지 않게 했어요",
-    "🩹 독(초록 피통) 걸린 파티원도 정상적으로 힐해요",
-    "🔌 뚱USB 연결 상태가 대기 중에도 바로 보이도록 했어요",
-    "⚡ 파티힐이 더 빨리 들어가도록 타겟 클릭을 줄였어요",
-    "🎥 피통 인식이 흔들리지 않게 캡처 방식을 안정화했어요",
-    "✨ 버프는 단축창(F1~F3) × 슬롯(F5~F12)으로 골라 켜요",
-    "▶ 옵션/버프/힐 칸을 접었다 펼 수 있어요",
-    "📅 상단 업데이트 날짜로 최신인지 확인할 수 있어요",
-    "🟢 독 걸려도 피% 기준으로 자힐·파티힐이 동작해요 (해독과 따로)",
-    "🎮 장치에서 뚱USB / 뚱박스 중 고를 수 있어요",
-    "📡 격수 모니터와 연결되면 격수 피%가 폼에 보여요",
+    "🖱️ Home 고정 — 자동공격 끄고 제자리 고정(Shift만), 힐하기 편하게 개선",
+    "🖱️ Home 따라클릭 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 고정",
+    "💚 휠힐 — 최신 펌웨어에서 일반 힐은 가운데 휠클릭 (항상 켜짐)",
+    "⚡ 상위힐 — 일반힐과 달리 좌클릭으로 대상 지정 (더 정확)",
+    "🖱️ 클릭 위치 — 힐·공격할 때마다 좌표가 살짝씩 달라져서 덜 눈에 띔",
+    "✨ 버프 — 클릭 꺼져 있어도 버프 대상 자동 지정",
+    "✨ 버프·자버프 초 — 슬롯 체크·초 바꿔도 껐다 켜도 저장 유지",
+    "🏃 강제베르 — 옵션 켜고 End키로 즉시 귀환 (격수 모니터도 가능)",
+    "⚡ 자기 버프 — 헤이스트 등 본인 버프 슬롯·초 설정 추가",
+    "🔄 업데이트 알림 — 예 눌러도 버전 같으면 반복 안 뜸",
+    "📐 접이식 — 옵션·버프·힐 접으면 창 높이 자동 축소",
+    "🔌 펌웨어 — 휠클릭·우클릭 등 확장 기능, 워치독으로 멈춤 자동 복구",
+    "🔌 펌업 — 리셋 버튼 없이도 자동 업로드 개선",
+    "🔄 격수 모니터 — 상단 업데이트 버튼으로 최신 버전 확인",
+    "📐 창 크기 — 오른쪽 아래 모서리 드래그로 크기 조절·저장",
+    "🔑 PC 등록 — 같은 컴퓨터면 와이파이 바뀌어도 인증 유지",
+    "🕹️ 뚱박스 — 설정 도구·메뉴얼을 프로그램 안에서 바로 실행",
+    "🔑 만료일 — 구글시트 기준으로 표시·판정",
+    "🩹 버프 직후 자힐 — 단축창 꼬여서 엉뚱한 키 누르던 문제 수정",
+    "🔴 자힐 — 평소 힐만, 피 50% 이하면 물약+힐 같이",
+    "🩹 파티힐 — 파티창 깜빡여도 힐 끊기지 않게",
+    "⌨️ 격수 원격 — 힐 중에도 Insert·Home 명령 바로 반응",
+    "🖱️ 파티힐 — 마우스 이동 속도·반응 개선",
+    "🔄 업데이트 — 있으면 예 누르면 자동으로 껐다 켜짐",
+    "📢 업데이트 알림 — 오래 켜둬도 새 버전 있으면 알려줌",
+    "🪨 석화 — 석화 걸려도 피통 % 제대로 표시",
+    "🛡️ 위기 귀환 — 한 번 오탐으로 바로 나가지 않게 여러 번 확인",
+    "🖼️ 유령힐 — 파티 없을 때 배경 오탐 줄임 (아이콘 설정 선택)",
+    "💙 파랭이 — 10분 간격으로 정상 복용",
+    "🚫 파티창 닫힘 — 파티힐 안 나가게",
+    "🩹 클릭 켜 둬도 — 파랭이·버프·줍기·해독 정상 동작",
+    "✨ 버프 OFF — 끄면 꺼진 상태 유지",
+    "💙 파랭이 — 단축창·슬롯 직접 선택",
+    "⏰ 예약 종료 — 로그에 표시 (위기 귀환과 구분)",
+    "💬 채팅 중 — 힐·귀환은 계속, 버프·줍기만 잠깐 쉼",
+    "⌨️ Insert·Home — 가끔 안 먹히던 문제 수정",
+    "🛡️ 독 — 독 걸려도 위기 귀환 잘못 나가던 문제 수정",
+    "💾 스위치 — 자힐·상위힐·격수 등 껐다 켜도 기억",
+    "🟢 파티 해독 — 독 걸린 파티원 지정 후 해독",
+    "🎮 힐 시 — 리니지 창으로 포커스 가서 키 안 먹히는 일 감소",
+    "🩹 파티원 사망 — 창 깜빡여도 나머지 힐 계속",
+    "🩹 독 파티원 — 초록 피통도 정상 힐",
+    "🔌 뚱USB — 대기 중에도 연결 상태 바로 표시",
+    "✨ 버프 — 단축창·슬롯으로 골라 켜기",
+    "▶ 접이식 — 옵션·버프·힐 칸 접기",
+    "📅 상단 날짜 — 최신 버전인지 확인",
+    "🟢 독·피% — 해독과 별개로 피통 기준 힐",
+    "🎮 장치 — 뚱USB / 뚱박스 선택",
+    "📡 격수 — 연결되면 격수 체력% 표시",
 ]
 PAST_PATCHES = [
     "0703 - 화면캡처 GPU가속 복원 · 상위힐(F7) 추가 · 자동클릭 중 힐/물약 즉시동작 · 독 걸리면 위기귀환 방지 · 연결 자동인식 개선",
@@ -3993,20 +4013,21 @@ def refresh_fw_version(ser_obj=None, log=False):
     return ver
 
 def _apply_wheel_heal_ui():
-    """WDT4 아니면 휠힐 옵션 끄고 비활성 표시."""
+    """WDT4면 휠힐 항상 ON 표시."""
     tw = globals().get("toggle_wheel_heal")
     cw = globals().get("chk_wheel_heal")
     if not tw or not cw:
         return
     if _fw_wdt4:
-        tw.lbl.configure(text="휠힐(힐만)", text_color="#cdd6f4")
+        cw.set(True)
+        tw.lbl.configure(text="휠힐(항상ON)", text_color="#a6e3a1")
     else:
         cw.set(False)
-        tw.lbl.configure(text="휠힐(WDT4필요)", text_color="#6c7086")
+        tw.lbl.configure(text="휠힐(펌업필요)", text_color="#6c7086")
 
 def wheel_heal_enabled():
-    """WDT4 + 휠힐 옵션 — 타겟 힐만 가운데클릭(M). 버프/해독은 K 그대로."""
-    return bool(_fw_wdt4 and chk_wheel_heal and chk_wheel_heal.get())
+    """최신 펌웨어(WDT4)면 일반 힐은 가운데 휠클릭. 상위힐은 별도(좌클릭)."""
+    return bool(_fw_wdt4)
 
 
 def heal_target_click():
@@ -4014,13 +4035,15 @@ def heal_target_click():
     return 'M' if wheel_heal_enabled() else 'K'
 
 
-def run_target_heal(heal_cmd, end_delay=0.08):
-    """타겟 힐 — ① F1+힐키(F9/F7) ② 클릭만 따로(M 또는 K).
-    F9와 클릭을 한꺼번에 안 보냄 → 버프 휠클릭이랑 섞이지 않게."""
+def run_target_heal(heal_cmd, end_delay=0.08, use_wheel=None):
+    """타겟 힐 — ① 단축창+힐키 ② 대상 클릭(휠 또는 좌클릭).
+    use_wheel=None이면 휠힐 설정 따름. 상위힐은 use_wheel=False(좌클릭)."""
     global ser, running
     if not running or not ser or not getattr(ser, "is_open", False):
         return False
-    click = heal_target_click()
+    if use_wheel is None:
+        use_wheel = wheel_heal_enabled()
+    click = 'M' if use_wheel else 'K'
     execute_keys(['1', heal_cmd], max(0.10, end_delay * 0.35), skip_follow_toggle=True, key_gap=(0.09, 0.16))
     if not running or not ser or not getattr(ser, "is_open", False):
         return False
@@ -4537,11 +4560,11 @@ def expert_logic():
                             try:
                                 use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                                 heal_key = '7' if use_strong else 'A'
-                                tag = "휠" if wheel_heal_enabled() else None
-                                run_target_heal(heal_key, end_delay=0.45)
+                                run_target_heal(heal_key, end_delay=0.45, use_wheel=wheel_heal_enabled() and not use_strong)
                                 if use_strong:
-                                    log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%" + (f" ({tag})" if tag else ""))
+                                    log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
                                 else:
+                                    tag = "휠" if wheel_heal_enabled() else None
                                     log_event(f"💚 파티힐 P{best_i+1} HP{best_hp:.0f}%" + (f" ({tag})" if tag else ""))
                                 healed = True
                             finally:
@@ -4583,9 +4606,9 @@ def expert_logic():
                             human_mouse_move((heal_roi[0] + heal_roi[2]) // 2, (heal_roi[1] + heal_roi[3]) // 2, fast=True, roi=heal_roi); time.sleep(0.02)
                             use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                             heal_key = '7' if use_strong else 'A'
-                            run_target_heal(heal_key, end_delay=0.08)
+                            run_target_heal(heal_key, end_delay=0.08, use_wheel=wheel_heal_enabled() and not use_strong)
                             if use_strong:
-                                log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%" + (" (휠)" if wheel_heal_enabled() else ""))
+                                log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
                             else:
                                 log_event(f"💚 파티힐 P{best_pi + 1} HP{best_hp:.0f}%" + (" (휠)" if wheel_heal_enabled() else ""))
                             human_mouse_move(orig_x, orig_y, fast=True)
@@ -4613,12 +4636,12 @@ def expert_logic():
                         focus_lineage_window()
                         use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
                         heal_key = '7' if use_strong else 'A'
-                        if wheel_heal_enabled():
+                        if wheel_heal_enabled() and not use_strong:
                             run_target_heal(heal_key, end_delay=0.45)
-                            if use_strong:
-                                log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}% (휠)")
-                            else:
-                                log_event(f"💚 격수힐 HP{atk_hp:.0f}% (휠)")
+                            log_event(f"💚 격수힐 HP{atk_hp:.0f}% (휠)")
+                        elif wheel_heal_enabled() and use_strong:
+                            run_target_heal(heal_key, end_delay=0.45, use_wheel=False)
+                            log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%")
                         else:
                             was_fixed, was_follow = _pause_attack_click()
                             try:
@@ -4909,14 +4932,15 @@ chk_wheel_heal = ctk.BooleanVar(value=saved_chk_wheel_heal in ("1", "true", "Tru
 def _on_wheel_heal_sw():
     if not _fw_wdt4:
         chk_wheel_heal.set(False)
-        log_event("⚠️ 휠힐 — WDT4 펌웨어 필요 (펌업 후 [확인])")
+        log_event("⚠️ 휠힐 — 최신 펌웨어 필요 (펌업 후 [확인])")
         return
-    log_event(f"🖱️ 휠힐 {'ON' if chk_wheel_heal.get() else 'OFF'}")
+    chk_wheel_heal.set(True)
+    log_event("🖱️ 휠힐 — 최신 펌웨어에서 항상 켜짐 (일반힐=휠, 상위힐=좌클릭)")
     try:
         save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception:
         pass
-toggle_wheel_heal = RoundedToggle(frame_opt, "휠힐(힐만)", "#a371f7", var=chk_wheel_heal, cmd=_on_wheel_heal_sw)
+toggle_wheel_heal = RoundedToggle(frame_opt, "휠힐(항상ON)", "#a371f7", var=chk_wheel_heal, cmd=_on_wheel_heal_sw)
 toggle_wheel_heal.grid(row=3, column=1, padx=3, pady=2, sticky="w")
 try:
     root.after(200, _apply_wheel_heal_ui)
