@@ -798,7 +798,7 @@ _buff_cfg_save_after_id = None
 
 
 def _click_jitter_xy(x, y, roi=None, pct=CLICK_JITTER_PCT):
-    """클릭 목표 좌표 ±pct% 흔들림 (sooplive auto_click 좌표 jitter 대응)."""
+    """클릭 목표 좌표 ±pct% 흔들림."""
     if roi and len(roi) >= 4:
         w = max(6, abs(int(roi[2]) - int(roi[0])))
         h = max(6, abs(int(roi[3]) - int(roi[1])))
@@ -1783,7 +1783,7 @@ def open_guide_panel():
     add_t("🖱️ Home — 따라가기 / 고정", "#cba6f7")
     add_d("1번 누름", "따라가기 ON — 몹 따라가며 자동 공격")
     add_d("2번 누름", "고정 — 제자리에서 Shift만 (자동공격 끔, 힐하기 좋음)")
-    add_d("다시 Home", "따라가기으로 복귀")
+    add_d("다시 Home", "따라가기로 복귀")
     add_w("옵션 칸의 [따라가기]·[고정] 스위치로도 같은 동작")
     add_w("격수 모니터 [따라가기]·[고정] 버튼도 동일")
     add_sep()
@@ -2807,7 +2807,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:20"
+PATCH_UPDATED_AT = "2026-08-14 05:25"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
