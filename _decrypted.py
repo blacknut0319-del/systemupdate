@@ -441,14 +441,15 @@ def buff_time_key(hb, slot):
 
 def cast_buff(hb_label, slot_label):
     """버프 시전. F2/F3이면 시전 후 반드시 F1로 복귀.
-    (복귀 실패 시 이후 자힐 B=F9 가 F3의 F9로 먹히는 사고 방지 — 자힐 쪽에서도 F1 재확인)"""
+    클릭(Home) 꺼져 있으면 버프키 후 K로 대상 지정 — 예전엔 무한클릭이 대신했음."""
     hb = hb_label.replace("F", "")
     sk = BUFF_SLOT_KEYS[slot_label]
     if hb == "1":
         execute_keys([sk], 0.5)
     else:
-        # 슬롯→F1 사이 간격을 조금 여유 있게 (핫바 전환 씹힘 완화)
         execute_keys([hb, sk, "1"], 0.55, key_gap=(0.08, 0.18))
+    if not attack_click_active():
+        _buff_target_click()
 
 
 def cast_self_buff(hb_label, slot_label):
@@ -671,6 +672,10 @@ class KmBox:
             if self._auto and self.is_open:
                 with self._lk:
                     try:
+                        jx = random.randint(-3, 3)
+                        jy = random.randint(-3, 3)
+                        if jx or jy:
+                            kmNet.move(jx, jy)
                         kmNet.left(1); time.sleep(random.uniform(0.030, 0.075)); kmNet.left(0)
                     except: pass
                 time.sleep(random.uniform(0.085, 0.180))
@@ -720,6 +725,14 @@ class KmBox:
         if cmd == 'K':                             # 좌클릭 20~50ms
             with self._lk:
                 try: kmNet.left(1); time.sleep(random.uniform(0.020, 0.050)); kmNet.left(0)
+                except: pass
+            return
+        if cmd == 'M':                             # 휠클릭(가운데) 20~50ms — WDT4 휠힐
+            with self._lk:
+                try:
+                    mid = getattr(kmNet, "middle", None)
+                    if mid:
+                        mid(1); time.sleep(random.uniform(0.020, 0.050)); mid(0)
                 except: pass
             return
         if cmd == 'U':                             # 자동클릭 OFF + 전체키 해제
@@ -780,7 +793,20 @@ class KmBox:
 running = False
 BASE_BUFF_INTERVAL = 1200
 BUFF_SEQ_GAP = 5.0
+CLICK_JITTER_PCT = 10
 _buff_cfg_save_after_id = None
+
+
+def _click_jitter_xy(x, y, roi=None, pct=CLICK_JITTER_PCT):
+    """클릭 목표 좌표 ±pct% 흔들림 (sooplive auto_click 좌표 jitter 대응)."""
+    if roi and len(roi) >= 4:
+        w = max(6, abs(int(roi[2]) - int(roi[0])))
+        h = max(6, abs(int(roi[3]) - int(roi[1])))
+        jx = max(1, int(w * pct / 100))
+        jy = max(1, int(h * pct / 100))
+    else:
+        jx = jy = max(1, int(24 * pct / 100))
+    return x + random.randint(-jx, jx), y + random.randint(-jy, jy)
 
 
 def _buff_sec_str(iv, grid_key):
@@ -1734,8 +1760,8 @@ def open_guide_panel():
     def add_w(txt):
         ctk.CTkLabel(sf, text="• " + txt, text_color="#ffffff", font=("Malgun Gothic", 11, "bold"), justify="left", wraplength=350).pack(anchor="w", pady=2, padx=5)
     add_t("⌨️ 단축키 안내")
-    add_d("[Insert]", "시작 / 종료 (토글 버튼)")
-    add_d("[Home]", "클릭 (마우스 왼쪽 무한클릭, 따라다니기)")
+    add_d("[Insert]", "시작 / 종료만 (클릭은 켜지지 않음)")
+    add_d("[Home]", "무한좌클릭 ON/OFF (가동 중일 때만)")
     add_d("[PgUp]", "고정 (따라다니다 누르면 그 자리 멈춤)")
     add_d("[Delete]", "폼창 숨기기 / 다시 보이기")
     add_d("[ F4 ]", "주변 줍기 켜기 / 끄기 (토글)")
@@ -1754,9 +1780,9 @@ def open_guide_panel():
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
     add_t("🚨 주의사항 (필독)")
     add_w("파티 모드 시 쫄법사는 파티창이 활성화된 상태여야 합니다 (안 그러면 베르)")
-    add_w("솔로(파티) 모드는 1:1 맨투맨, 무조건 따라다니기(Home) 켜야 정상 작동합니다")
-    add_w("노파티 모드는 비비기만 됩니다 (제자리 힐 불가)")
-    add_w("노파티 힐은 고정(PgUp) 상태에서만 제자리 힐이 동작합니다")
+    add_w("솔로(파티) 모드는 1:1 맨투맨, Home으로 클릭 켜야 정상 작동합니다")
+    add_w("휠힐(힐만) — 타겟 힐만 M, 버프·해독은 K")
+    add_w("클릭(Home) OFF + 고정(PgUp) ON — 제자리 사냥. 버프는 클릭 꺼져 있으면 K로 대상 지정")
     add_w("제어판에서 파티원 HP바를 드래그로 설정 후 💯 100% 기준을 꼭 저장하세요")
     add_w("🖼️아이콘 ROI(선택) — HP바 옆 캐릭터 아이콘을 지정하면, 파티 없을 때 배경(나무 등)이 HP바로 오탐돼 유령힐 나가는 것을 이중으로 차단")
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
@@ -2608,13 +2634,13 @@ def _clamp_to_screen(x, y, margin=4):
         pass
     return x, y
 
-def human_mouse_move(tx, ty, fast=False):
+def human_mouse_move(tx, ty, fast=False, roi=None):
     """fast=True: 파티힐용 — 기본보다 조금 빠르되, 텔포처럼 안 보이게 중간 속도."""
     global ser
     if not ser or not ser.is_open: return
     pt = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     cx, cy = pt.x, pt.y
-    tx += random.randint(-2, 2); ty += random.randint(-2, 2)
+    tx, ty = _click_jitter_xy(tx, ty, roi=roi)
     tx, ty = _clamp_to_screen(tx, ty)    # 화면 밖/핫코너 진입 차단 (목표·복귀 좌표 모두 경유)
     # fast: 기본(20~30)보다 빠르되 텔포급(8~12)은 피함 → 12~18
     steps = random.randint(12, 18) if fast else random.randint(20, 30)
@@ -2649,6 +2675,24 @@ def human_mouse_move(tx, ty, fast=False):
             try: ser.write(f"<{dx},{dy}>".encode())
             except: break
             time.sleep(human_delay(*step_sleep))
+
+def attack_click_active():
+    """무한클릭(Home) 또는 고정(PgUp) 켜져 있으면 자동 클릭 중."""
+    if chk_fix and chk_fix.get():
+        return True
+    if chk_follow and chk_follow.get():
+        return True
+    return False
+
+def _buff_target_click():
+    """버프 대상 지정 — 클릭 꺼져 있을 때만 K(좌클릭). 휠(M)은 힐 전용."""
+    global ser, running
+    if not running or not ser or not getattr(ser, "is_open", False):
+        return
+    focus_lineage_window()
+    time.sleep(0.02)
+    ser.write(b'K')
+    time.sleep(human_delay(0.03, 0.08))
 
 def _pause_attack_click():
     """고정(Shift+클릭) / 따라다니기(클릭) 잠시 해제. 복구용 상태 반환."""
@@ -2736,7 +2780,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 03:10"
+PATCH_UPDATED_AT = "2026-08-14 04:05"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -2984,6 +3028,10 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🖱️ 클릭 좌표 jitter 10% — 힐 이동·자동클릭마다 좌표 살짝 흔들림",
+    "⌨️ Home=클릭 ON/OFF / Insert=시작만 — sooplive처럼 역할 분리",
+    "✨ 버프 클릭 — Home(클릭) 꺼져 있으면 버프키 후 K로 대상 지정",
+    "💚 휠힐(힐만) — F9와 M 분리 전송, 버프/해독은 K 그대로",
     "✨ 버프·자버프 초 설정 저장 — 슬롯 체크/초 입력 바꿀 때마다 저장, 껐다 켜도 유지",
     "🖱️ 휠힐 — WDT4 펌웨어+옵션 ON일 때만 파티힐 M, 구펌은 K 그대로",
     "🏃 강제베르(end) — 옵션 체크 후 END키로 귀환 즉시 (쫄·격수 키보드 모두)",
@@ -3237,15 +3285,31 @@ def on_space_save(e=None):
         except: r, g, b = 0, 0, 0
         with open(COORD_FILE, 'a', encoding='utf-8') as f: f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{cx},{cy},{r},{g},{b}\n") 
 
-def on_caps_lock(e=None):
-    global debounce, ser, running, chk_follow, root
-    if time.time() - debounce['caps'] < 0.15: return 
-    debounce['caps'] = time.time()
-    if ser and ser.is_open and running: 
+def _device_toggle_follow_click():
+    """Home = 무한좌클릭 ON/OFF (Insert 시작과 분리). running 중일 때만."""
+    global ser, running
+    if not running or not ser or not getattr(ser, "is_open", False):
+        return
+    try:
         ser.write(b'T')
-        try: keyboard.release('shift'); time.sleep(0.01)
-        except: pass
-        if root and chk_follow: root.after(0, lambda: chk_follow.set(not chk_follow.get()))
+        keyboard.release('shift')
+        time.sleep(0.01)
+    except Exception:
+        pass
+
+def on_home_click_toggle(e=None):
+    """Home — 클릭(무한좌클릭) ON/OFF. Insert는 시작/종료만."""
+    global debounce, ser, running, chk_follow, root
+    if time.time() - debounce['caps'] < 0.15:
+        return
+    debounce['caps'] = time.time()
+    if not running:
+        return
+    was_on = bool(chk_follow and chk_follow.get())
+    _device_toggle_follow_click()
+    if root and chk_follow:
+        root.after(0, lambda: chk_follow.set(not was_on))
+    log_event(f"🖱️ 클릭 {'ON' if not was_on else 'OFF'}")
 
 def on_tab_toggle(e=None):
     global debounce, ser, running, chk_fix, root, chk_follow
@@ -3932,16 +3996,36 @@ def _apply_wheel_heal_ui():
     if not tw or not cw:
         return
     if _fw_wdt4:
-        tw.lbl.configure(text="휠힐(WDT4)", text_color="#cdd6f4")
+        tw.lbl.configure(text="휠힐(힐만)", text_color="#cdd6f4")
     else:
         cw.set(False)
         tw.lbl.configure(text="휠힐(WDT4필요)", text_color="#6c7086")
 
-def heal_click_key():
-    """파티힐 클릭 — WDT4+옵션 ON일 때만 M, 그 외 K."""
-    if _fw_wdt4 and chk_wheel_heal and chk_wheel_heal.get():
-        return "M"
-    return "K"
+def wheel_heal_enabled():
+    """WDT4 + 휠힐 옵션 — 타겟 힐만 가운데클릭(M). 버프/해독은 K 그대로."""
+    return bool(_fw_wdt4 and chk_wheel_heal and chk_wheel_heal.get())
+
+
+def heal_target_click():
+    """힐 대상 지정 클릭만. 휠힐 ON→M, OFF→K. 버프·해독 등은 항상 K."""
+    return 'M' if wheel_heal_enabled() else 'K'
+
+
+def run_target_heal(heal_cmd, end_delay=0.08):
+    """타겟 힐 — ① F1+힐키(F9/F7) ② 클릭만 따로(M 또는 K).
+    F9와 클릭을 한꺼번에 안 보냄 → 버프 휠클릭이랑 섞이지 않게."""
+    global ser, running
+    if not running or not ser or not getattr(ser, "is_open", False):
+        return False
+    click = heal_target_click()
+    execute_keys(['1', heal_cmd], max(0.10, end_delay * 0.35), skip_follow_toggle=True, key_gap=(0.09, 0.16))
+    if not running or not ser or not getattr(ser, "is_open", False):
+        return False
+    focus_lineage_window()
+    time.sleep(0.02)
+    ser.write(click.encode())
+    time.sleep(random.uniform(max(0.05, end_delay * 0.55), max(end_delay, end_delay * 1.1)))
+    return True
 
 def on_fw_check_click():
     """제어판 [확인] — 연결된 뚱USB가 워치독 펌인지 조회."""
@@ -4367,10 +4451,10 @@ def expert_logic():
                             orig_x, orig_y = pt_orig.x, pt_orig.y
                             was_fixed, was_follow = _pause_attack_click()
                             focus_lineage_window()
-                            human_mouse_move(cure_tx + random.randint(-3, 3), cure_ty + random.randint(-2, 2)); time.sleep(0.02)
+                            human_mouse_move(cure_tx, cure_ty, roi=PARTY_ROIS[cure_pi]); time.sleep(0.02)
                             # F2→F10(큐어포이즌)→클릭(대상지정)→F1 — 이미 pause됨, 키만 전송
                             execute_keys(['2', 'X', 'K', '1'], 0.45, skip_follow_toggle=True)
-                            human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2))
+                            human_mouse_move(orig_x, orig_y)
                             _resume_attack_click(was_fixed, was_follow)
                         else:
                             fix_mode_keys(['2', 'X', '1'], 0.45)
@@ -4448,13 +4532,15 @@ def expert_logic():
                             focus_lineage_window()
                             was_fixed, was_follow = _pause_attack_click()
                             try:
-                                # F1 보장 — F3 버프 직후 잘못된 단축창 키 방지
-                                ser.write(b'1'); time.sleep(human_delay(0.08, 0.16))
-                                if chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct:
-                                    ser.write(b'7'); log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
+                                use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
+                                heal_key = '7' if use_strong else 'A'
+                                tag = "휠" if wheel_heal_enabled() else None
+                                run_target_heal(heal_key, end_delay=0.45)
+                                if use_strong:
+                                    log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%" + (f" ({tag})" if tag else ""))
                                 else:
-                                    ser.write(b'A')
-                                time.sleep(human_delay(0.45, 0.7)); healed = True
+                                    log_event(f"💚 파티힐 P{best_i+1} HP{best_hp:.0f}%" + (f" ({tag})" if tag else ""))
+                                healed = True
                             finally:
                                 _resume_attack_click(was_fixed, was_follow)
                     if healed: continue
@@ -4490,16 +4576,18 @@ def expert_logic():
                         if best_pi >= 0:
                             was_fixed, was_follow = _pause_attack_click()
                             focus_lineage_window()
-                            human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2), fast=True); time.sleep(0.02)
+                            heal_roi = PARTY_ROIS[best_pi]
+                            human_mouse_move((heal_roi[0] + heal_roi[2]) // 2, (heal_roi[1] + heal_roi[3]) // 2, fast=True, roi=heal_roi); time.sleep(0.02)
                             use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                             heal_key = '7' if use_strong else 'A'
-                            # F1 보장 후 힐→클릭 — WDT4+휠힐옵션만 M, 그 외 K
-                            execute_keys(['1', heal_key, heal_click_key()], 0.08, skip_follow_toggle=True, key_gap=(0.05, 0.12))
-                            human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2), fast=True)
+                            run_target_heal(heal_key, end_delay=0.08)
+                            if use_strong:
+                                log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%" + (" (휠)" if wheel_heal_enabled() else ""))
+                            else:
+                                log_event(f"💚 파티힐 P{best_pi + 1} HP{best_hp:.0f}%" + (" (휠)" if wheel_heal_enabled() else ""))
+                            human_mouse_move(orig_x, orig_y, fast=True)
                             _resume_attack_click(was_fixed, was_follow)
                             last_party_heal = now; healed = True
-                            if use_strong:
-                                log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
 
             # 노파티 — 격수힐: 독 여부와 무관, UDP HP% vs 격수% 임계값만 판단
             elif m == "노파티":
@@ -4520,19 +4608,26 @@ def expert_logic():
                     atk_hp = attacker_hp_udp
                     if chk_attacker_sw.get() and udp_ok and atk_hp < attacker_hp_threshold:
                         focus_lineage_window()
-                        was_fixed, was_follow = _pause_attack_click()
-                        try:
-                            use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
-                            # F1 보장 — F3 버프 직후 잘못된 단축창 키 방지
-                            ser.write(b'1'); time.sleep(human_delay(0.08, 0.16))
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
+                        heal_key = '7' if use_strong else 'A'
+                        if wheel_heal_enabled():
+                            run_target_heal(heal_key, end_delay=0.45)
                             if use_strong:
-                                ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
-                            elif random.randint(1, 100) <= 85:
-                                ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
+                                log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}% (휠)")
                             else:
-                                time.sleep(human_delay(0.2, 0.3))
-                        finally:
-                            _resume_attack_click(was_fixed, was_follow)
+                                log_event(f"💚 격수힐 HP{atk_hp:.0f}% (휠)")
+                        else:
+                            was_fixed, was_follow = _pause_attack_click()
+                            try:
+                                ser.write(b'1'); time.sleep(human_delay(0.08, 0.16))
+                                if use_strong:
+                                    ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
+                                elif random.randint(1, 100) <= 85:
+                                    ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
+                                else:
+                                    time.sleep(human_delay(0.2, 0.3))
+                            finally:
+                                _resume_attack_click(was_fixed, was_follow)
                         last_noparty_heal = now
 
                 
@@ -4773,8 +4868,13 @@ frame_opt.grid_columnconfigure(0, weight=1)
 frame_opt.grid_columnconfigure(1, weight=1)
 sw_w, sw_h = 28, 14; ft = ('Malgun Gothic', 8, 'bold')
 
+def _on_follow_sw():
+    log_event(f"🖱️ 클릭 {'ON' if chk_follow.get() else 'OFF'}")
+    if running:
+        _device_toggle_follow_click()
+
 RoundedToggle(frame_opt, "고정(PgUp)", "#a371f7", var=chk_fix).grid(row=0, column=0, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "클릭(Home)", "#a371f7", var=chk_follow).grid(row=0, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "클릭(Home)", "#a371f7", var=chk_follow, cmd=_on_follow_sw).grid(row=0, column=1, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: log_event(f"☠️ 독해독 {'ON' if chk_poison.get() else 'OFF'}")).grid(row=1, column=0, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=1, column=1, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=lambda: log_event(f"💚 파티해독 {'ON' if chk_party_poison.get() else 'OFF'}")).grid(row=2, column=0, padx=3, pady=2, sticky="w")
@@ -4798,7 +4898,7 @@ def _on_wheel_heal_sw():
         save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception:
         pass
-toggle_wheel_heal = RoundedToggle(frame_opt, "휠힐(WDT4필요)", "#a371f7", var=chk_wheel_heal, cmd=_on_wheel_heal_sw)
+toggle_wheel_heal = RoundedToggle(frame_opt, "휠힐(힐만)", "#a371f7", var=chk_wheel_heal, cmd=_on_wheel_heal_sw)
 toggle_wheel_heal.grid(row=3, column=1, padx=3, pady=2, sticky="w")
 try:
     root.after(200, _apply_wheel_heal_ui)
@@ -5110,7 +5210,7 @@ def update_udp_hp_label():
 # UDP 원격 명령 매핑
 UDP_CMD_MAP = {
     b'I': 'on_main_toggle',    # Insert → 시작/종료
-    b'H': 'on_caps_lock',      # Home   → 따라다니기 토글
+    b'H': 'on_home_click_toggle',  # Home   → 클릭 ON/OFF
     b'P': 'on_tab_toggle',     # PgUp   → 고정 토글
     b'L': 'on_f4_toggle',      # F4     → 줍기 토글
 }
@@ -5199,7 +5299,7 @@ def toggle_gui(e=None):
 keyboard.on_press(_on_any_keypress)   # 채팅 타이핑 감지용 — F1~F12 제외, 콜백은 시간기록만 하고 즉시 반환(후킹 안전)
 keyboard.on_release_key('delete', toggle_gui) 
 keyboard.on_release_key('space', on_space_save) 
-keyboard.on_release_key('home', on_caps_lock)
+keyboard.on_release_key('home', on_home_click_toggle)
 keyboard.on_release_key('page up', on_tab_toggle)
 keyboard.on_release_key('insert', on_main_toggle)
 keyboard.on_release_key('end', on_end_bert)

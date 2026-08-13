@@ -92,6 +92,11 @@ void loop() {
   if (autoClick) {
     unsigned long currentTime = millis();
     if (currentTime - lastClickTime >= nextInterval) {
+      int jx = random(-3, 4);
+      int jy = random(-3, 4);
+      if (jx != 0 || jy != 0) {
+        Mouse.move(jx, jy, 0);
+      }
       Mouse.press(MOUSE_LEFT);
       delay(random(30, 75));
       Mouse.release(MOUSE_LEFT);
