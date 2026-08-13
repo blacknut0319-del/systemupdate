@@ -8,7 +8,7 @@ for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","k
     try: __import__(mod)
     except: subprocess.check_call([sys.executable,"-m","pip","install",pkg,"--quiet"])
 
-import socket, struct, json, os, threading, time
+import socket, struct, json, os, threading, time, re
 import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
@@ -17,15 +17,45 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 02:50"
+PATCH_UPDATED_AT = "2026-08-14 02:55"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
-def _sync_attacker_from_new():
-    """업데이트로 받은 .new → attacker_hp.pyw 동기화 (hp_start.bat 경로 유지)."""
+def _read_patch_ver(source):
+    try:
+        if isinstance(source, bytes):
+            text = source.decode("utf-8", errors="replace")
+        elif isinstance(source, str) and os.path.isfile(source):
+            with open(source, encoding="utf-8") as f:
+                text = f.read()
+        else:
+            text = str(source)
+        m = re.search(r'PATCH_UPDATED_AT\s*=\s*"([^"]+)"', text)
+        return m.group(1).strip() if m else ""
+    except Exception:
+        return ""
+
+def _cleanup_stale_new(expected_patch=None):
+    """구버전 .new 가 main 을 덮어써서 업데이트 무한루프 나는 것 방지."""
     new_path = ATTACKER_MAIN + ".new"
     if not os.path.isfile(new_path):
+        return
+    exp = (expected_patch or PATCH_UPDATED_AT or "").strip()
+    if _read_patch_ver(new_path) != exp:
+        try:
+            os.remove(new_path)
+        except Exception:
+            pass
+
+def _sync_attacker_from_new():
+    """업데이트 .new → main (서버 버전과 일치할 때만)."""
+    new_path = ATTACKER_MAIN + ".new"
+    if not os.path.isfile(new_path):
+        return
+    remote = fetch_remote_version()
+    if not remote or _read_patch_ver(new_path) != remote:
+        _cleanup_stale_new(remote)
         return
     try:
         import shutil
@@ -39,6 +69,8 @@ def _sync_attacker_from_new():
 
 if __file__.lower().endswith(".new"):
     _sync_attacker_from_new()
+elif os.path.isfile(ATTACKER_MAIN + ".new"):
+    _cleanup_stale_new(PATCH_UPDATED_AT)
 
 TARGET_IP = "192.168.0.100"
 TARGET_PORT = 9999
@@ -266,12 +298,11 @@ def check_for_update(force=False, manual=False):
         if manual:
             def _ok():
                 _set_lbl("업데이트 %s" % _short, "#a6e3a1")
-                if _show_msgbox(
-                    "yesno",
+                _show_msgbox(
+                    "info",
                     "업데이트 확인",
-                    "최신이에요.\n다시 실행할까요?\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
-                ):
-                    restart_app()
+                    "최신이에요.\n다시 받을 필요 없어요.\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
+                )
             try:
                 if root:
                     root.after(0, _ok)
