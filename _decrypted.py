@@ -780,6 +780,49 @@ class KmBox:
 running = False
 BASE_BUFF_INTERVAL = 1200
 BUFF_SEQ_GAP = 5.0
+_buff_cfg_save_after_id = None
+
+
+def _buff_sec_str(iv, grid_key):
+    raw = (iv.get() or "").strip()
+    if raw:
+        return raw
+    prev = saved_buff_grid.get(grid_key, "")
+    if ":" in prev:
+        return prev.split(":", 1)[1]
+    return str(BASE_BUFF_INTERVAL)
+
+
+def _self_buff_sec_str(sec_var, idx):
+    raw = (sec_var.get() or "").strip()
+    if raw:
+        return raw
+    prev = saved_self_buff_grid.get(str(idx), "")
+    parts = prev.split(":")
+    if len(parts) > 3 and parts[3]:
+        return parts[3]
+    return "1200"
+
+
+def _schedule_buff_cfg_save():
+    global _buff_cfg_save_after_id
+    if "root" not in globals() or not root:
+        return
+    try:
+        if _buff_cfg_save_after_id is not None:
+            root.after_cancel(_buff_cfg_save_after_id)
+    except Exception:
+        pass
+    _buff_cfg_save_after_id = root.after(350, _save_buff_cfg_now)
+
+
+def _save_buff_cfg_now():
+    global _buff_cfg_save_after_id
+    _buff_cfg_save_after_id = None
+    try:
+        save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception:
+        pass
 last_loot = 0
 last_buff_seq = 0
 last_loot_sent_time = 0
@@ -1176,12 +1219,13 @@ def save_hidden_config(pwd_to_save):
                         for sl, cb, iv in _buff_cfg[hb]:
                             if sl == slot:
                                 on_s = "1" if cb.get() else "0"
-                                sec_s = iv.get() if iv.get() else str(BASE_BUFF_INTERVAL)
+                                sec_s = _buff_sec_str(iv, gk)
                                 break
                     elif gk in saved_buff_grid:
                         parts = saved_buff_grid[gk].split(":", 1)
                         if len(parts) == 2:
                             on_s, sec_s = parts[0], parts[1]
+                    saved_buff_grid[gk] = f"{on_s}:{sec_s}"
                     f.write(f"BUFF_{hb}_{slot}={on_s}:{sec_s}\n")
             f.write(f"HW_MODE={cur_hw}\nKM_IP={cur_km_ip}\nKM_PORT={cur_km_port}\nKM_MAC={cur_km_mac}\n")
             f.write(f"WIN_W={saved_win_w}\n")
@@ -1223,7 +1267,7 @@ def save_hidden_config(pwd_to_save):
                 on_sb = "1" if cb_sb.get() else "0"
                 hb_sb = hb_var.get() if hb_var.get() in BUFF_HOTBARS else "F1"
                 slot_sb = slot_var.get() if slot_var.get() in BUFF_SLOT_LABELS else "F5"
-                sec_sb = sec_var.get() if sec_var.get() else "1200"
+                sec_sb = _self_buff_sec_str(sec_var, idx)
                 saved_self_buff_grid[str(idx)] = f"{on_sb}:{hb_sb}:{slot_sb}:{sec_sb}"
                 f.write(f"SELF_BUFF_{idx}={on_sb}:{hb_sb}:{slot_sb}:{sec_sb}\n")
             if _self_buff_cfg:
@@ -2692,7 +2736,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 02:30"
+PATCH_UPDATED_AT = "2026-08-14 03:10"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -2940,6 +2984,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "✨ 버프·자버프 초 설정 저장 — 슬롯 체크/초 입력 바꿀 때마다 저장, 껐다 켜도 유지",
     "🖱️ 휠힐 — WDT4 펌웨어+옵션 ON일 때만 파티힐 M, 구펌은 K 그대로",
     "🏃 강제베르(end) — 옵션 체크 후 END키로 귀환 즉시 (쫄·격수 키보드 모두)",
     "⚡ 자기 버프 — 버프 칸에 헤이스트(자신) 추가, 슬롯 키 2번 연타 + 초 설정",
@@ -4802,13 +4847,19 @@ for hb in BUFF_HOTBARS:
             on_def, sec_def = _parse_buff_saved(hb, slot)
             cb = ctk.BooleanVar(value=on_def)
             iv = tk.StringVar(value=sec_def)
+            def _on_buff_slot(_hb=hb, _slot=slot):
+                try:
+                    save_hidden_config(loaded_pwd if loaded_pwd else "")
+                except Exception:
+                    pass
             ctk.CTkCheckBox(cell, text=slot, variable=cb, width=42, checkbox_width=14, checkbox_height=14,
                             font=("Malgun Gothic", 8, "bold"), text_color="#cdd6f4",
-                            fg_color="#800020", hover_color="#9e1a3a").pack()
+                            fg_color="#800020", hover_color="#9e1a3a", command=_on_buff_slot).pack()
             ent = ctk.CTkEntry(cell, textvariable=iv, width=34, height=18, font=("Malgun Gothic", 8),
                                text_color="#ffffff", fg_color="#1e1e2e", justify="center")
             ent.pack(pady=(0, 1))
             ctk.CTkLabel(cell, text="초", text_color="#6c7086", font=("Malgun Gothic", 7)).pack()
+            iv.trace_add("write", lambda *a: _schedule_buff_cfg_save())
             rows.append((slot, cb, iv))
     _buff_cfg[hb] = rows
 
@@ -4842,10 +4893,15 @@ for _sb_idx in range(1, SELF_BUFF_COUNT + 1):
     ctk.CTkCheckBox(_sb_row, text=str(_sb_idx), variable=_sb_cb, width=28, checkbox_width=14, checkbox_height=14,
                     font=("Malgun Gothic", 8, "bold"), text_color="#f9e2af",
                     fg_color="#800020", hover_color="#9e1a3a", command=_on_self_buff_row).pack(side="left", padx=(0, 2))
-    make_pick_btn(_sb_row, BUFF_HOTBARS, _sb_hb_var, width=44, height=20, font=("Malgun Gothic", 8)).pack(side="left", padx=1)
-    make_pick_btn(_sb_row, BUFF_SLOT_LABELS, _sb_slot_var, width=44, height=20, font=("Malgun Gothic", 8)).pack(side="left", padx=1)
+    _sb_hb_btn = make_pick_btn(_sb_row, BUFF_HOTBARS, _sb_hb_var, width=44, height=20, font=("Malgun Gothic", 8))
+    _sb_hb_btn.pack(side="left", padx=1)
+    _sb_hb_btn.set_pick_command(lambda *a: _schedule_buff_cfg_save())
+    _sb_slot_btn = make_pick_btn(_sb_row, BUFF_SLOT_LABELS, _sb_slot_var, width=44, height=20, font=("Malgun Gothic", 8))
+    _sb_slot_btn.pack(side="left", padx=1)
+    _sb_slot_btn.set_pick_command(lambda *a: _schedule_buff_cfg_save())
     ctk.CTkEntry(_sb_row, textvariable=_sb_sec_var, width=40, height=20, font=("Malgun Gothic", 8),
                  text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=2)
+    _sb_sec_var.trace_add("write", lambda *a: _schedule_buff_cfg_save())
     ctk.CTkLabel(_sb_row, text="초", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(side="left")
     _self_buff_cfg.append((_sb_cb, _sb_hb_var, _sb_slot_var, _sb_sec_var))
 
