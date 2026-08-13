@@ -64,8 +64,11 @@ SOOPLIVE_CLIENT_LAUNCHER = "sooplive client.exe"
 
 def _resolve_healer_launcher():
     path = os.path.join(APP_DIR, SOOPLIVE_CLIENT_LAUNCHER)
-    if os.path.isfile(path):
-        return path
+    try:
+        if os.path.isfile(path) and os.path.getsize(path) > 50000:
+            return path
+    except Exception:
+        pass
     exe = sys.executable
     if exe.lower().endswith("python.exe"):
         pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
@@ -3021,10 +3024,12 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:50"
+PATCH_UPDATED_AT = "2026-08-14 05:55"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
+_GH_RAW = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+_GH_API = "https://api.github.com/repos/blacknut0319-del/systemupdate/contents/"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
 _KMBOX_ZIP_URL = (
     "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
@@ -3053,23 +3058,78 @@ def _save_update_skip(ver):
     except Exception:
         pass
 
+def _github_download(rel_path, timeout=20):
+    """raw GitHub → API 순으로 다운로드 (CDN/캐시·차단 회피)."""
+    import json
+    import base64
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    headers = {
+        "User-Agent": "ddong-healer",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+    }
+    ts = int(time.time())
+    last_err = None
+    raw_url = _GH_RAW + rel_path.replace(" ", "%20") + "?t=%d" % ts
+    try:
+        req = urllib.request.Request(raw_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            data = r.read()
+        if data:
+            return data
+    except Exception as e:
+        last_err = e
+    api_path = rel_path.replace(" ", "%20")
+    try:
+        req = urllib.request.Request(
+            _GH_API + api_path,
+            headers={**headers, "Accept": "application/vnd.github.raw"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            data = r.read()
+        if data:
+            return data
+    except Exception as e:
+        last_err = e
+    try:
+        req = urllib.request.Request(_GH_API + api_path, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            j = json.loads(r.read().decode("utf-8", errors="replace"))
+        data = base64.b64decode(j.get("content") or b"")
+        if data:
+            return data
+    except Exception as e:
+        last_err = e
+    raise RuntimeError(last_err or "다운로드 실패")
+
+def _ensure_healer_launcher():
+    try:
+        import sync_launchers
+        sync_launchers.sync_launcher(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
+    except Exception:
+        pass
+    path = os.path.join(APP_DIR, SOOPLIVE_CLIENT_LAUNCHER)
+    try:
+        if os.path.isfile(path) and os.path.getsize(path) > 50000:
+            return
+    except Exception:
+        pass
+    try:
+        data = _github_download("sooplive client.exe")
+        if len(data) > 50000:
+            with open(path, "wb") as f:
+                f.write(data)
+    except Exception:
+        pass
+
 def fetch_remote_version():
     """GitHub version.txt 조회. 실패하면 None."""
     try:
-        import ssl as _ssl
-        ctx = _ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = _ssl.CERT_NONE
-        req = urllib.request.Request(
-            _VERSION_URL + "?t=%d" % int(time.time()),
-            headers={
-                "User-Agent": "ddong-healer",
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
-            return r.read().decode("utf-8", errors="replace").strip().splitlines()[0].strip()
+        data = _github_download("version.txt", timeout=8)
+        return data.decode("utf-8", errors="replace").strip().splitlines()[0].strip()
     except Exception:
         return None
 
@@ -3123,28 +3183,13 @@ def restart_with_update():
     if remote:
         _mark_update_attempt(remote)
     try:
-        import ssl as _ssl
-        ctx = _ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = _ssl.CERT_NONE
         dest = os.path.join(APP_DIR, "dloader.py")
-        req = urllib.request.Request(
-            _LOADER_URL + "?t=%d" % int(time.time()),
-            headers={
-                "User-Agent": "ddong-healer",
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
-            data = r.read()
+        data = _github_download("ddong_loader.py")
+        if not data or b"fetch_data_b64" not in data:
+            raise RuntimeError("다운로드한 로더가 올바르지 않습니다.")
         with open(dest, "wb") as f:
             f.write(data)
-        try:
-            import sync_launchers
-            sync_launchers.sync_launcher(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
-        except Exception:
-            pass
+        _ensure_healer_launcher()
         exe = _resolve_healer_launcher()
         env = os.environ.copy()
         env["DDONG_APP_DIR"] = APP_DIR

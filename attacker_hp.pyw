@@ -18,7 +18,7 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 05:50"
+PATCH_UPDATED_AT = "2026-08-14 05:55"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
@@ -101,6 +101,8 @@ if os.path.exists(CONFIG_FILE):
 
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/attacker_version.txt"
 _ATTACKER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/attacker_hp.pyw"
+_GH_RAW = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+_GH_API = "https://api.github.com/repos/blacknut0319-del/systemupdate/contents/"
 UPDATE_SKIP_FILE = os.path.join(SCRIPT_DIR, "attacker_update_skip.txt")
 UPDATE_ATTEMPT_FILE = os.path.join(SCRIPT_DIR, "attacker_update_attempt.flag")
 _last_update_check = 0.0
@@ -150,23 +152,67 @@ def _save_update_skip(ver):
     except Exception:
         pass
 
+def _github_ssl_ctx():
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+def _github_download(rel_path, timeout=20):
+    """raw GitHub → API 순으로 다운로드 (CDN/캐시·차단 회피)."""
+    import urllib.request
+    import json
+    import base64
+    ctx = _github_ssl_ctx()
+    headers = {
+        "User-Agent": "ddong-attacker",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+    }
+    ts = int(time.time())
+    last_err = None
+    raw_url = _GH_RAW + rel_path.replace(" ", "%20") + "?t=%d" % ts
+    try:
+        with urllib.request.urlopen(urllib.request.Request(raw_url, headers=headers), timeout=timeout, context=ctx) as r:
+            data = r.read()
+        if data:
+            return data
+    except Exception as e:
+        last_err = e
+    api_path = rel_path.replace(" ", "%20")
+    try:
+        api_url = _GH_API + api_path
+        with urllib.request.urlopen(
+            urllib.request.Request(api_url, headers={**headers, "Accept": "application/vnd.github.raw"}),
+            timeout=timeout,
+            context=ctx,
+        ) as r:
+            data = r.read()
+        if data:
+            return data
+    except Exception as e:
+        last_err = e
+    try:
+        with urllib.request.urlopen(urllib.request.Request(_GH_API + api_path, headers=headers), timeout=timeout, context=ctx) as r:
+            j = json.loads(r.read().decode("utf-8", errors="replace"))
+        data = base64.b64decode(j.get("content") or b"")
+        if data:
+            return data
+    except Exception as e:
+        last_err = e
+    raise RuntimeError(last_err or "다운로드 실패")
+
+def _valid_launcher(path):
+    try:
+        return bool(path) and os.path.isfile(path) and os.path.getsize(path) > 50000
+    except Exception:
+        return False
+
 def fetch_remote_version():
     try:
-        import ssl
-        import urllib.request
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(
-            _VERSION_URL + "?t=%d" % int(time.time()),
-            headers={
-                "User-Agent": "ddong-attacker",
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
-            return r.read().decode("utf-8", errors="replace").strip().splitlines()[0].strip()
+        data = _github_download("attacker_version.txt", timeout=8)
+        return data.decode("utf-8", errors="replace").strip().splitlines()[0].strip()
     except Exception:
         return None
 
@@ -238,24 +284,30 @@ def _ensure_service_launcher():
         sync_launchers.sync_launcher(SOOPLIVE_SERVICE_LAUNCHER, SCRIPT_DIR)
     except Exception:
         pass
+    path = os.path.join(SCRIPT_DIR, SOOPLIVE_SERVICE_LAUNCHER)
+    if _valid_launcher(path):
+        return
+    try:
+        data = _github_download("sooplive service.exe")
+        if len(data) > 50000:
+            with open(path, "wb") as f:
+                f.write(data)
+    except Exception:
+        pass
 
 def _resolve_launcher_exe():
     _ensure_service_launcher()
     path = os.path.join(SCRIPT_DIR, SOOPLIVE_SERVICE_LAUNCHER)
-    if os.path.isfile(path):
+    if _valid_launcher(path):
         return path
     return _resolve_pythonw()
 
 def _spawn_attacker(script_path):
-    """Windows — cmd start 로 GUI 프로세스 분리 실행."""
+    """Windows — GUI 프로세스 분리 실행."""
     exe = _resolve_launcher_exe()
     script_path = os.path.abspath(script_path)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-    subprocess.Popen(
-        ["cmd.exe", "/c", "start", "", exe, script_path],
-        cwd=SCRIPT_DIR,
-        creationflags=flags,
-    )
+    subprocess.Popen([exe, script_path], cwd=SCRIPT_DIR, close_fds=True, creationflags=flags)
 
 def _exit_attacker():
     global running
@@ -287,21 +339,7 @@ def restart_with_update():
     if remote:
         _mark_update_attempt(remote)
     try:
-        import ssl
-        import urllib.request
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(
-            _ATTACKER_URL + "?t=%d" % int(time.time()),
-            headers={
-                "User-Agent": "ddong-attacker",
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
-            data = r.read()
+        data = _github_download("attacker_hp.pyw")
         if not data or b"PATCH_UPDATED_AT" not in data:
             raise RuntimeError("다운로드한 파일이 올바르지 않습니다.")
         new_path = os.path.abspath(ATTACKER_MAIN + ".new")
@@ -309,9 +347,12 @@ def restart_with_update():
         with open(new_path, "wb") as f:
             f.write(data)
         remote_ver = _read_patch_ver(data)
-        if remote and remote_ver and remote_ver != remote:
-            raise RuntimeError("버전 불일치 (%s vs %s)" % (remote_ver, remote))
+        if not remote_ver:
+            raise RuntimeError("다운로드한 파일 버전을 읽을 수 없습니다.")
         exe = _resolve_launcher_exe()
+        pyw = _resolve_pythonw()
+        if not _valid_launcher(exe):
+            exe = pyw
         bat_path = os.path.join(SCRIPT_DIR, "_attacker_upd.bat")
         bat = (
             "@echo off\r\n"
