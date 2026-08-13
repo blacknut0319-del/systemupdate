@@ -1931,6 +1931,7 @@ def open_guide_panel():
 
     add_t("💚 힐 · 휠힐 설정", "#94e2d5")
     add_w("게임 단축창: 휠(마우스 가운데) 슬롯에 일반힐(F9) 고정")
+    add_w("WDT4 펌이면 Insert 연결 시 휠힐 자동 ON (별도 펌업 불필요)")
     add_w("최신 펌웨어: 일반 파티힐·격수힐 → 가운데 휠클릭으로 대상 지정 (항상 켜짐)")
     add_w("상위힐(F7)은 휠이 아니라 좌클릭으로 대상 지정 (더 정확함)")
     add_w("버프·해독·줍기는 항상 좌클릭")
@@ -1938,7 +1939,7 @@ def open_guide_panel():
 
     add_t("🛡️ 옵션 설명")
     add_d("버프", "▶ 버프 펼침 → 단축창(F1~F3) · 슬롯(F5~F12) 체크·초 설정")
-    add_d("자힐", "평소 힐만 · 피 50% 이하면 물약+힐")
+    add_d("자힐", "평소 힐만 · 피 50% 이하면 물약+힐 · 상위힐% 이하면 F7")
     add_d("상위힐", "설정% 이하일 때 강한 힐 자동 (좌클릭 대상)")
     add_d("독 해독", "본인 독 → F2단축창 엔줄복용(F9) 자동")
     add_d("격수 해독", "격수 독 → F2단축창 큐어포이즌(F10) 자동")
@@ -1947,18 +1948,26 @@ def open_guide_panel():
     add_d("격수 HP", "격수 모니터 연결 시 체력% 표시")
     add_sep()
 
+    add_t("📡 쫄화면 송출 (격수 ↔ 쫄)", "#89b4fa")
+    add_w("쫄 PC 제어판 → [📡 송출 영역 드래그]로 게임 화면만 지정 (미설정이면 주 모니터 전체)")
+    add_w("격수 PC: IP 맞춘 뒤 [📡 전송 ON] → [📺 쫄화면] 창 열기")
+    add_w("쫄화면에서 Alt 누른 채 마우스 이동·클릭 → 쫄 PC 마우스 원격 조종")
+    add_w("[📡 전송 OFF] 또는 격수 종료 시 송출 정지")
+    add_sep()
+
     add_t("🚨 주의사항")
     add_w("파티창 UI를 켜 두지 않아도 파티힐 됩니다 (제어판 HP바 ROI만 맞으면 됨)")
     add_w("노파티: 배경 오탐 방지용 아이콘 ROI 설정 권장")
     add_w("채팅 중: 힐·귀환은 계속, 버프·줍기·해독만 잠깐 쉼")
     add_sep()
 
-    add_t("🕹️ 뚱USB (아두이노)", "#f9e2af")
+    add_t("🕹️ 뚱USB", "#f9e2af")
     add_w("상단 [장치] → 뚱USB 선택")
     add_w("USB 꽂으면 COM 포트 자동 표시 (대기 중에도 확인 가능)")
     add_w("Insert 로 시작 · 정지할 때도 Insert")
-    add_w("[펌업] — 정지 상태에서만, 최신 펌웨어+워치독 설치")
-    add_w("[확인] — 워치독 펌인지 조회 (휠힐은 최신 펌 필요)")
+    add_w("[펌업] — 옛 펌일 때만 (이미 WDT4면 불필요)")
+    add_w("Insert 연결 시 펌 자동 확인 → WDT4면 휠힐 바로 사용")
+    add_w("[확인] — 펌 버전 수동 조회")
     add_sep()
 
     add_t("🕹️ 뚱박스 — 처음 세팅", "#cba6f7")
@@ -3005,26 +3014,30 @@ def fix_mode_keys(keys, delay=0.5):
 # 자힐: 확률% 제거 — 평소 힐만, 위험(<=50%)일 때만 물약+힐
 SELF_POTION_COMBO_PCT = 50.0
 
-def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
+def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     """쫄법 자힐.
-    - 평소: 힐(B=F9)만
-    - 피 <= 50%: 물약(E=F5)+힐(B) 같이 (위험할 때만 물약)
-    - 마나부족: 물약만
-    반드시 F1 단축창으로 전환 후 키 입력 — F2/F3 버프 직후 F1 복귀가 씹히면
-    F3의 F9가 눌리는 사고 방지."""
+    - 평소: B → 펌웨어에서 F9 연타 2번 / 상위힐은 7 연타 2번
+    - 피 <= 50%: 물약(E)+힐 같이 (위험할 때만 물약)
+    - 마나부족: 물약만"""
     ed = human_delay(end_delay * 0.88, end_delay * 1.12)
-    # F1 전환 간격을 조금 여유 있게 (게임 핫바 전환 인식 시간)
     gap_f1 = (0.10, 0.20)
+    gap_heal2 = (0.07, 0.13)  # 펌웨어 case 'B' 와 동일 간격
     if mp_low:
         execute_keys(['1', 'E'], ed, key_gap=gap_f1)
         return "물약(마나)"
     if self_hp is not None and self_hp <= SELF_POTION_COMBO_PCT:
+        if use_strong:
+            execute_keys(['1', 'E', '7', '7'], ed, key_gap=gap_heal2)
+            return "물약+상위힐"
         execute_keys(['1', 'E', 'B'], ed, key_gap=(0.09, 0.18))
         return "물약+힐"
+    if use_strong:
+        execute_keys(['1', '7', '7'], ed, key_gap=gap_heal2)
+        return "상위힐"
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:55"
+PATCH_UPDATED_AT = "2026-08-14 07:37"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3315,6 +3328,11 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "📡 쫄화면 송출 — 쫄 PC 게임 화면을 격수 PC로 실시간 전송",
+    "📐 송출 영역 — 제어판에서 드래그로 게임창만 잘라서 보냄",
+    "🖱️ 쫄화면 조종 — 격수 PC Alt+마우스로 쫄 PC 원격 클릭·휠",
+    "🔌 WDT4 — Insert 연결 시 펌 자동 확인, 휠힐 별도 펌업 없이 사용",
+    "🏃 강제베르 — End/격수 명령 시 위기베르처럼 자동 정지",
     "🖱️ Home 고정 — 자동공격 끄고 제자리 고정(Shift만), 힐하기 편하게 개선",
     "🖱️ Home 따라가기 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 고정",
     "💚 휠힐 — 최신 펌웨어에서 일반 힐은 가운데 휠클릭 (항상 켜짐)",
@@ -4259,10 +4277,19 @@ def _fw_is_wdt4(ver=None):
     v = (ver if ver is not None else _fw_version_str) or ""
     return "DDONG-WDT4" in v.upper().replace(" ", "")
 
-def refresh_fw_version(ser_obj=None, log=False):
+def refresh_fw_version(ser_obj=None, log=False, retries=4):
     """연결·펌확인·펌업 후 펌 버전 캐시 갱신."""
     global _fw_version_str, _fw_wdt4
-    ver = probe_arduino_fw(ser_obj)
+    s = ser_obj if ser_obj is not None else ser
+    ver = ""
+    for i in range(max(1, retries)):
+        if i > 0:
+            time.sleep(0.4)
+        if not s or not getattr(s, "is_open", False):
+            break
+        ver = probe_arduino_fw(s, timeout=2.5 if i == 0 else 1.8)
+        if ver and "DDONG" in ver.upper():
+            break
     _fw_version_str = ver
     _fw_wdt4 = _fw_is_wdt4(ver)
     if root:
@@ -4273,6 +4300,11 @@ def refresh_fw_version(ser_obj=None, log=False):
     if log and ver:
         extra = " (휠힐 가능)" if _fw_wdt4 else ""
         log_event(f"🔌 펌 {ver}{extra}")
+        if _fw_wdt4:
+            try:
+                root.after(0, lambda: lbl_ard.configure(text="● WDT4 OK", text_color="#3fb950"))
+            except Exception:
+                pass
     return ver
 
 def _apply_wheel_heal_ui():
@@ -4286,7 +4318,7 @@ def _apply_wheel_heal_ui():
         tw.lbl.configure(text="휠힐(항상ON)", text_color="#a6e3a1")
     else:
         cw.set(False)
-        tw.lbl.configure(text="휠힐(펌업필요)", text_color="#6c7086")
+        tw.lbl.configure(text="휠힐(WDT4필요)", text_color="#6c7086")
 
 def wheel_heal_enabled():
     """최신 펌웨어(WDT4)면 일반 힐은 가운데 휠클릭. 상위힐은 별도(좌클릭)."""
@@ -4614,7 +4646,7 @@ def connect_hardware():
                         except Exception:
                             pass
                 else:
-                    Thread(target=lambda s=ser: refresh_fw_version(s, log=False), daemon=True).start()
+                    Thread(target=lambda s=ser: refresh_fw_version(s, log=True), daemon=True).start()
             return connected
         except Exception:
             ser = None
@@ -4804,7 +4836,8 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
-                        tag = do_self_heal(self_hp, end_delay=1.0, mp_low=_mp_low)
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < strong_heal_pct
+                        tag = do_self_heal(self_hp, end_delay=1.0, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     tag = do_self_heal(None, end_delay=1.0, mp_low=_mp_low)
@@ -4844,7 +4877,8 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
-                        tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low)
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < strong_heal_pct
+                        tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
                     tag = do_self_heal(None, end_delay=0.8, mp_low=_mp_low)
@@ -4888,7 +4922,8 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
-                        tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low)
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < strong_heal_pct
+                        tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; action_taken = True
                         log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 20) and (now - last_self_heal >= 0.2):
@@ -5215,7 +5250,7 @@ chk_wheel_heal = ctk.BooleanVar(value=saved_chk_wheel_heal in ("1", "true", "Tru
 def _on_wheel_heal_sw():
     if not _fw_wdt4:
         chk_wheel_heal.set(False)
-        log_event("⚠️ 휠힐 — 최신 펌웨어 필요 (펌업 후 [확인])")
+        log_event("⚠️ 휠힐 — WDT4 펌 필요 (Insert 연결 시 자동 확인)")
         return
     chk_wheel_heal.set(True)
     log_event("🖱️ 휠힐 — 최신 펌웨어에서 항상 켜짐 (일반힐=휠, 상위힐=좌클릭)")
