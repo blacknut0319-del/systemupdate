@@ -420,8 +420,13 @@ buff_next_due = {}
 last_buff_global = 0
 saved_buff_on = "0"
 saved_buff_grid = {}
-chk_buff_on = None
-buff_hotbar_var = None
+saved_self_buff_on = "0"
+saved_self_buff_hotbar = "F1"
+saved_self_buff_slot = "F5"
+saved_self_buff_sec = "1200"
+SELF_BUFF_COUNT = 3
+saved_self_buff_grid = {}
+_self_buff_cfg = []
 
 
 def buff_grid_key(hb, slot):
@@ -442,6 +447,44 @@ def cast_buff(hb_label, slot_label):
     else:
         # 슬롯→F1 사이 간격을 조금 여유 있게 (핫바 전환 씹힘 완화)
         execute_keys([hb, sk, "1"], 0.55, key_gap=(0.08, 0.18))
+
+
+def cast_self_buff(hb_label, slot_label):
+    """자기 대상 버프(헤이스트 등) — 슬롯 키 두 번 연타. 자힐처럼 F1 복귀."""
+    hb = hb_label.replace("F", "")
+    sk = BUFF_SLOT_KEYS[slot_label]
+    tap_gap = (0.09, 0.18)
+    if hb == "1":
+        execute_keys(["1", sk, sk], 0.55, key_gap=tap_gap)
+    else:
+        execute_keys([hb, sk, sk, "1"], 0.55, key_gap=tap_gap)
+
+
+def self_buff_time_key(idx):
+    return f"_self_buff_{idx}"
+
+
+def _parse_self_buff_saved(idx):
+    raw = saved_self_buff_grid.get(str(idx))
+    if not raw and idx == 1:
+        on = saved_self_buff_on in ("1", "true", "True")
+        return on, saved_self_buff_hotbar, saved_self_buff_slot, str(saved_self_buff_sec or "1200")
+    if not raw:
+        return False, "F1", "F5", "1200"
+    parts = raw.split(":")
+    on = parts[0] in ("1", "true", "True") if parts else False
+    hb = parts[1] if len(parts) > 1 and parts[1] in BUFF_HOTBARS else "F1"
+    slot = parts[2] if len(parts) > 2 and parts[2] in BUFF_SLOT_LABELS else "F5"
+    sec = parts[3] if len(parts) > 3 else "1200"
+    return on, hb, slot, sec
+
+
+def migrate_legacy_self_buff():
+    global saved_self_buff_grid
+    if saved_self_buff_grid:
+        return
+    if saved_self_buff_on in ("1", "true", "True") or saved_self_buff_hotbar != "F1" or saved_self_buff_slot != "F5":
+        saved_self_buff_grid["1"] = f"{saved_self_buff_on}:{saved_self_buff_hotbar}:{saved_self_buff_slot}:{saved_self_buff_sec}"
 
 
 def mna_potion_keys():
@@ -489,7 +532,7 @@ def migrate_legacy_buffs():
         try:
             sec = int(iv)
         except Exception:
-            sec = 300
+            sec = BASE_BUFF_INTERVAL
         if sec > 0:
             saved_buff_grid[buff_grid_key(hb, slot)] = f"0:{sec}"
 
@@ -553,6 +596,7 @@ saved_chk_danger = "1"
 saved_chk_strong_heal = "1"
 saved_chk_attacker = "1"
 saved_chk_mna = "0"
+saved_chk_end_bert = "0"
 
 LOG_FILE = os.path.join(APP_DIR, "ddong.log")
 last_log = ""
@@ -731,7 +775,7 @@ class KmBox:
 
 
 running = False
-BASE_BUFF_INTERVAL = 300
+BASE_BUFF_INTERVAL = 1200
 BUFF_SEQ_GAP = 5.0
 last_loot = 0
 last_buff_seq = 0
@@ -777,7 +821,7 @@ saved_party_flags = "0,1,0,0,0,0,0,0"
 party_mode_flags = [1, 1, 1, 1, 1, 1, 1, 1]
 saved_party_mode_flags = "1,1,1,1,1,1,1,1"
 
-saved_v_bl = "1800"
+saved_v_bl = "1200"
 saved_v_sh = "1200"
 saved_v_blu = "1200"
 saved_v_f10 = "1200"
@@ -798,6 +842,7 @@ chk_poison = None
 chk_target_poison = None
 chk_party_poison = None
 chk_loot = None
+chk_end_bert = None
 lbl_status = None
 lbl_buff = None
 lbl_saved_coord = None
@@ -894,6 +939,7 @@ def load_hidden_config():
     global SELF_POISON_COORD, SELF_POISON_RGB, TARGET_POISON_COORD, TARGET_POISON_RGB, DANGER_HP_COORD, DANGER_HP_RGB
     global saved_v_bl, saved_v_sh, saved_v_blu, saved_v_f10, saved_v_f11
     global saved_buff_on, saved_buff_grid
+    global saved_self_buff_on, saved_self_buff_hotbar, saved_self_buff_slot, saved_self_buff_sec, saved_self_buff_grid
     global BUFF_BAR_X1, BUFF_BAR_Y1, BUFF_BAR_X2, BUFF_BAR_Y2
     global saved_expire_start, saved_expire_days
     global saved_party_flags, saved_party_mode_flags
@@ -901,7 +947,7 @@ def load_hidden_config():
     global MNA_ROI, MNA_100_REF, mna_threshold, MNA_HOTBAR, MNA_SLOT
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
-    global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna
+    global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna, saved_chk_end_bert
     global strong_heal_pct, saved_win_w, saved_win_h
     
     text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11",
@@ -911,11 +957,17 @@ def load_hidden_config():
     saved_expire_days = "0"
     saved_buff_on = "0"
     saved_buff_grid = {}
+    saved_self_buff_on = "0"
+    saved_self_buff_hotbar = "F1"
+    saved_self_buff_slot = "F5"
+    saved_self_buff_sec = "1200"
+    saved_self_buff_grid = {}
     saved_chk_self_heal = "1"
     saved_chk_danger = "1"
     saved_chk_strong_heal = "1"
     saved_chk_attacker = "1"
     saved_chk_mna = "0"
+    saved_chk_end_bert = "0"
     
     if os.path.exists(AUTH_FILE):
         ctypes.windll.kernel32.SetFileAttributesW(AUTH_FILE, 2)
@@ -1003,6 +1055,18 @@ def load_hidden_config():
                 if key == "CHK_STRONG_HEAL": saved_chk_strong_heal = val_str; continue
                 if key == "CHK_ATTACKER": saved_chk_attacker = val_str; continue
                 if key == "CHK_MNA": saved_chk_mna = val_str; continue
+                if key == "CHK_END_BERT": saved_chk_end_bert = val_str; continue
+                if key == "SELF_BUFF_ON": saved_self_buff_on = val_str; continue
+                if key == "SELF_BUFF_HOTBAR":
+                    saved_self_buff_hotbar = val_str if val_str in BUFF_HOTBARS else "F1"; continue
+                if key == "SELF_BUFF_SLOT":
+                    saved_self_buff_slot = val_str if val_str in BUFF_SLOT_LABELS else "F5"; continue
+                if key == "SELF_BUFF_SEC": saved_self_buff_sec = val_str; continue
+                if key.startswith("SELF_BUFF_"):
+                    sb_idx = key[10:]
+                    if sb_idx.isdigit():
+                        saved_self_buff_grid[sb_idx] = val_str
+                        continue
                 for pi in range(8):
                     if key == f"PARTY_ROI_P{pi+1}_X1": party_roi_vals[pi][0] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
                     if key == f"PARTY_ROI_P{pi+1}_Y1": party_roi_vals[pi][1] = int(val_str) if val_str.lstrip('-').isdigit() else 0; break
@@ -1042,6 +1106,7 @@ def load_hidden_config():
         globals()["saved_buff_on"] = saved_buff_on
         globals()["saved_buff_grid"] = saved_buff_grid
     migrate_legacy_buffs()
+    migrate_legacy_self_buff()
     return saved_pwd
 
 def save_hidden_config(pwd_to_save):
@@ -1137,12 +1202,32 @@ def save_hidden_config(pwd_to_save):
             cur_strong = _sw01(chk_strong_heal, saved_chk_strong_heal)
             cur_atk = _sw01(chk_attacker_sw if 'chk_attacker_sw' in globals() else None, saved_chk_attacker)
             cur_mna = _sw01(chk_mna, saved_chk_mna)
+            cur_end_bert = _sw01(chk_end_bert if 'chk_end_bert' in globals() else None, saved_chk_end_bert)
             globals()['saved_chk_self_heal'] = cur_self
             globals()['saved_chk_danger'] = cur_danger
             globals()['saved_chk_strong_heal'] = cur_strong
             globals()['saved_chk_attacker'] = cur_atk
             globals()['saved_chk_mna'] = cur_mna
-            f.write(f"CHK_SELF_HEAL={cur_self}\nCHK_DANGER={cur_danger}\nCHK_STRONG_HEAL={cur_strong}\nCHK_ATTACKER={cur_atk}\nCHK_MNA={cur_mna}\n")
+            globals()['saved_chk_end_bert'] = cur_end_bert
+            f.write(f"CHK_SELF_HEAL={cur_self}\nCHK_DANGER={cur_danger}\nCHK_STRONG_HEAL={cur_strong}\nCHK_ATTACKER={cur_atk}\nCHK_MNA={cur_mna}\nCHK_END_BERT={cur_end_bert}\n")
+            for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
+                on_sb = "1" if cb_sb.get() else "0"
+                hb_sb = hb_var.get() if hb_var.get() in BUFF_HOTBARS else "F1"
+                slot_sb = slot_var.get() if slot_var.get() in BUFF_SLOT_LABELS else "F5"
+                sec_sb = sec_var.get() if sec_var.get() else "1200"
+                saved_self_buff_grid[str(idx)] = f"{on_sb}:{hb_sb}:{slot_sb}:{sec_sb}"
+                f.write(f"SELF_BUFF_{idx}={on_sb}:{hb_sb}:{slot_sb}:{sec_sb}\n")
+            if _self_buff_cfg:
+                cb1, hb1, slot1, sec1 = _self_buff_cfg[0]
+                cur_self_buff = "1" if cb1.get() else "0"
+                cur_sb_hb = hb1.get()
+                cur_sb_slot = slot1.get()
+                cur_sb_sec = sec1.get()
+                globals()['saved_self_buff_on'] = cur_self_buff
+                globals()['saved_self_buff_hotbar'] = cur_sb_hb
+                globals()['saved_self_buff_slot'] = cur_sb_slot
+                globals()['saved_self_buff_sec'] = cur_sb_sec
+                f.write(f"SELF_BUFF_ON={cur_self_buff}\nSELF_BUFF_HOTBAR={cur_sb_hb}\nSELF_BUFF_SLOT={cur_sb_slot}\nSELF_BUFF_SEC={cur_sb_sec}\n")
             for pi in range(8):
                 r = PARTY_ROIS[pi]
                 f.write(f"PARTY_ROI_P{pi+1}_X1={r[0]}\nPARTY_ROI_P{pi+1}_Y1={r[1]}\nPARTY_ROI_P{pi+1}_X2={r[2]}\nPARTY_ROI_P{pi+1}_Y2={r[3]}\n")
@@ -2598,7 +2683,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 00:35"
+PATCH_UPDATED_AT = "2026-08-14 02:20"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -2846,9 +2931,12 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🏃 END 베르 — 옵션 체크 후 END키로 귀환 즉시 (쫄·격수 키보드 모두)",
+    "⚡ 자기 버프 — 버프 칸에 헤이스트(자신) 추가, 슬롯 키 2번 연타 + 초 설정",
     "🔄 업데이트 반복 알림 수정 — 예 눌러도 버전 안 바뀌면 뚱시작.bat 안내 후 알림 숨김",
     "📐 접이식 접으면 창 높이 자동 축소 — 저장된 높이(WIN_H) 안 씀, 너비만 저장",
-    "🔑 PC ID — MachineGuid 기준 + 예전 MAC ID 시트 호환 / 로그인창에 PC ID 표시",
+    "🔌 펌웨어 WDT4 — 휠클릭·우클릭·Alt/Ctrl·Delete/End/PgDn / 자기버프 3칸",
+    "🔌 펌업 — 리셋버튼 없어도 DTR+1200 자동진입, WDT4 보드는 수동리셋 안내 안 뜸",
     "📐 접이식(옵션/버프/힐) 접으면 창 높이 자동으로 줄어들게 복구",
     "🔄 격수도 상단 [업데이트] — 뚱힐러처럼 확인 후 껐다 켜서 최신 적용",
     "📐 창 크기 — 오른쪽 아래 ◢ 드래그로 뚱힐러·격수 창 조절 (크기 저장)",
@@ -2940,6 +3028,36 @@ def open_patch_notes_panel():
 
     ctk.CTkButton(patch, text="닫기", command=patch.destroy, fg_color="#800020", hover_color="#9e1a3a",
                   text_color="#ffffff", font=("Malgun Gothic", 12, "bold")).pack(pady=10)
+
+def do_manual_bert():
+    """END 키 / 격수 UDP — 귀환(F8 꾹) 즉시. 아두이노·뚱박스 공통 ser.write(b'C')."""
+    global ser
+    if not chk_end_bert or not chk_end_bert.get():
+        return
+    if not ser or not getattr(ser, "is_open", False):
+        try:
+            log_event("🏃 END 베르 실패(장치 미연결)")
+        except Exception:
+            pass
+        return
+    try:
+        focus_lineage_window()
+        ser.write(b"C")
+        log_event("🏃 END 베르")
+    except Exception:
+        pass
+
+_end_bert_debounce = 0.0
+
+def on_end_bert(e=None):
+    global _end_bert_debounce
+    now = time.time()
+    if now - _end_bert_debounce < 0.5:
+        return
+    _end_bert_debounce = now
+    if not chk_end_bert or not chk_end_bert.get():
+        return
+    Thread(target=do_manual_bert, daemon=True).start()
 
 def stop_everything(reason="💤 대기 중"):
     global running, ser, root, chk_follow, chk_fix, lbl_status
@@ -3129,6 +3247,9 @@ def _start_worker():
             for slot, cb, iv in _buff_cfg.get(hb, []):
                 if cb.get():
                     schedule_buff(buff_time_key(hb, slot), get_safe_int(iv, BASE_BUFF_INTERVAL), soon=True)
+        for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
+            if cb_sb.get():
+                schedule_buff(self_buff_time_key(idx), get_safe_int(sec_var, int(saved_self_buff_sec or 1200)), soon=True)
         last_self_heal = now
         last_party_heal = now
         last_noparty_heal = now
@@ -3862,12 +3983,12 @@ def on_fw_flash_click():
                     def _ask():
                         try:
                             box["ok"] = bool(messagebox.askokcancel(
-                                "이번 1회만 수동 (이후 자동)",
-                                "지금 보드는 예전 워치독이라 자동리셋이 막혀 있습니다.\n"
-                                "이번만 최신(WDT3)을 수동으로 올리면,\n"
-                                "그 다음부터는 처음처럼 버튼 없이 자동 펌업됩니다.\n\n"
-                                "【리셋 버튼】 빠르게 두 번 → 바로 【확인】\n"
-                                "(15초 안에 업로드, 최신 hex 강제받음)",
+                                "옛 펌웨어 — 이번 1회만",
+                                "지금 보드는 워치독 펌이 아닙니다.\n"
+                                "이번만 최신(WDT4)을 올리면 이후엔 버튼 없이 자동 펌업됩니다.\n\n"
+                                "리셋 버튼이 있으면: 빠르게 두 번 → 【확인】\n"
+                                "없으면: USB 케이블 뽑았다 꽂기 → 【확인】\n"
+                                "(20초 안에 업로드)",
                             ))
                         except Exception:
                             box["ok"] = True
@@ -4033,7 +4154,7 @@ def expert_logic():
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold, mna_threshold, strong_heal_pct, chk_strong_heal
     global attacker_hp_udp, attacker_poisoned, attacker_petrified
     global MNA_ROI, MNA_100_REF, last_mna_potion, chk_mna, chk_self_heal_sw, chk_danger_sw, chk_attacker_sw
-    global buff_next_due, last_buff_global, _buff_cfg
+    global buff_next_due, last_buff_global, _buff_cfg, _self_buff_cfg
     
     load_buff_templates()
 
@@ -4152,23 +4273,39 @@ def expert_logic():
             # 버프 (F1/F2/F3 × F5~F12 그리드) — 타이핑 중엔 대기(생명과 무관)
             if not _typing_now and chk_buff_on and chk_buff_on.get() and (now - last_buff_global >= 1.0) and (now - last_buff_seq >= BUFF_SEQ_GAP):
                 buff_cast = False
-                for hb in BUFF_HOTBARS:
-                    for slot, cb, iv in _buff_cfg.get(hb, []):
-                        if not cb.get():
-                            continue
-                        tk = buff_time_key(hb, slot)
-                        iv_sec = get_safe_int(iv, BASE_BUFF_INTERVAL)
-                        if now >= buff_next_due.get(tk, 0):
-                            cast_buff(hb, slot)
-                            schedule_buff(tk, iv_sec, soon=False)
-                            last_buff_seq = now
-                            last_buff_global = now
-                            tag = f"{hb}-{slot}" if hb != "F1" else slot
-                            log_event(f"✨ 버프 {tag}")
-                            buff_cast = True
-                            break
-                    if buff_cast:
+                for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
+                    if not cb_sb.get():
+                        continue
+                    tk_sb = self_buff_time_key(idx)
+                    iv_sb = get_safe_int(sec_var, int(saved_self_buff_sec or 1200))
+                    if now >= buff_next_due.get(tk_sb, 0):
+                        hb_sb = hb_var.get()
+                        slot_sb = slot_var.get()
+                        cast_self_buff(hb_sb, slot_sb)
+                        schedule_buff(tk_sb, iv_sb, soon=False)
+                        last_buff_seq = now
+                        last_buff_global = now
+                        log_event(f"⚡ 자기버프{idx} {hb_sb}-{slot_sb}")
+                        buff_cast = True
                         break
+                if not buff_cast:
+                    for hb in BUFF_HOTBARS:
+                        for slot, cb, iv in _buff_cfg.get(hb, []):
+                            if not cb.get():
+                                continue
+                            tk = buff_time_key(hb, slot)
+                            iv_sec = get_safe_int(iv, BASE_BUFF_INTERVAL)
+                            if now >= buff_next_due.get(tk, 0):
+                                cast_buff(hb, slot)
+                                schedule_buff(tk, iv_sec, soon=False)
+                                last_buff_seq = now
+                                last_buff_global = now
+                                tag = f"{hb}-{slot}" if hb != "F1" else slot
+                                log_event(f"✨ 버프 {tag}")
+                                buff_cast = True
+                                break
+                        if buff_cast:
+                            break
                 if buff_cast:
                     continue
 
@@ -4535,6 +4672,14 @@ RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: lo
 RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=1, column=1, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=lambda: log_event(f"💚 파티해독 {'ON' if chk_party_poison.get() else 'OFF'}")).grid(row=2, column=0, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=2, column=1, padx=3, pady=2, sticky="w")
+chk_end_bert = ctk.BooleanVar(value=saved_chk_end_bert in ("1", "true", "True"))
+def _on_end_bert_sw():
+    log_event(f"🏃 END베르 {'ON' if chk_end_bert.get() else 'OFF'}")
+    try:
+        save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception:
+        pass
+RoundedToggle(frame_opt, "END 베르", "#f9e2af", var=chk_end_bert, cmd=_on_end_bert_sw).grid(row=3, column=0, padx=3, pady=2, sticky="w")
 
 # ─── 접이식: 버프 그리드 ───
 coll_buff = Collapsible(root, "버프", start_open=False)
@@ -4598,6 +4743,32 @@ def _show_buff_page(choice=None):
 
 buff_hotbar_combo.set_pick_command(_show_buff_page)
 _show_buff_page("F1")
+
+ctk.CTkLabel(buff_body, text="─ 자기 버프 (헤이스트 등, 키 2번) ─", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(pady=(4, 2))
+_self_buff_cfg = []
+for _sb_idx in range(1, SELF_BUFF_COUNT + 1):
+    _sb_on, _sb_hb, _sb_slot, _sb_sec = _parse_self_buff_saved(_sb_idx)
+    _sb_row = ctk.CTkFrame(buff_body, fg_color="transparent")
+    _sb_row.pack(fill="x", padx=4, pady=1)
+    _sb_cb = ctk.BooleanVar(value=_sb_on)
+    _sb_hb_var = tk.StringVar(value=_sb_hb if _sb_hb in BUFF_HOTBARS else "F1")
+    _sb_slot_var = tk.StringVar(value=_sb_slot if _sb_slot in BUFF_SLOT_LABELS else "F5")
+    _sb_sec_var = tk.StringVar(value=str(_sb_sec or "1200"))
+    def _on_self_buff_row(_i=_sb_idx, _c=_sb_cb):
+        log_event(f"⚡ 자기버프{_i} {'ON' if _c.get() else 'OFF'}")
+        try:
+            save_hidden_config(loaded_pwd if loaded_pwd else "")
+        except Exception:
+            pass
+    ctk.CTkCheckBox(_sb_row, text=str(_sb_idx), variable=_sb_cb, width=28, checkbox_width=14, checkbox_height=14,
+                    font=("Malgun Gothic", 8, "bold"), text_color="#f9e2af",
+                    fg_color="#800020", hover_color="#9e1a3a", command=_on_self_buff_row).pack(side="left", padx=(0, 2))
+    make_pick_btn(_sb_row, BUFF_HOTBARS, _sb_hb_var, width=44, height=20, font=("Malgun Gothic", 8)).pack(side="left", padx=1)
+    make_pick_btn(_sb_row, BUFF_SLOT_LABELS, _sb_slot_var, width=44, height=20, font=("Malgun Gothic", 8)).pack(side="left", padx=1)
+    ctk.CTkEntry(_sb_row, textvariable=_sb_sec_var, width=40, height=20, font=("Malgun Gothic", 8),
+                 text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=2)
+    ctk.CTkLabel(_sb_row, text="초", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(side="left")
+    _self_buff_cfg.append((_sb_cb, _sb_hb_var, _sb_slot_var, _sb_sec_var))
 
 # ─── 접이식: 힐·물약 ───
 coll_heal = Collapsible(root, "힐·물약", start_open=False)
@@ -4856,6 +5027,8 @@ def udp_listener():
                 elif data in (b'1',b'2',b'3',b'4',b'5',b'6',b'7',b'8'):
                     n = int(data.decode())
                     Thread(target=lambda s=n: udp_macro_slot(s), daemon=True).start()
+                elif data == b'C':
+                    Thread(target=do_manual_bert, daemon=True).start()
             elif len(data) == 4:
                 attacker_hp_udp = struct.unpack('f', data)[0]; last_udp_time = time.time()
             elif len(data) == 5:
@@ -4894,6 +5067,7 @@ keyboard.on_release_key('space', on_space_save)
 keyboard.on_release_key('home', on_caps_lock)
 keyboard.on_release_key('page up', on_tab_toggle)
 keyboard.on_release_key('insert', on_main_toggle)
+keyboard.on_release_key('end', on_end_bert)
 keyboard.on_release_key('f4', on_f4_toggle)
 
 timer_thread_active = True

@@ -276,6 +276,81 @@ def _enter_bootloader_serial_cmd(port, flog=None):
     flog and flog.log("touch: serial '!' OK")
 
 
+def _probe_firmware(port, flog=None):
+    """펌업 전 'V' 조회 — DDONG-WDT3/4면 1200 자동리셋 가능."""
+    s = None
+    try:
+        s = serial.Serial(port, 9600, timeout=0.2, write_timeout=1.0)
+        try:
+            s.reset_input_buffer()
+        except Exception:
+            pass
+        time.sleep(0.12)
+        s.write(b"V")
+        try:
+            s.flush()
+        except Exception:
+            pass
+        buf = b""
+        t0 = time.time()
+        while time.time() - t0 < 1.6:
+            n = getattr(s, "in_waiting", 0) or 0
+            if n:
+                buf += s.read(n)
+                if b"DDONG" in buf or b"\n" in buf:
+                    break
+            time.sleep(0.05)
+        ver = buf.decode("ascii", errors="ignore").strip()
+        flog and flog.log(f"probe V: {ver!r}")
+        return ver
+    except Exception as e:
+        flog and flog.log(f"probe V 실패: {e!r}")
+        return ""
+    finally:
+        if s:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+
+def _has_watchdog_fw(ver):
+    return "DDONG-WDT" in (ver or "").upper().replace(" ", "")
+
+
+def _touch_dtr_reset(port, flog=None):
+    """Leonardo CDC 소프트리셋 (DTR 토글). 리셋 버튼 없는 보드용."""
+    s = None
+    try:
+        s = serial.Serial()
+        s.port = port
+        s.baudrate = 9600
+        s.dsrdtr = True
+        s.rtscts = False
+        s.open()
+        try:
+            s.setDTR(False)
+            s.setRTS(False)
+            time.sleep(0.05)
+            s.setDTR(True)
+            time.sleep(0.05)
+            s.setDTR(False)
+        except Exception:
+            pass
+        time.sleep(0.12)
+        s.baudrate = 1200
+        time.sleep(0.12)
+        flog and flog.log("touch: DTR+1200 OK")
+    except Exception as e:
+        flog and flog.log(f"DTR+1200: {e!r}")
+    finally:
+        if s:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+
 def _touch_1200_simple(port, flog=None):
     """처음 성공하던 짧은 1200 open/close."""
     try:
@@ -295,6 +370,34 @@ def _touch_1200_simple(port, flog=None):
         time.sleep(0.1)
         s.close()
     flog and flog.log("touch: simple 1200 OK")
+
+
+def _enter_bootloader(port, flog=None, rounds=4):
+    """! 명령 + DTR + 1200 조합으로 부트로더 진입 시도."""
+    boot = find_bootloader_port()
+    if boot:
+        return boot
+    for i in range(rounds):
+        try:
+            _enter_bootloader_serial_cmd(port, flog=flog)
+        except Exception as e:
+            flog and flog.log(f"'!' r{i}: {e!r}")
+        boot = wait_bootloader(timeout=2.5, flog=flog, hint=f"!{i}")
+        if boot:
+            return boot
+        try:
+            _touch_dtr_reset(port, flog=flog)
+        except Exception:
+            pass
+        try:
+            _touch_1200_simple(port, flog=flog)
+        except Exception as e:
+            flog and flog.log(f"1200 r{i}: {e!r}")
+        time.sleep(0.45)
+        boot = find_bootloader_port()
+        if boot:
+            return boot
+    return None
 
 
 def _run_avrdude(root, hex_path, boot_port, callback=None, flog=None):
@@ -445,52 +548,42 @@ def flash(callback=None, port=None, ask_manual_reset=None):
         if not com:
             msg = "아두이노 COM 없음"
             return False, msg, flog.save(False, msg)
+        fw_ver = _probe_firmware(com, flog=flog)
+        has_wdt = _has_watchdog_fw(fw_ver)
+        flog.log(f"watchdog_fw={has_wdt}")
         if callback:
             callback(10, f"장치: {com}")
-        time.sleep(1.2)
+        time.sleep(0.8)
+
+        def _try_avrdude(boot_port, tag):
+            if not boot_port:
+                return False, "부트로더 없음"
+            return _run_avrdude(root, hex_path, boot_port, callback=callback, flog=flog)
 
         # 이미 부트로더면 바로
         boot = find_bootloader_port()
         if boot:
-            ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
+            ok, detail = _try_avrdude(boot, "boot")
             if ok:
                 if callback:
                     callback(100, "업로드 완료!")
                 return True, f"완료(이미부트로더/{boot})", flog.save(True, f"완료/{boot}")
 
-        # 1) '!' → 부트로더 대기
-        flog.section("시도: 시리얼 '!'")
-        try:
-            _enter_bootloader_serial_cmd(com, flog=flog)
-        except Exception as e:
-            flog.log(f"'!' 예외: {e!r}")
-        boot = wait_bootloader(timeout=5.0, callback=callback, flog=flog, hint="!후")
-        if boot:
-            ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
-            if ok:
-                if callback:
-                    callback(100, "업로드 완료!")
-                return True, f"완료(!/{boot})", flog.save(True, f"완료(!/{boot})")
-            flog.log(f"avrdude 실패: {detail}")
+        detail2 = ""
+        for attempt in range(3):
+            flog.section(f"자동 부트로더 진입 시도 {attempt + 1}/3")
+            com = find_arduino(preferred=port) or com
+            boot = _enter_bootloader(com, flog=flog, rounds=3)
+            if boot:
+                ok, detail = _try_avrdude(boot, f"auto{attempt}")
+                if ok:
+                    if callback:
+                        callback(100, "업로드 완료!")
+                    return True, f"완료(자동/{boot})", flog.save(True, f"완료(자동/{boot})")
+                flog.log(f"avrdude 실패: {detail}")
+            time.sleep(0.6)
 
-        # 2) 처음 성공 방식: 1200 짧게 → 0.5초 → 같은COM 또는 부트로더COM
-        flog.section("시도: 1200 빠른업로드 (처음 성공방식)")
-        com = find_arduino(preferred=port) or com
-        try:
-            _touch_1200_simple(com, flog=flog)
-        except Exception as e:
-            flog.log(f"1200 예외: {e!r}")
-        time.sleep(0.5)
-        boot = find_bootloader_port() or com
-        flog.dump_ports(f"1200후 boot={find_bootloader_port()}")
-        ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
-        if ok:
-            if callback:
-                callback(100, "업로드 완료!")
-            return True, f"완료(1200/{boot})", flog.save(True, f"완료(1200/{boot})")
-        flog.log(f"1200 avrdude 실패: {detail}")
-
-        # 3) cli
+        # arduino-cli — 내부에서 1200 리셋 처리
         flog.section("시도: arduino-cli")
         com2 = find_arduino(preferred=port) or com
         ok2, detail2 = flash_via_arduino_cli(hex_path, com2, flog=flog, callback=callback)
@@ -500,19 +593,29 @@ def flash(callback=None, port=None, ask_manual_reset=None):
             return True, "완료(cli)", flog.save(True, "완료(cli)")
         flog.log(f"cli 실패: {detail2}")
 
-        # 4) 수동 1회 (옛 시스템WDT → WDT3)
+        # 워치독 펌(WDT3/4)이면 리셋버튼 안내 없음 — USB 재연결만
+        if has_wdt:
+            msg = (
+                "자동 펌업 실패.\n"
+                "· USB 케이블을 잠깐 뽑았다 다시 꽂은 뒤 【펌업】을 한 번 더 눌러주세요.\n"
+                "(리셋 버튼 없어도 됩니다)\n"
+                f"· 펌: {fw_ver or 'WDT'}"
+            )
+            return False, msg, flog.save(False, msg.replace("\n", " / "))
+
+        # 옛 펌(워치독 없음)만 수동 1회 — 최초 WDT 올릴 때
         if callable(ask_manual_reset):
-            flog.section("최후: 수동 더블리셋 (옛WDT→WDT3 1회)")
+            flog.section("최후: 옛펌 → WDT 수동 1회")
             if callback:
-                callback(25, "수동 안내")
+                callback(25, "옛펌 수동 안내")
             try:
                 go = bool(ask_manual_reset())
             except Exception:
                 go = False
             if go:
-                boot = wait_bootloader(timeout=15.0, callback=callback, flog=flog, hint="수동")
+                boot = wait_bootloader(timeout=20.0, callback=callback, flog=flog, hint="수동")
                 if boot:
-                    ok3, detail3 = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
+                    ok3, detail3 = _try_avrdude(boot, "manual")
                     if ok3:
                         if callback:
                             callback(100, "업로드 완료!")
@@ -521,8 +624,8 @@ def flash(callback=None, port=None, ask_manual_reset=None):
 
         msg = (
             "자동 펌업 실패.\n"
-            "· 이번 hex는 최신으로 받았습니다. 리셋버튼 있으면 더블리셋 1회로 WDT3 올리세요.\n"
-            "· WDT3 이후엔 처음처럼 1200 자동펌업이 다시 됩니다.\n"
+            "· USB를 뽑았다 다시 꽂고 【펌업】을 다시 눌러주세요.\n"
+            "· 리셋 버튼이 있으면 더블리셋도 가능합니다.\n"
             f"· cli: {detail2}"
         )
         return False, msg, flog.save(False, msg.replace("\n", " / "))
