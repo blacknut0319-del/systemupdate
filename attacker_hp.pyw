@@ -10,13 +10,14 @@ for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","k
 
 import socket, struct, json, os, threading, time
 import tkinter as tk
+from tkinter import messagebox
 from PIL import Image, ImageTk
 import mss
 import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-07-15 19:45"
+PATCH_UPDATED_AT = "2026-08-14 00:20"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
@@ -24,6 +25,10 @@ TARGET_IP = "192.168.0.100"
 TARGET_PORT = 9999
 HP_ROI = (558, 878, 304, 5)
 HP_100_REF = None
+WIN_W = 340
+WIN_H = 420
+_WIN_MIN_W, _WIN_MAX_W = 240, 520
+_WIN_MIN_H, _WIN_MAX_H = 120, 900
 
 if os.path.exists(CONFIG_FILE):
     try:
@@ -33,7 +38,189 @@ if os.path.exists(CONFIG_FILE):
         TARGET_IP = cfg.get("target_ip", TARGET_IP)
         if "hp_roi" in cfg: HP_ROI = tuple(int(v) for v in cfg["hp_roi"])
         if "hp_100_ref" in cfg: HP_100_REF = cfg["hp_100_ref"]
+        if "win_w" in cfg:
+            try: WIN_W = max(_WIN_MIN_W, min(_WIN_MAX_W, int(cfg["win_w"])))
+            except Exception: pass
+        if "win_h" in cfg:
+            try: WIN_H = max(_WIN_MIN_H, min(_WIN_MAX_H, int(cfg["win_h"])))
+            except Exception: pass
     except: pass
+
+_VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/attacker_version.txt"
+_ATTACKER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/attacker_hp.pyw"
+UPDATE_SKIP_FILE = os.path.join(SCRIPT_DIR, "attacker_update_skip.txt")
+_last_update_check = 0.0
+_update_available = False
+_update_notified = False
+lbl_update = None
+
+def _load_update_skip():
+    try:
+        if os.path.isfile(UPDATE_SKIP_FILE):
+            with open(UPDATE_SKIP_FILE, encoding="utf-8") as f:
+                return f.read().strip()
+    except Exception:
+        pass
+    return ""
+
+def _save_update_skip(ver):
+    try:
+        with open(UPDATE_SKIP_FILE, "w", encoding="utf-8") as f:
+            f.write(ver or "")
+    except Exception:
+        pass
+
+def fetch_remote_version():
+    try:
+        import ssl
+        import urllib.request
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(
+            _VERSION_URL + "?t=%d" % int(time.time()),
+            headers={"User-Agent": "ddong-attacker", "Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
+            return r.read().decode("utf-8", errors="replace").strip().splitlines()[0].strip()
+    except Exception:
+        return None
+
+def restart_with_update():
+    global running
+    try:
+        import ssl
+        import urllib.request
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(
+            _ATTACKER_URL + "?t=%d" % int(time.time()),
+            headers={"User-Agent": "ddong-attacker", "Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
+            data = r.read()
+        dest = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
+        tmp = dest + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dest)
+        exe = sys.executable
+        if exe.lower().endswith("python.exe"):
+            pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+            if os.path.isfile(pyw):
+                exe = pyw
+        subprocess.Popen([exe, dest], close_fds=True, cwd=SCRIPT_DIR)
+        time.sleep(0.4)
+    except Exception as e:
+        try:
+            messagebox.showerror(
+                "업데이트 실패",
+                "다시 받기에 실패했어요.\nhp_start.bat 으로 실행해 주세요.\n\n%s" % e,
+            )
+        except Exception:
+            pass
+        return
+    running = False
+    try:
+        keyboard.unhook_all()
+        sock.close()
+    except Exception:
+        pass
+    try:
+        root.destroy()
+    except Exception:
+        pass
+    os._exit(0)
+
+def check_for_update(force=False, manual=False):
+    global _last_update_check, _update_available, _update_notified
+    now = time.time()
+    if not force and not manual and (now - _last_update_check) < 600:
+        return
+    _last_update_check = now
+    remote = fetch_remote_version()
+    _short = PATCH_UPDATED_AT[5:] if len(PATCH_UPDATED_AT) > 5 else PATCH_UPDATED_AT
+
+    def _set_lbl(text, color="#e2e8f0"):
+        try:
+            if lbl_update:
+                lbl_update.config(text=text, fg=color)
+        except Exception:
+            pass
+
+    if not remote:
+        if manual:
+            def _fail():
+                _set_lbl("업데이트 %s" % _short, "#e2e8f0")
+                try:
+                    messagebox.showwarning("업데이트 확인", "확인 실패.\n인터넷 연결을 확인해 주세요.")
+                except Exception:
+                    pass
+            try:
+                if root:
+                    root.after(0, _fail)
+            except Exception:
+                pass
+        return
+    if remote == PATCH_UPDATED_AT:
+        _update_available = False
+        _save_update_skip("")
+        if manual:
+            def _ok():
+                _set_lbl("업데이트 %s" % _short, "#a6e3a1")
+                try:
+                    messagebox.showinfo("업데이트 확인", "최신이에요.\n다시 받을 필요 없어요.")
+                except Exception:
+                    pass
+            try:
+                if root:
+                    root.after(0, _ok)
+            except Exception:
+                pass
+        return
+    _update_available = True
+    if manual:
+        _update_notified = False
+    elif _load_update_skip() == remote:
+        def _skipped():
+            _set_lbl("⚠️업데이트있음", "#f9e2af")
+        try:
+            if root:
+                root.after(0, _skipped)
+        except Exception:
+            pass
+        return
+
+    def _ui():
+        global _update_notified
+        _set_lbl("⚠️업데이트있음", "#f9e2af")
+        if not _update_notified:
+            _update_notified = True
+            try:
+                if messagebox.askyesno(
+                    "업데이트",
+                    "업데이트가 있습니다.\n업데이트하시겠습니까?",
+                ):
+                    _save_update_skip("")
+                    restart_with_update()
+                else:
+                    _save_update_skip(remote)
+            except Exception:
+                pass
+    try:
+        if root:
+            root.after(0, _ui)
+    except Exception:
+        pass
+
+def on_update_check_click():
+    try:
+        if lbl_update:
+            lbl_update.config(text="확인중...", fg="#f9e2af")
+    except Exception:
+        pass
+    threading.Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 def my_ip():
     try:
@@ -95,7 +282,7 @@ for i in range(1, 9):
 # ============================================================
 root = tk.Tk()
 root.overrideredirect(True)
-root.geometry("340x100+80+80")
+root.geometry("%dx%d+80+80" % (WIN_W, WIN_H))
 root.attributes("-topmost", True)
 root.configure(bg="#0d0f14")  # header UI v14 - final - CDN refresh
 
@@ -103,8 +290,12 @@ root.configure(bg="#0d0f14")  # header UI v14 - final - CDN refresh
 header = tk.Frame(root, bg="#141420", height=24)
 header.pack(fill="x")
 header.pack_propagate(False)
-# Date in title
-title_lbl = tk.Label(header, text=f"{PATCH_UPDATED_AT}  격수", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 8, "bold"))
+_upd_short = PATCH_UPDATED_AT[5:] if len(PATCH_UPDATED_AT) > 5 else PATCH_UPDATED_AT
+lbl_update = tk.Label(header, text="업데이트 %s" % _upd_short, bg="#21262d", fg="#e2e8f0",
+                      font=("Malgun Gothic", 7, "bold"), padx=4, cursor="hand2")
+lbl_update.pack(side="left", padx=4, pady=2)
+lbl_update.bind("<Button-1>", lambda e: on_update_check_click())
+title_lbl = tk.Label(header, text="격수", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 8, "bold"))
 title_lbl.place(relx=0.5, rely=0.5, anchor="center")
 # 닫기
 close_btn = tk.Label(header, text="✕", bg="#141420", fg="#f38ba8", font=("", 11))
@@ -130,13 +321,33 @@ title_lbl.bind("<B1-Motion>", do_move)
 # 닫기
 close_btn.bind("<Button-1>", lambda e: close_app())
 
+def _start_resize(event):
+    root._rs_x = event.x_root
+    root._rs_y = event.y_root
+    root._rs_w = root.winfo_width()
+    root._rs_h = root.winfo_height()
+
+def _do_resize(event):
+    dw = event.x_root - root._rs_x
+    dh = event.y_root - root._rs_y
+    nw = max(_WIN_MIN_W, min(_WIN_MAX_W, root._rs_w + dw))
+    nh = max(_WIN_MIN_H, min(_WIN_MAX_H, root._rs_h + dh))
+    root.geometry("%dx%d+%d+%d" % (int(nw), int(nh), root.winfo_x(), root.winfo_y()))
+
+def _end_resize(event):
+    global WIN_W, WIN_H
+    WIN_W = root.winfo_width()
+    WIN_H = root.winfo_height()
+    save_cfg()
+
 def auto_resize_height():
     if root and root.winfo_exists():
-        h = root.winfo_reqheight()
-        if h > 100:
-            x = root.winfo_x(); y = root.winfo_y()
-            root.geometry("225x%d+%d+%d" % (h, x, y))
-    root.after(500, auto_resize_height)
+        req = root.winfo_reqheight()
+        cur = root.winfo_height()
+        if req > cur + 4:
+            root.geometry("%dx%d+%d+%d" % (root.winfo_width(), req, root.winfo_x(), root.winfo_y()))
+    if root:
+        root.after(500, auto_resize_height)
 root.after(300, auto_resize_height)
 
 # --- IP 행 ---
@@ -180,6 +391,8 @@ def save_cfg():
         ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 2)
     cfg["target_ip"] = ip_var.get()
     cfg["hp_roi"] = tuple(int(v) for v in HP_ROI)
+    cfg["win_w"] = WIN_W
+    cfg["win_h"] = WIN_H
     if HP_100_REF is not None:
         cfg["hp_100_ref"] = HP_100_REF
     if os.path.exists(CONFIG_FILE): ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 128)
@@ -444,6 +657,19 @@ def on_close():
     root.destroy()
 
 root.protocol("WM_DELETE_WINDOW", on_close)
+resize_grip = tk.Label(root, text="◢", bg="#313244", fg="#6c7086", font=("Malgun Gothic", 9, "bold"), cursor="sizing")
+resize_grip.place(relx=1.0, rely=1.0, anchor="se")
+resize_grip.bind("<ButtonPress-1>", _start_resize)
+resize_grip.bind("<B1-Motion>", _do_resize)
+resize_grip.bind("<ButtonRelease-1>", _end_resize)
+
+def _upd_periodic():
+    threading.Thread(target=lambda: check_for_update(force=False), daemon=True).start()
+    root.after(600000, _upd_periodic)
+
+root.after(15000, lambda: threading.Thread(target=lambda: check_for_update(force=True), daemon=True).start())
+root.after(615000, _upd_periodic)
+
 try:
     root.mainloop()
 except Exception as e:

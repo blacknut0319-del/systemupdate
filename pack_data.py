@@ -11,6 +11,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, "_decrypted.py")
 DST = os.path.join(ROOT, "data.txt")
 VER = os.path.join(ROOT, "version.txt")
+ATTACKER_SRC = os.path.join(ROOT, "attacker_hp.pyw")
+ATTACKER_VER = os.path.join(ROOT, "attacker_version.txt")
 
 
 def main():
@@ -29,6 +31,14 @@ def main():
         print(f"완료 {DST} ({len(b64)//1024}KB) / version.txt={m.group(1).strip()}")
     else:
         print(f"완료 {DST} ({len(b64)//1024}KB) — PATCH_UPDATED_AT 없음")
+    if os.path.isfile(ATTACKER_SRC):
+        with open(ATTACKER_SRC, encoding="utf-8") as f:
+            acode = f.read()
+        am = re.search(r'PATCH_UPDATED_AT\s*=\s*"([^"]+)"', acode)
+        if am:
+            with open(ATTACKER_VER, "w", encoding="utf-8") as f:
+                f.write(am.group(1).strip() + "\n")
+            print(f"attacker_version.txt={am.group(1).strip()}")
 
 
 if __name__ == "__main__":

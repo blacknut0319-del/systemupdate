@@ -749,6 +749,8 @@ saved_v_f10 = "1200"
 saved_v_f11 = "1200"
 saved_expire_start = ""
 saved_expire_days = "0"
+saved_win_w = 195
+saved_win_h = 380
 sheet_expire_info = ""   # 구글시트 C열 (일수 또는 만료일) — 표시·판정은 여기만 사용
 sheet_expire_end = ""    # 구글시트 D열 (만료일)
 
@@ -865,7 +867,7 @@ def load_hidden_config():
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
     global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna
-    global strong_heal_pct
+    global strong_heal_pct, saved_win_w, saved_win_h
     
     text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11",
                        "PARTY_FLAGS", "PARTY_MODE_FLAGS", "BUFF_ON"}
@@ -919,6 +921,14 @@ def load_hidden_config():
                 key, val = line.split('=', 1)
                 val_str = val.strip()
                 if key == "HW_MODE": globals()['HW_MODE'] = {"KMBox": "뚱박스", "아두이노": "뚱USB"}.get(val_str, val_str); continue
+                if key == "WIN_W":
+                    try: globals()['saved_win_w'] = max(165, min(420, int(val_str)))
+                    except Exception: pass
+                    continue
+                if key == "WIN_H":
+                    try: globals()['saved_win_h'] = max(180, min(900, int(val_str)))
+                    except Exception: pass
+                    continue
                 if key == "KM_IP": globals()['KM_IP'] = val_str; continue
                 if key == "KM_PORT": globals()['KM_PORT'] = val_str; continue
                 if key == "KM_MAC": globals()['KM_MAC'] = val_str; continue
@@ -1067,6 +1077,7 @@ def save_hidden_config(pwd_to_save):
                             on_s, sec_s = parts[0], parts[1]
                     f.write(f"BUFF_{hb}_{slot}={on_s}:{sec_s}\n")
             f.write(f"HW_MODE={cur_hw}\nKM_IP={cur_km_ip}\nKM_PORT={cur_km_port}\nKM_MAC={cur_km_mac}\n")
+            f.write(f"WIN_W={saved_win_w}\nWIN_H={saved_win_h}\n")
             f.write(f"PARTY_FLAGS={saved_party_flags}\nPARTY_MODE_FLAGS={saved_party_mode_flags}\n")
             f.write(f"SELF_HP_ROI_X1={SELF_HP_ROI[0]}\nSELF_HP_ROI_Y1={SELF_HP_ROI[1]}\nSELF_HP_ROI_X2={SELF_HP_ROI[2]}\nSELF_HP_ROI_Y2={SELF_HP_ROI[3]}\n")
             if SELF_HP_100_REF is not None: f.write(f"SELF_HP_100_REF={SELF_HP_100_REF}\n")
@@ -2551,7 +2562,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-13 23:50"
+PATCH_UPDATED_AT = "2026-08-14 00:20"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2738,6 +2749,8 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🔄 격수도 상단 [업데이트] — 뚱힐러처럼 확인 후 껐다 켜서 최신 적용",
+    "📐 창 크기 — 오른쪽 아래 ◢ 드래그로 뚱힐러·격수 창 조절 (크기 저장)",
     "🔑 PC ID 고정 — 윈도우 기기 ID로 등록 (WiFi/VPN 바뀌어도 같은 PC면 B열 안 흔들림) / B열 ANY=여러 PC",
     "🔄 업데이트 반복 알림 — '아니요' 누르면 같은 버전은 다시 안 뜸 / '예' 후 최신 적용 캐시 문제 수정",
     "🕹️ 뚱박스 [설정도구] — 한글 통역 창이 앱 안에서 같이 뜨게 수정 (옛 캐시도 zip 재다운)",
@@ -4187,15 +4200,46 @@ def expert_logic():
 # =======================================================
 # 🚨 메인 구동
 # =======================================================
+_WIN_MIN_W, _WIN_MAX_W = 165, 420
+_WIN_MIN_H, _WIN_MAX_H = 180, 900
+
+def _start_resize(event):
+    root._rs_x = event.x_root
+    root._rs_y = event.y_root
+    root._rs_w = root.winfo_width()
+    root._rs_h = root.winfo_height()
+
+def _do_resize(event):
+    dw = event.x_root - root._rs_x
+    dh = event.y_root - root._rs_y
+    nw = max(_WIN_MIN_W, min(_WIN_MAX_W, root._rs_w + dw))
+    nh = max(_WIN_MIN_H, min(_WIN_MAX_H, root._rs_h + dh))
+    root.geometry(f"{int(nw)}x{int(nh)}+{root.winfo_x()}+{root.winfo_y()}")
+
+def _end_resize(event):
+    global saved_win_w, saved_win_h
+    try:
+        saved_win_w = root.winfo_width()
+        saved_win_h = root.winfo_height()
+        if loaded_pwd:
+            save_hidden_config(loaded_pwd)
+    except Exception:
+        pass
+
 root = ctk.CTk()
-root.geometry("195x380+0+0")
+root.geometry(f"{saved_win_w}x{saved_win_h}+0+0")
 root.attributes("-topmost", True)
 def auto_resize_height():
     try:
         if root and root.winfo_exists() and not _ui_busy():
-            h = root.winfo_reqheight()
-            if h > 200:
-                x = root.winfo_x(); y = root.winfo_y(); root.geometry(f"195x{h}+{x}+{y}")
+            req_h = root.winfo_reqheight()
+            cur_h = root.winfo_height()
+            w = root.winfo_width()
+            if w < 120:
+                w = saved_win_w
+            if req_h > cur_h + 4:
+                x = root.winfo_x(); y = root.winfo_y()
+                root.geometry(f"{int(w)}x{req_h}+{x}+{y}")
     except Exception:
         pass
     if root:
@@ -4337,8 +4381,11 @@ def _toggle_km_fields():
     try:
         root.update_idletasks()
         h = root.winfo_reqheight()
-        if h > 50:
-            root.geometry(f"195x{h}+{root.winfo_x()}+{root.winfo_y()}")
+        if h > saved_win_h + 4:
+            w = root.winfo_width()
+            if w < 120:
+                w = saved_win_w
+            root.geometry(f"{int(w)}x{h}+{root.winfo_x()}+{root.winfo_y()}")
     except Exception:
         pass
 
@@ -4761,4 +4808,10 @@ lbl_log = ctk.CTkTextbox(root, height=55, fg_color="#0d1117", text_color="#a6e3a
 lbl_log.pack(fill="x", padx=6, pady=(4,2))
 lbl_log.insert("1.0", "🟢 시스템 시작")
 lbl_log.configure(state="disabled")
+resize_grip = ctk.CTkLabel(root, text="◢", width=16, height=16, fg_color="#313244", text_color="#6c7086",
+                           font=("Malgun Gothic", 10, "bold"), corner_radius=0)
+resize_grip.place(relx=1.0, rely=1.0, anchor="se")
+resize_grip.bind("<ButtonPress-1>", _start_resize)
+resize_grip.bind("<B1-Motion>", _do_resize)
+resize_grip.bind("<ButtonRelease-1>", _end_resize)
 root.mainloop()
