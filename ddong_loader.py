@@ -9,6 +9,23 @@ import time
 import urllib.request
 import zlib
 
+def _setup_app_dir():
+    app = os.environ.get("DDONG_APP_DIR", "").strip().rstrip("\\/")
+    if app and os.path.isdir(app):
+        try:
+            os.chdir(app)
+        except Exception:
+            pass
+        return
+    cwd = os.path.abspath(os.getcwd())
+    if os.path.isfile(os.path.join(cwd, "license.dat")) or os.path.isfile(os.path.join(cwd, "뚱시작.bat")):
+        try:
+            os.chdir(cwd)
+        except Exception:
+            pass
+
+_setup_app_dir()
+
 # Insert/Home/PageUp 전역핫키는 관리자 권한이 있어야 리니지 위에서 바로 먹힘
 def _ensure_admin():
     try:
@@ -18,7 +35,8 @@ def _ensure_admin():
         pass
     try:
         script = os.path.abspath(__file__)
-        cwd = os.path.dirname(script) or None
+        app_dir = os.environ.get("DDONG_APP_DIR", "").strip() or os.getcwd()
+        cwd = app_dir if os.path.isdir(app_dir) else (os.path.dirname(script) or None)
         # UAC 뜨면 '예' → 관리자 pythonw로 다시 실행
         ret = ctypes.windll.shell32.ShellExecuteW(
             None, "runas", sys.executable, f'"{script}"', cwd, 1
@@ -53,7 +71,11 @@ DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main
 def fetch_data_b64():
     req = urllib.request.Request(
         DATA_URL + "?t=%d" % int(time.time()),
-        headers={"User-Agent": "ddong", "Cache-Control": "no-cache"},
+        headers={
+            "User-Agent": "ddong",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        },
     )
     with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
         return r.read().decode("utf-8").strip()

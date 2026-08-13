@@ -48,6 +48,22 @@ import customtkinter as ctk
 import atexit 
 import win32gui, win32con
 import cv2
+
+def _detect_app_dir():
+    """license.dat / 뚱시작.bat 이 있는 실제 설치 폴더 (TEMP·cwd 오동작 방지)."""
+    env = os.environ.get("DDONG_APP_DIR", "").strip().rstrip("\\/")
+    if env and os.path.isdir(env):
+        return os.path.abspath(env)
+    cwd = os.path.abspath(os.getcwd())
+    if os.path.isfile(os.path.join(cwd, "license.dat")) or os.path.isfile(os.path.join(cwd, "뚱시작.bat")):
+        return cwd
+    return cwd
+
+APP_DIR = _detect_app_dir()
+try:
+    os.chdir(APP_DIR)
+except Exception:
+    pass
 import numpy as np
 import socket
 import struct
@@ -132,8 +148,10 @@ GOOGLE_SHEET_ID = "1FJznTKvy_4rnYkt9fI8u93MMow2she0AIlxmTWJz9XE"
 GAS_API_URL = "https://script.google.com/macros/s/AKfycbwvgEjdco_Gtz4zH1anlpVRNzK2YkZb0Nhx8VLq06adMXsmElBJ8vfAUxh7Ay0bl3he/exec"
 
 MY_PLAY_KEY = "1137"         
-AUTH_FILE = "license.dat"
-COORD_FILE = "saved_coord.txt"
+AUTH_FILE = os.path.join(APP_DIR, "license.dat")
+COORD_FILE = os.path.join(APP_DIR, "saved_coord.txt")
+UPDATE_SKIP_FILE = os.path.join(APP_DIR, "update_skip.txt")
+UPDATE_ATTEMPT_FILE = os.path.join(APP_DIR, "update_attempt.flag")
 
 SERIAL_PORT = auto_find_arduino()
 if not SERIAL_PORT: SERIAL_PORT = 'COM5'
@@ -536,7 +554,7 @@ saved_chk_strong_heal = "1"
 saved_chk_attacker = "1"
 saved_chk_mna = "0"
 
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ddong.log")
+LOG_FILE = os.path.join(APP_DIR, "ddong.log")
 last_log = ""
 log_history = []
 def log_event(msg):
@@ -2580,9 +2598,10 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 00:30"
+PATCH_UPDATED_AT = "2026-08-14 00:35"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
+_DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
 _KMBOX_ZIP_URL = (
     "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
@@ -2594,7 +2613,6 @@ _last_update_check = 0.0
 _update_available = False
 _update_notified = False
 lbl_update = None
-UPDATE_SKIP_FILE = "update_skip.txt"
 
 def _load_update_skip():
     try:
@@ -2621,24 +2639,79 @@ def fetch_remote_version():
         ctx.verify_mode = _ssl.CERT_NONE
         req = urllib.request.Request(
             _VERSION_URL + "?t=%d" % int(time.time()),
-            headers={"User-Agent": "ddong-healer", "Cache-Control": "no-cache"},
+            headers={
+                "User-Agent": "ddong-healer",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
         )
         with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
             return r.read().decode("utf-8", errors="replace").strip().splitlines()[0].strip()
     except Exception:
         return None
 
+def _mark_update_attempt(remote_ver):
+    try:
+        with open(UPDATE_ATTEMPT_FILE, "w", encoding="utf-8") as f:
+            f.write("%f|%s" % (time.time(), remote_ver or ""))
+    except Exception:
+        pass
+
+def _check_update_stuck_on_boot():
+    """예 눌렀는데도 버전이 안 바뀌면 반복 알림 대신 한 번 안내 후 스킵."""
+    remote = fetch_remote_version()
+    if not remote or remote == PATCH_UPDATED_AT:
+        try:
+            if os.path.isfile(UPDATE_ATTEMPT_FILE):
+                os.remove(UPDATE_ATTEMPT_FILE)
+        except Exception:
+            pass
+        return
+    try:
+        if not os.path.isfile(UPDATE_ATTEMPT_FILE):
+            return
+        with open(UPDATE_ATTEMPT_FILE, encoding="utf-8") as f:
+            parts = f.read().strip().split("|", 1)
+        ts = float(parts[0])
+        ver = parts[1] if len(parts) > 1 else ""
+        if ver == remote and (time.time() - ts) < 600:
+            _save_update_skip(remote)
+            try:
+                os.remove(UPDATE_ATTEMPT_FILE)
+            except Exception:
+                pass
+            try:
+                messagebox.showwarning(
+                    "업데이트",
+                    "자동 업데이트가 적용되지 않았습니다.\n\n"
+                    "1) 뚱힐러 완전히 끄기\n"
+                    "2) 뚱시작.bat 우클릭 → 관리자 실행\n\n"
+                    "서버: %s\n현재: %s\n\n"
+                    "같은 알림은 잠시 숨깁니다." % (remote, PATCH_UPDATED_AT),
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 def restart_with_update():
     """뚱시작.bat 과 같이 로더를 받아 새 프로세스로 켠 뒤, 지금 창은 종료."""
+    remote = fetch_remote_version()
+    if remote:
+        _mark_update_attempt(remote)
     try:
         import ssl as _ssl
         ctx = _ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = _ssl.CERT_NONE
-        dest = os.path.join(os.environ.get("TEMP") or os.environ.get("TMP") or ".", "dloader.py")
+        dest = os.path.join(APP_DIR, "dloader.py")
         req = urllib.request.Request(
             _LOADER_URL + "?t=%d" % int(time.time()),
-            headers={"User-Agent": "ddong-healer", "Cache-Control": "no-cache"},
+            headers={
+                "User-Agent": "ddong-healer",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
         )
         with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
             data = r.read()
@@ -2649,7 +2722,9 @@ def restart_with_update():
             pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
             if os.path.isfile(pyw):
                 exe = pyw
-        subprocess.Popen([exe, dest], close_fds=True)
+        env = os.environ.copy()
+        env["DDONG_APP_DIR"] = APP_DIR
+        subprocess.Popen([exe, dest], close_fds=True, cwd=APP_DIR, env=env)
         time.sleep(0.4)
     except Exception as e:
         try:
@@ -2745,7 +2820,8 @@ def check_for_update(force=False, manual=False):
             try:
                 if messagebox.askyesno(
                     "업데이트",
-                    "업데이트가 있습니다.\n업데이트하시겠습니까?",
+                    "업데이트가 있습니다.\n\n서버: %s\n현재: %s\n\n업데이트하시겠습니까?"
+                    % (remote, PATCH_UPDATED_AT),
                 ):
                     _save_update_skip("")
                     restart_with_update()
@@ -2770,6 +2846,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🔄 업데이트 반복 알림 수정 — 예 눌러도 버전 안 바뀌면 뚱시작.bat 안내 후 알림 숨김",
     "📐 접이식 접으면 창 높이 자동 축소 — 저장된 높이(WIN_H) 안 씀, 너비만 저장",
     "🔑 PC ID — MachineGuid 기준 + 예전 MAC ID 시트 호환 / 로그인창에 PC ID 표시",
     "📐 접이식(옵션/버프/힐) 접으면 창 높이 자동으로 줄어들게 복구",
@@ -2931,6 +3008,7 @@ def update_ui_timer():
             _upd_boot = False
             try:
                 if root:
+                    root.after(3000, _check_update_stuck_on_boot)
                     root.after(15000, lambda: check_for_update(force=True))
             except Exception:
                 pass
