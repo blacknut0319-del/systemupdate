@@ -17,7 +17,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 06:05"
+PATCH_UPDATED_AT = "2026-08-14 06:12"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -66,11 +66,6 @@ def _sync_attacker_from_new():
         os.remove(new_path)
     except Exception:
         pass
-
-if __file__.lower().endswith(".new"):
-    _sync_attacker_from_new()
-elif os.path.isfile(ATTACKER_MAIN + ".new"):
-    _cleanup_stale_new(PATCH_UPDATED_AT)
 
 TARGET_IP = "192.168.0.100"
 TARGET_PORT = 9999
@@ -171,6 +166,16 @@ def fetch_remote_version():
     except Exception:
         return None
 
+def _attacker_startup_sync():
+    """모듈 로드 완료 후 호출 — .new 실행 시 fetch_remote_version 필요."""
+    if __file__.lower().endswith(".new"):
+        _sync_attacker_from_new()
+        if os.path.isfile(ATTACKER_MAIN):
+            _spawn_attacker(ATTACKER_MAIN)
+            os._exit(0)
+    elif os.path.isfile(ATTACKER_MAIN + ".new"):
+        _cleanup_stale_new(PATCH_UPDATED_AT)
+
 def _mark_update_attempt(remote_ver):
     try:
         with open(UPDATE_ATTEMPT_FILE, "w", encoding="utf-8") as f:
@@ -249,7 +254,16 @@ def restart_with_update():
         new_path = ATTACKER_MAIN + ".new"
         with open(new_path, "wb") as f:
             f.write(data)
-        _spawn_attacker(new_path)
+        remote_ver = _read_patch_ver(data)
+        if remote and remote_ver and remote_ver != remote:
+            raise RuntimeError("버전 불일치 (%s vs %s)" % (remote_ver, remote))
+        import shutil
+        shutil.copy2(new_path, ATTACKER_MAIN)
+        try:
+            os.remove(new_path)
+        except Exception:
+            pass
+        _spawn_attacker(ATTACKER_MAIN)
         time.sleep(0.45)
     except Exception as e:
         _show_msgbox(
@@ -427,6 +441,8 @@ keyboard.on_release_key('end', on_end_bert_key)
 # ============================================================
 # 메인 GUI
 # ============================================================
+_attacker_startup_sync()
+
 root = tk.Tk()
 root.overrideredirect(True)
 root.geometry("%dx%d+80+80" % (WIN_W, WIN_H))
