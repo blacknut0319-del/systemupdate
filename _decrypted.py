@@ -741,11 +741,11 @@ class KmBox:
                 try: kmNet.keyup(self.SHIFT)
                 except: pass
             return
-        if cmd == 'H':                             # Shift 누름 유지 + 자동클릭 ON
+        if cmd == 'H':                             # Shift 누름 유지 (고정) — 자동클릭 없음
+            self._auto = False
             with self._lk:
                 try: kmNet.keydown(self.SHIFT)
                 except: pass
-            self._auto = True
             return
         if cmd == 'R':                             # Shift 뗌 + 자동클릭 OFF
             with self._lk:
@@ -856,7 +856,7 @@ loot_interval = 5.0
 debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0}
 
 # ── 채팅 타이핑 감지 ──
-# 주의: 클릭/고정(PgUp)은 아두이노가 Shift를 누른 채로 둠.
+# 주의: 고정(Home)은 아두이노가 Shift를 누른 채로 둠.
 # Windows가 Shift 키다운을 반복 발생시키면 '채팅 중'으로 오인되어
 # 파랭이·버프·줍기·해독이 영구 정지됨(힐은 예외라 혼자만 동작). → 수정자/매크로키는 무시.
 last_typing_time = 0.0
@@ -1761,8 +1761,7 @@ def open_guide_panel():
         ctk.CTkLabel(sf, text="• " + txt, text_color="#ffffff", font=("Malgun Gothic", 11, "bold"), justify="left", wraplength=350).pack(anchor="w", pady=2, padx=5)
     add_t("⌨️ 단축키 안내")
     add_d("[Insert]", "시작 / 종료만 (클릭은 켜지지 않음)")
-    add_d("[Home]", "무한좌클릭 ON/OFF (가동 중일 때만)")
-    add_d("[PgUp]", "고정 (따라다니다 누르면 그 자리 멈춤)")
+    add_d("[Home]", "따라클릭 ↔ 고정 토글 (가동 중, sooplive Insert 클릭/고정과 동일)")
     add_d("[Delete]", "폼창 숨기기 / 다시 보이기")
     add_d("[ F4 ]", "주변 줍기 켜기 / 끄기 (토글)")
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
@@ -1780,9 +1779,8 @@ def open_guide_panel():
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
     add_t("🚨 주의사항 (필독)")
     add_w("파티 모드 시 쫄법사는 파티창이 활성화된 상태여야 합니다 (안 그러면 베르)")
-    add_w("솔로(파티) 모드는 1:1 맨투맨, Home으로 클릭 켜야 정상 작동합니다")
+    add_w("Home 1번=따라클릭 ON / Home 2번=고정(제자리·클릭 없음)")
     add_w("휠힐(힐만) — 타겟 힐만 M, 버프·해독은 K")
-    add_w("클릭(Home) OFF + 고정(PgUp) ON — 제자리 사냥. 버프는 클릭 꺼져 있으면 K로 대상 지정")
     add_w("제어판에서 파티원 HP바를 드래그로 설정 후 💯 100% 기준을 꼭 저장하세요")
     add_w("🖼️아이콘 ROI(선택) — HP바 옆 캐릭터 아이콘을 지정하면, 파티 없을 때 배경(나무 등)이 HP바로 오탐돼 유령힐 나가는 것을 이중으로 차단")
     ctk.CTkLabel(sf, text="-"*55, text_color="#45475a").pack(pady=5)
@@ -2677,12 +2675,8 @@ def human_mouse_move(tx, ty, fast=False, roi=None):
             time.sleep(human_delay(*step_sleep))
 
 def attack_click_active():
-    """무한클릭(Home) 또는 고정(PgUp) 켜져 있으면 자동 클릭 중."""
-    if chk_fix and chk_fix.get():
-        return True
-    if chk_follow and chk_follow.get():
-        return True
-    return False
+    """무한클릭(따라클릭) 중일 때만 True. 고정은 Shift만(클릭 없음)."""
+    return bool(chk_follow and chk_follow.get())
 
 def _buff_target_click():
     """버프 대상 지정 — 클릭 꺼져 있을 때만 K(좌클릭). 휠(M)은 힐 전용."""
@@ -2780,7 +2774,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 04:05"
+PATCH_UPDATED_AT = "2026-08-14 04:33"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3029,7 +3023,7 @@ def on_update_check_click():
 
 LATEST_PATCH = [
     "🖱️ 클릭 좌표 jitter 10% — 힐 이동·자동클릭마다 좌표 살짝 흔들림",
-    "⌨️ Home=클릭 ON/OFF / Insert=시작만 — sooplive처럼 역할 분리",
+    "⌨️ PageUp 단축키 제거 — 따라클릭↔고정은 Home만",
     "✨ 버프 클릭 — Home(클릭) 꺼져 있으면 버프키 후 K로 대상 지정",
     "💚 휠힐(힐만) — F9와 M 분리 전송, 버프/해독은 K 그대로",
     "✨ 버프·자버프 초 설정 저장 — 슬롯 체크/초 입력 바꿀 때마다 저장, 껐다 켜도 유지",
@@ -3285,43 +3279,45 @@ def on_space_save(e=None):
         except: r, g, b = 0, 0, 0
         with open(COORD_FILE, 'a', encoding='utf-8') as f: f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{cx},{cy},{r},{g},{b}\n") 
 
-def _device_toggle_follow_click():
-    """Home = 무한좌클릭 ON/OFF (Insert 시작과 분리). running 중일 때만."""
-    global ser, running
+def _apply_attack_mode(mode):
+    """mode='follow' 따라클릭 ON / mode='fix' 고정(Shift만, 클릭 OFF)."""
+    global ser, running, root, chk_follow, chk_fix
     if not running or not ser or not getattr(ser, "is_open", False):
         return
     try:
-        ser.write(b'T')
         keyboard.release('shift')
         time.sleep(0.01)
+        if mode == 'follow':
+            ser.write(b'R'); time.sleep(0.05)
+            ser.write(b'T'); time.sleep(0.06)
+        else:
+            if chk_follow and chk_follow.get():
+                ser.write(b'T'); time.sleep(0.04)
+            ser.write(b'U'); time.sleep(0.05)
+            ser.write(b'H'); time.sleep(0.04)
+            ser.write(b'H'); time.sleep(0.04)
     except Exception:
-        pass
+        return
+    if root:
+        if mode == 'follow':
+            root.after(0, lambda: (chk_fix.set(False), chk_follow.set(True)))
+        else:
+            root.after(0, lambda: (chk_follow.set(False), chk_fix.set(True)))
 
 def on_home_click_toggle(e=None):
-    """Home — 클릭(무한좌클릭) ON/OFF. Insert는 시작/종료만."""
-    global debounce, ser, running, chk_follow, root
+    """Home — 따라클릭 ↔ 고정(제자리, 클릭 없음) 토글. Insert는 시작/종료만."""
+    global debounce, running, chk_follow
     if time.time() - debounce['caps'] < 0.15:
         return
     debounce['caps'] = time.time()
     if not running:
         return
-    was_on = bool(chk_follow and chk_follow.get())
-    _device_toggle_follow_click()
-    if root and chk_follow:
-        root.after(0, lambda: chk_follow.set(not was_on))
-    log_event(f"🖱️ 클릭 {'ON' if not was_on else 'OFF'}")
-
-def on_tab_toggle(e=None):
-    global debounce, ser, running, chk_fix, root, chk_follow
-    if time.time() - debounce['tab'] < 0.15: return 
-    debounce['tab'] = time.time()
-    if ser and ser.is_open and running:
-        is_fixed = not chk_fix.get() if chk_fix else False
-        if is_fixed: ser.write(b'H') 
-        else: 
-            ser.write(b'U')
-            if chk_follow and chk_follow.get(): time.sleep(0.04); ser.write(b'T')
-        if root and chk_fix: root.after(0, lambda: chk_fix.set(is_fixed))
+    if chk_follow and chk_follow.get():
+        _apply_attack_mode('fix')
+        log_event("📌 고정 (클릭 OFF)")
+    else:
+        _apply_attack_mode('follow')
+        log_event("🖱️ 따라클릭 ON")
 
 def on_f4_toggle(e=None):
     global debounce, chk_loot, root, last_loot_sent_time
@@ -3333,7 +3329,7 @@ def on_f4_toggle(e=None):
 def _start_worker():
     """Insert(시작) 실제 처리 — 백그라운드 스레드에서 실행.
     connect_hardware()·check_google_sheet()가 느릴 수 있어서, 키보드 후킹 콜백 안에서
-    직접 돌리면 Windows가 300ms 넘는 후킹을 조용히 끊어버려 Insert/Home/PageUp이
+    직접 돌리면 Windows가 300ms 넘는 후킹을 조용히 끊어버려 Insert/Home이
     전부 안 먹히게 됨. 그래서 후킹 콜백(on_main_toggle)은 이 스레드만 띄우고 바로 반환."""
     global running, last_buff_seq, root, lbl_status
     global last_loot, loot_interval, buff_next_due, last_buff_global
@@ -4868,12 +4864,27 @@ frame_opt.grid_columnconfigure(0, weight=1)
 frame_opt.grid_columnconfigure(1, weight=1)
 sw_w, sw_h = 28, 14; ft = ('Malgun Gothic', 8, 'bold')
 
-def _on_follow_sw():
-    log_event(f"🖱️ 클릭 {'ON' if chk_follow.get() else 'OFF'}")
-    if running:
-        _device_toggle_follow_click()
+def _on_fix_sw():
+    if not running:
+        return
+    if chk_fix.get():
+        _apply_attack_mode('fix')
+        log_event("📌 고정 (클릭 OFF)")
+    else:
+        _apply_attack_mode('follow')
+        log_event("🖱️ 따라클릭 ON")
 
-RoundedToggle(frame_opt, "고정(PgUp)", "#a371f7", var=chk_fix).grid(row=0, column=0, padx=3, pady=2, sticky="w")
+def _on_follow_sw():
+    if not running:
+        return
+    if chk_follow.get():
+        _apply_attack_mode('follow')
+        log_event("🖱️ 따라클릭 ON")
+    else:
+        _apply_attack_mode('fix')
+        log_event("📌 고정 (클릭 OFF)")
+
+RoundedToggle(frame_opt, "고정", "#a371f7", var=chk_fix, cmd=_on_fix_sw).grid(row=0, column=0, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "클릭(Home)", "#a371f7", var=chk_follow, cmd=_on_follow_sw).grid(row=0, column=1, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: log_event(f"☠️ 독해독 {'ON' if chk_poison.get() else 'OFF'}")).grid(row=1, column=0, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=1, column=1, padx=3, pady=2, sticky="w")
@@ -5211,7 +5222,7 @@ def update_udp_hp_label():
 UDP_CMD_MAP = {
     b'I': 'on_main_toggle',    # Insert → 시작/종료
     b'H': 'on_home_click_toggle',  # Home   → 클릭 ON/OFF
-    b'P': 'on_tab_toggle',     # PgUp   → 고정 토글
+    b'P': 'on_home_click_toggle',  # 격수모니터 [고정] 버튼 (Home과 동일 토글)
     b'L': 'on_f4_toggle',      # F4     → 줍기 토글
 }
 # Alt+숫자 → F3→F키→F1 매크로 (슬롯 1~8 → F5~F12)
@@ -5300,7 +5311,6 @@ keyboard.on_press(_on_any_keypress)   # 채팅 타이핑 감지용 — F1~F12 �
 keyboard.on_release_key('delete', toggle_gui) 
 keyboard.on_release_key('space', on_space_save) 
 keyboard.on_release_key('home', on_home_click_toggle)
-keyboard.on_release_key('page up', on_tab_toggle)
 keyboard.on_release_key('insert', on_main_toggle)
 keyboard.on_release_key('end', on_end_bert)
 keyboard.on_release_key('f4', on_f4_toggle)

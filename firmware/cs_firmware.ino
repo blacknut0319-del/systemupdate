@@ -140,7 +140,7 @@ void loop() {
     }
 
     // Shift: H=누름 R=뗌 | Alt: (=누름 )=뗌 | Ctrl: [=누름 ]=뗌
-    if (cmd == 'H') { Keyboard.press(KEY_LEFT_SHIFT); autoClick = true; continue; }
+    if (cmd == 'H') { Keyboard.press(KEY_LEFT_SHIFT); autoClick = false; continue; }
     if (cmd == 'R') { Keyboard.release(KEY_LEFT_SHIFT); autoClick = false; continue; }
     if (cmd == '(') { Keyboard.press(KEY_LEFT_ALT); continue; }
     if (cmd == ')') { Keyboard.release(KEY_LEFT_ALT); continue; }

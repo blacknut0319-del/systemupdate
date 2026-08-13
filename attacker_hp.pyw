@@ -369,9 +369,9 @@ running = True; hp_pct = 0.0
 # ============================================================
 # 원격 제어 (UDP 1byte)
 # ============================================================
-DEBOUNCE = {'insert': 0, 'home': 0, 'page up': 0, 'f4': 0, 'end': 0}
-CMD_MAP = {'insert': b'I', 'home': b'H', 'page up': b'P', 'f4': b'L'}
-CMD_NAMES = {b'I':'시작', b'H':'따라', b'P':'고정', b'L':'줍기'}
+DEBOUNCE = {'insert': 0, 'home': 0, 'f4': 0, 'end': 0}
+CMD_MAP = {'insert': b'I', 'home': b'H', 'f4': b'L'}
+CMD_NAMES = {b'I':'시작', b'H':'클릭', b'P':'고정', b'L':'줍기'}
 
 def send_remote_cmd(cmd_byte):
     try:
@@ -388,7 +388,7 @@ def on_remote_key(name):
         send_remote_cmd(CMD_MAP[name])
     return handler
 
-for key_name in ['insert', 'home', 'page up', 'f4']:
+for key_name in ['insert', 'home', 'f4']:
     keyboard.on_release_key(key_name, on_remote_key(key_name))
 
 SLOT_NAMES = {1:'F5',2:'F6',3:'F7',4:'F8',5:'F9',6:'F10',7:'F11',8:'F12'}

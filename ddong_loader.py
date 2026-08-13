@@ -26,7 +26,7 @@ def _setup_app_dir():
 
 _setup_app_dir()
 
-# Insert/Home/PageUp 전역핫키는 관리자 권한이 있어야 리니지 위에서 바로 먹힘
+# Insert/Home 전역핫키는 관리자 권한이 있어야 리니지 위에서 바로 먹힘
 def _ensure_admin():
     try:
         if ctypes.windll.shell32.IsUserAnAdmin():
