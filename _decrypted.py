@@ -756,12 +756,6 @@ class KmBox:
         if cmd == 'T':                             # 자동클릭 토글
             self._auto = not self._auto
             return
-        if cmd == 'q':                             # 자동클릭 강제 OFF
-            self._auto = False
-            return
-        if cmd == 'w':                             # 자동클릭 강제 ON
-            self._auto = True
-            return
         if cmd == 'A':                             # F9
             self._human_press(0x42); return
         if cmd == 'B':                             # F9 두 번
@@ -2680,28 +2674,6 @@ def human_mouse_move(tx, ty, fast=False, roi=None):
             except: break
             time.sleep(human_delay(*step_sleep))
 
-def _autoclick_off():
-    """무한클릭 확실히 끔 (T 토글 아님 — 고정 시 클릭 같이 켜지는 버그 방지)."""
-    global ser
-    if not ser or not getattr(ser, "is_open", False):
-        return
-    try:
-        ser.write(b'q')
-        time.sleep(0.03)
-    except Exception:
-        pass
-
-def _autoclick_on():
-    """무한클릭 확실히 켬."""
-    global ser
-    if not ser or not getattr(ser, "is_open", False):
-        return
-    try:
-        ser.write(b'w')
-        time.sleep(0.04)
-    except Exception:
-        pass
-
 def attack_click_active():
     """무한클릭(따라클릭) 중일 때만 True. 고정은 Shift만(클릭 없음)."""
     return bool(chk_follow and chk_follow.get())
@@ -2717,16 +2689,16 @@ def _buff_target_click():
     time.sleep(human_delay(0.03, 0.08))
 
 def _pause_attack_click():
-    """고정(Shift+클릭) / 따라다니기(클릭) 잠시 해제. 복구용 상태 반환."""
+    """고정(Shift만) / 따라클릭 잠시 해제. 복구용 상태 반환."""
     was_fixed = bool(chk_fix and chk_fix.get())
     was_follow = bool(chk_follow and chk_follow.get()) and not was_fixed
     if not ser or not getattr(ser, "is_open", False):
         return False, False
     try:
         if was_fixed:
-            ser.write(b'U'); time.sleep(0.05)   # Shift 뗌 + 클릭OFF (키 잔류 방지)
+            ser.write(b'U'); time.sleep(0.05)
         elif was_follow:
-            _autoclick_off()
+            ser.write(b'T'); time.sleep(0.06)
     except Exception:
         return False, False
     return was_fixed, was_follow
@@ -2741,7 +2713,7 @@ def _resume_attack_click(was_fixed, was_follow):
             time.sleep(0.05)
             ser.write(b'H'); time.sleep(0.04)
         elif was_follow and chk_follow and chk_follow.get():
-            _autoclick_on()
+            ser.write(b'T'); time.sleep(0.04)
     except Exception:
         pass
 
@@ -2802,7 +2774,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 04:42"
+PATCH_UPDATED_AT = "2026-08-14 04:50"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3051,7 +3023,7 @@ def on_update_check_click():
 
 LATEST_PATCH = [
     "🖱️ 클릭 좌표 jitter 10% — 힐 이동·자동클릭마다 좌표 살짝 흔들림",
-    "⌨️ 고정 시 무한클릭 같이 켜지던 버그 — q/w로 클릭 강제 OFF/ON (펌웨어 q/w 필요)",
+    "⌨️ Home 고정 = U 후 H(Shift만·클릭 없음) — 펌업 추가 없음",
     "✨ 버프 클릭 — Home(클릭) 꺼져 있으면 버프키 후 K로 대상 지정",
     "💚 휠힐(힐만) — F9와 M 분리 전송, 버프/해독은 K 그대로",
     "✨ 버프·자버프 초 설정 저장 — 슬롯 체크/초 입력 바꿀 때마다 저장, 껐다 켜도 유지",
@@ -3190,7 +3162,7 @@ def stop_everything(reason="💤 대기 중"):
     if root:
         if chk_follow and chk_follow.get():
             if ser and ser.is_open:
-                try: time.sleep(0.02); _autoclick_off()
+                try: time.sleep(0.02); ser.write(b'U')
                 except: pass
             root.after(0, lambda: chk_follow.set(False))
         if chk_fix and chk_fix.get():
@@ -3317,12 +3289,10 @@ def _apply_attack_mode(mode):
         time.sleep(0.01)
         if mode == 'follow':
             ser.write(b'R'); time.sleep(0.05)
-            _autoclick_on()
+            ser.write(b'T'); time.sleep(0.06)
         else:
-            _autoclick_off()
             ser.write(b'U'); time.sleep(0.05)
             ser.write(b'H'); time.sleep(0.04)
-            _autoclick_off()
     except Exception:
         return
     if root:
