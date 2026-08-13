@@ -17,7 +17,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 02:40"
+PATCH_UPDATED_AT = "2026-08-14 02:45"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
@@ -58,7 +58,7 @@ _update_available = False
 _update_notified = False
 lbl_update = None
 
-# Windows 네이티브 알림 — overrideredirect+topmost tk 창에서 tkinter messagebox가 안 보임
+# Windows 네이티브 알림 — borderless topmost 창에서 tkinter messagebox가 안 보임
 _MB_ICONINFORMATION = 0x00000040
 _MB_ICONWARNING = 0x00000030
 _MB_ICONERROR = 0x00000010
@@ -127,7 +127,16 @@ def _mark_update_attempt(remote_ver):
     except Exception:
         pass
 
+def _resolve_pythonw():
+    exe = sys.executable
+    if exe.lower().endswith("python.exe"):
+        pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.isfile(pyw):
+            return pyw
+    return exe
+
 def restart_with_update():
+    """최신 attacker_hp.pyw 받은 뒤 배치로 교체·재실행 (실행 중 파일 덮어쓰기 회피)."""
     global running
     remote = fetch_remote_version()
     if remote:
@@ -148,30 +157,37 @@ def restart_with_update():
         )
         with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
             data = r.read()
+        if not data or b"PATCH_UPDATED_AT" not in data:
+            raise RuntimeError("다운로드한 파일이 올바르지 않습니다.")
         dest = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
-        tmp = dest + ".tmp"
-        with open(tmp, "wb") as f:
+        new_path = dest + ".new"
+        with open(new_path, "wb") as f:
             f.write(data)
-        os.replace(tmp, dest)
-        exe = sys.executable
-        if exe.lower().endswith("python.exe"):
-            pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
-            if os.path.isfile(pyw):
-                exe = pyw
-        subprocess.Popen([exe, dest], close_fds=True, cwd=SCRIPT_DIR)
-        time.sleep(0.4)
+        exe = _resolve_pythonw()
+        bat_path = os.path.join(SCRIPT_DIR, "_attacker_upd.bat")
+        bat = (
+            "@echo off\r\n"
+            "ping 127.0.0.1 -n 2 >nul\r\n"
+            'move /y "%s" "%s"\r\n'
+            'start "" "%s" "%s"\r\n'
+            'del "%%~f0"\r\n'
+        ) % (new_path, dest, exe, dest)
+        with open(bat_path, "w", encoding="utf-8") as f:
+            f.write(bat)
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        subprocess.Popen(
+            ["cmd", "/c", bat_path],
+            cwd=SCRIPT_DIR,
+            close_fds=True,
+            creationflags=flags,
+        )
+        time.sleep(0.3)
     except Exception as e:
-        try:
-            def _err():
-                _show_msgbox(
-                    "error",
-                    "업데이트 실패",
-                    "다시 받기에 실패했어요.\nhp_start.bat 으로 실행해 주세요.\n\n%s" % e,
-                )
-            if root:
-                root.after(0, _err)
-        except Exception:
-            pass
+        _show_msgbox(
+            "error",
+            "업데이트 실패",
+            "다시 받기에 실패했어요.\nhp_start.bat 으로 실행해 주세요.\n\n%s" % e,
+        )
         return
     running = False
     try:
