@@ -441,7 +441,7 @@ def buff_time_key(hb, slot):
 
 def cast_buff(hb_label, slot_label):
     """버프 시전. F2/F3이면 시전 후 반드시 F1로 복귀.
-    클릭(Home) 꺼져 있으면 버프키 후 K로 대상 지정 — 예전엔 무한클릭이 대신했음."""
+    따라가기(Home) 꺼져 있으면 버프키 후 K로 대상 지정 — 예전엔 무한클릭이 대신했음."""
     hb = hb_label.replace("F", "")
     sk = BUFF_SLOT_KEYS[slot_label]
     if hb == "1":
