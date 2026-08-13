@@ -2537,7 +2537,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-13 17:00"
+PATCH_UPDATED_AT = "2026-08-13 17:15"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2551,6 +2551,23 @@ _last_update_check = 0.0
 _update_available = False
 _update_notified = False
 lbl_update = None
+UPDATE_SKIP_FILE = "update_skip.txt"
+
+def _load_update_skip():
+    try:
+        if os.path.isfile(UPDATE_SKIP_FILE):
+            with open(UPDATE_SKIP_FILE, encoding="utf-8") as f:
+                return f.read().strip()
+    except Exception:
+        pass
+    return ""
+
+def _save_update_skip(ver):
+    try:
+        with open(UPDATE_SKIP_FILE, "w", encoding="utf-8") as f:
+            f.write(ver or "")
+    except Exception:
+        pass
 
 def fetch_remote_version():
     """GitHub version.txt 조회. 실패하면 None."""
@@ -2644,6 +2661,7 @@ def check_for_update(force=False, manual=False):
         return
     if remote == PATCH_UPDATED_AT:
         _update_available = False
+        _save_update_skip("")
         if manual:
             def _ok():
                 _set_lbl(f"업데이트 {_short}", "#a6e3a1")
@@ -2660,6 +2678,15 @@ def check_for_update(force=False, manual=False):
     _update_available = True
     if manual:
         _update_notified = False  # 수동 확인이면 안내창 다시 띄움
+    elif _load_update_skip() == remote:
+        def _skipped():
+            _set_lbl("⚠️업데이트있음", "#f9e2af")
+        try:
+            if root:
+                root.after(0, _skipped)
+        except Exception:
+            pass
+        return
     def _ui():
         global _update_notified
         _set_lbl("⚠️업데이트있음", "#f9e2af")
@@ -2674,7 +2701,10 @@ def check_for_update(force=False, manual=False):
                     "업데이트",
                     "업데이트가 있습니다.\n업데이트하시겠습니까?",
                 ):
+                    _save_update_skip("")
                     restart_with_update()
+                else:
+                    _save_update_skip(remote)
             except Exception:
                 pass
     try:
@@ -2694,6 +2724,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🔄 업데이트 반복 알림 — '아니요' 누르면 같은 버전은 다시 안 뜸 / '예' 후 최신 적용 캐시 문제 수정",
     "🕹️ 뚱박스 [설정도구] — 한글 통역 창이 앱 안에서 같이 뜨게 수정 (옛 캐시도 zip 재다운)",
     "🔑 만료일 — 구글시트 D열(만료일) 기준으로 표시·판정 (license.dat 안 씀, 1분마다 동기화)",
     "🩹 F3 버프 직후 자힐이 F3의 F9를 누르던 문제 — 힐 전 반드시 F1 단축창으로 복귀",

