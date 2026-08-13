@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>뚱박스 랜(IP) 설정 메뉴얼</title>
+<style>
+html, body { background: #FFFFFF !important; }
+body { font-family: "Malgun Gothic", "Segoe UI", sans-serif; font-size: 15px; line-height: 1.65; color: #111111 !important; margin: 16px; max-width: 720px; }
+h1 { font-size: 20px; color: #0D47A1 !important; border-bottom: 3px solid #1976D2; padding-bottom: 8px; margin-bottom: 12px; }
+h2 { font-size: 17px; color: #1565C0 !important; margin-top: 24px; margin-bottom: 8px; }
+h3 { font-size: 15px; color: #333333 !important; margin-top: 14px; }
+p, li { color: #111111 !important; }
+b, strong { color: #000000 !important; }
+img { max-width: 100%; border: 2px solid #90A4AE; margin: 10px 0 4px; border-radius: 6px; background: #FAFAFA; }
+.cap { background: #E3F2FD !important; color: #0D47A1 !important; border-left: 4px solid #1976D2; padding: 8px 12px; margin: 0 0 14px; border-radius: 4px; font-size: 14px; }
+.cap-warn { background: #FFF3E0 !important; color: #E65100 !important; border-left-color: #FB8C00; }
+.note { background: #FFF9C4 !important; color: #3E2723 !important; border-left: 5px solid #F9A825; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+.warn { background: #FFCDD2 !important; color: #B71C1C !important; border-left: 5px solid #D32F2F; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+code { background: #ECEFF1 !important; color: #0D47A1 !important; padding: 3px 8px; border-radius: 4px; font-size: 14px; font-weight: bold; }
+table { background: #FFFFFF !important; color: #111111 !important; border-collapse: collapse; margin: 8px 0; }
+td { color: #111111 !important; padding: 6px 10px; border: 1px solid #B0BEC5; }
+ol li, ul li { margin: 8px 0; }
+a { color: #1565C0 !important; }
+</style>
+</head>
+<body>
+
+<h1>뚱박스 랜(IP) 설정 메뉴얼</h1>
+<p>뚱박스(Net 포트)를 PC에 연결할 때 필요한 <b>한글 안내</b>입니다.<br>
+아래 참고 그림은 제조사 원본(중국어)이지만, <b>파란 박스 한글 설명</b>만 따라 하시면 됩니다.</p>
+
+<div class="note">
+<b>뚱힐러에서:</b> 상단 [장치] → 뚱박스 → <b>[드라이버]</b> · <b>[IP설정]</b> · <b>[메뉴얼]</b> 버튼으로 같은 작업을 할 수 있습니다.
+</div>
+
+<h2>박스 연결 (단일 PC)</h2>
+<p>게임기 포트(1번)와 Net 포트(2번) USB를 <b>같은 PC</b>에 연결합니다.</p>
+<img src="manual_img/03.png" alt="박스 연결도">
+<div class="cap"><b>▶ 한글 안내:</b> 왼쪽이 뚱박스 본체입니다. <b>1번(게임기 USB)</b>과 <b>2번(Net/네트워크 USB)</b>을 PC에 꽂고, 키보드·마우스는 박스 앞면 포트에 연결하세요.</div>
+
+<h2>1단계 — Net 포트(2번) 랜 드라이버 설치</h2>
+<ol>
+<li>Net 포트(2번) USB를 PC에 연결</li>
+<li>가상 디스크(CD-ROM)가 뜨면 → 열기 → 설치 프로그램 실행</li>
+<li>디스크가 안 뜨면 → 뚱힐러 <b>[드라이버]</b> 버튼 (WCHUSBNIC.EXE)</li>
+<li>설치 후 PC <b>재부팅</b> 권장</li>
+</ol>
+<img src="manual_img/1714548779556.png" alt="가상 디스크 드라이버">
+<div class="cap"><b>▶ 한글 안내:</b> 새로 뜬 CD-ROM(가상 디스크)을 열고, 안의 <b>설치 exe</b>를 실행하세요. 글자가 중국어여도 <b>설치(Install)</b> 버튼만 누르면 됩니다. 안 뜨면 뚱힐러 [드라이버]를 쓰세요.</div>
+<div class="warn">
+<b>주의:</b> 드라이버는 Net USB를 꽂은 <b>그 PC</b>에 설치하세요. 다른 PC에만 설치하고 선만 옮기면 안 됩니다.
+</div>
+
+<h2>2단계 — 뚱박스 전용 이더넷 IP 변경 (가장 중요!)</h2>
+<p>뚱박스 LCD에 나온 IP(예: <code>192.168.2.188</code>)와 PC가 <b>같은 대역</b>이어야 합니다.<br>
+<b>인터넷 쓰는 Wi-Fi·기존 이더넷은 절대 건드리지 마세요.</b> USB로 새로 생긴 어댑터만 수정합니다.</p>
+
+<h3>① 제어판 → 네트워크 및 공유 센터</h3>
+<img src="manual_img/04.png" alt="제어판">
+<div class="cap"><b>▶ 한글 안내:</b> Windows 검색에서 <b>「제어판」</b> 실행 → <b>「네트워크 및 공유 센터」</b>를 클릭하세요. (그림은 중국어 Windows 예시)</div>
+
+<h3>② 어댑터 설정 변경 → 뚱박스 전용 이더넷</h3>
+<img src="manual_img/1714548926047.png" alt="어댑터 목록">
+<div class="cap"><b>▶ 한글 안내:</b> 왼쪽 <b>「어댑터 설정 변경」</b> → 목록에서 <b>새로 생긴 이더넷</b>(USB Ethernet, WCH, 이더넷 2 등)을 찾으세요. Wi-Fi·인터넷용 어댑터는 선택하지 마세요.</div>
+
+<h3>③ IPv4 속성 → IP 수동 입력</h3>
+<img src="manual_img/1714548993390.png" alt="IPv4 속성">
+<div class="cap"><b>▶ 한글 안내:</b> 뚱박스용 어댑터 <b>우클릭 → 속성</b> → 목록에서 <b>「인터넷 프로토콜 버전 4(TCP/IPv4)」</b> 선택 → <b>속성</b> 버튼.</div>
+<img src="manual_img/1714549022434.png" alt="IP 입력">
+<div class="cap"><b>▶ 한글 안내:</b> <b>「다음 IP 주소 사용」</b> 선택 후 아래처럼 입력 → 확인.</div>
+<table>
+<tr><td>IP 주소</td><td><b>192.168.2.100</b> (뚱박스 188과 다른 번호)</td></tr>
+<tr><td>서브넷 마스크</td><td>255.255.255.0</td></tr>
+<tr><td>게이트웨이 / DNS</td><td>비워 둠</td></tr>
+</table>
+<div class="note">
+뚱박스 LCD IP가 188이 아니면, 같은 <code>192.168.2.x</code> 대역에서 박스와 겹치지 않는 번호(예: .100)를 쓰면 됩니다.
+</div>
+
+<h2>3단계 — ping으로 통신 확인</h2>
+<ol>
+<li>Win + R → <code>cmd</code> → Enter</li>
+<li>뚱박스 LCD에서 IP 확인 (예: 192.168.2.188)</li>
+<li>입력: <code>ping 192.168.2.188</code> (ping과 IP 사이 공백 필수)</li>
+</ol>
+<img src="manual_img/1714549075489.png" alt="cmd 실행">
+<div class="cap"><b>▶ 한글 안내:</b> Win+R → <code>cmd</code> 입력 → 확인. 검은 명령 프롬프트 창이 열립니다.</div>
+<img src="manual_img/1714549139898.png" alt="ping 명령">
+<div class="cap"><b>▶ 한글 안내:</b> <code>ping 뚱박스IP</code> 입력 후 Enter. 예: <code>ping 192.168.2.188</code></div>
+<img src="manual_img/1762505960134.png" alt="ping 성공">
+<div class="cap"><b>▶ 한글 안내:</b> <b>「응답=…」</b> 또는 <b>Reply from …</b> 이 보이면 연결 OK입니다. <b>시간 초과</b>면 1~2단계를 다시 확인하세요.</div>
+
+<h2>4단계 — 뚱힐러에 뚱박스 정보 입력</h2>
+<p>뚱박스 LCD에 표시된 값을 <b>정확히</b> 입력하세요 (하나라도 틀리면 연결 불가):</p>
+<ul>
+<li><b>IP</b> — 예: 192.168.2.188</li>
+<li><b>포트</b> — 예: 8808 (박스마다 다를 수 있음)</li>
+<li><b>UUID</b> — MAC 칸에 박스 화면 UUID 입력 (박스마다 다름)</li>
+</ul>
+<img src="manual_img/1762508652548.png" alt="박스 IP 포트 UUID">
+<div class="cap cap-warn"><b>▶ 한글 안내:</b> 그림은 제조사 설정 프로그램(중국어) 예시입니다. 뚱힐러에서는 상단 <b>IP / 포트 / UUID</b> 입력칸에 같은 숫자를 넣고 <b>설정저장</b> 후 시작하세요. 중국어 프로그램을 열 필요 없습니다.</div>
+
+<h2>자주 묻는 문제</h2>
+<ul>
+<li><b>IP 바꿨더니 인터넷 끊김</b> → Wi-Fi/본래 이더넷을 잘못 수정함. 뚱박스 Net 전용 새 어댑터만 변경.</li>
+<li><b>드라이버 설치해도 ping 안 됨</b> → Net 포트(2번) 선, 어댑터 IP, 뚱박스 전원·LCD IP 확인.</li>
+<li><b>ping은 되는데 뚱힐러만 안 됨</b> → IP/포트/UUID 일치 여부, 다른 프로그램이 뚱박스 점유 중인지 확인.</li>
+</ul>
+
+<p style="color:#888;margin-top:24px;font-size:13px;">참고 그림 출처: 제조사 공식 매뉴얼 (중국어 원본). 안내 문구는 뚱힐러용 한글입니다.</p>
+</body>
+</html>

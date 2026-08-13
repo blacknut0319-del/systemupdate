@@ -735,6 +735,8 @@ saved_v_f10 = "1200"
 saved_v_f11 = "1200"
 saved_expire_start = ""
 saved_expire_days = "0"
+sheet_expire_info = ""   # 구글시트 C열 (일수 또는 만료일) — 표시·판정은 여기만 사용
+sheet_expire_end = ""    # 구글시트 D열 (만료일)
 
 root = None
 chk_fix = None
@@ -786,26 +788,55 @@ def check_google_sheet(input_code):
     except:
         return "ERROR", "", ""
 
-def _is_code_expired(cs_info, cs_start=None):
-    """구글시트 만료 컬럼(cs_info) 판정 — 절대날짜(YYYY-MM-DD) 또는 일수(숫자) 둘 다 지원.
-    시작 프로그램 실행 후에도(5분 재검증 시) 동일 기준으로 만료를 판정하기 위해
-    시작 시점 체크와 주기적 재검증 체크가 이 함수 하나를 공통으로 사용한다."""
+def _parse_expire_date(s):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(str(s).strip(), "%Y-%m-%d")
+    except Exception:
+        return None
+
+def _effective_expire_date(cs_info, cs_start=None):
+    """만료일 우선순위: D열(만료일) → C열(날짜). C열 숫자(일수)는 D 없을 때만 참고 안 함."""
+    end_dt = _parse_expire_date(cs_start)
+    if end_dt:
+        return end_dt
     if cs_info == "0":
-        return True   # 0 = 즉시 만료
+        return None
+    return _parse_expire_date(cs_info)
+
+def _is_code_expired(cs_info, cs_start=None):
+    """구글시트 만료 판정 — D열 만료일 최우선."""
+    end_dt = _effective_expire_date(cs_info, cs_start)
+    if end_dt:
+        return datetime.now().date() > end_dt.date()
+    if cs_info == "0":
+        return True
     if not cs_info:
         return False
-    try:
-        expire_dt = datetime.strptime(cs_info, "%Y-%m-%d")   # 절대날짜
-        return datetime.now() > expire_dt
-    except Exception:
-        pass
-    try:
-        max_days = int(cs_info)   # 일수
-        start_str = cs_start or saved_expire_start or datetime.now().strftime("%Y-%m-%d")
-        start_dt = datetime.strptime(start_str, "%Y-%m-%d")
-        return (datetime.now() - start_dt).days >= max_days
-    except Exception:
-        return False
+    return False
+
+def _sync_expire_cache(cs_info, cs_start=None):
+    """구글시트 C/D → 메모리만 반영 (license.dat에는 만료일 저장 안 함)."""
+    global sheet_expire_info, sheet_expire_end
+    sheet_expire_info = (cs_info or "").strip()
+    sheet_expire_end = (cs_start or "").strip()
+
+def _auth_expire_text(cs_info=None, cs_start=None):
+    """🔑 N일 남음 표시 — D열 만료일 최우선, 구글시트 기준."""
+    info = cs_info if cs_info is not None else sheet_expire_info
+    end_raw = cs_start if cs_start is not None else sheet_expire_end
+    end_dt = _effective_expire_date(info, end_raw)
+    if end_dt:
+        days_left = (end_dt.date() - datetime.now().date()).days
+        if days_left < 0:
+            days_left = 0
+        return f"🔑 {days_left}일 남음 ({end_dt.strftime('%m/%d')} 만료)"
+    if info == "0":
+        return ""
+    if not info:
+        return "🔑 영구 사용" if loaded_pwd else ""
+    return "🔑 영구 사용"
 
 def load_hidden_config():
     global MAIN_ATTACKER_COORD, SELF_HP_COORD, SELF_HP_RGB, NOPARTY_HP_COORD, NOPARTY_RGB, PARTY_COORDS
@@ -822,7 +853,7 @@ def load_hidden_config():
     global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna
     global strong_heal_pct
     
-    text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11", "EXPIRE_START", "EXPIRE_DAYS",
+    text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11",
                        "PARTY_FLAGS", "PARTY_MODE_FLAGS", "BUFF_ON"}
     saved_pwd = None
     saved_expire_start = ""
@@ -844,8 +875,6 @@ def load_hidden_config():
             text_key_map = {
                 "V_BL": "saved_v_bl", "V_SH": "saved_v_sh", "V_BLU": "saved_v_blu",
                 "V_F10": "saved_v_f10", "V_F11": "saved_v_f11",
-                "EXPIRE_START": chr(115)+chr(97)+chr(118)+chr(101)+chr(100)+chr(95)+chr(101)+chr(120)+chr(112)+chr(105)+chr(114)+chr(101)+chr(95)+chr(115)+chr(116)+chr(97)+chr(114)+chr(116),
-                "EXPIRE_DAYS": chr(115)+chr(97)+chr(118)+chr(101)+chr(100)+chr(95)+chr(101)+chr(120)+chr(112)+chr(105)+chr(114)+chr(101)+chr(95)+chr(100)+chr(97)+chr(121)+chr(115),
                 "PARTY_FLAGS": "saved_party_flags", "PARTY_MODE_FLAGS": "saved_party_mode_flags",
                 "BUFF_ON": "saved_buff_on",
             }
@@ -1024,8 +1053,6 @@ def save_hidden_config(pwd_to_save):
                             on_s, sec_s = parts[0], parts[1]
                     f.write(f"BUFF_{hb}_{slot}={on_s}:{sec_s}\n")
             f.write(f"HW_MODE={cur_hw}\nKM_IP={cur_km_ip}\nKM_PORT={cur_km_port}\nKM_MAC={cur_km_mac}\n")
-            if saved_expire_start: f.write(f"EXPIRE_START={saved_expire_start}\n")
-            f.write(f"EXPIRE_DAYS={saved_expire_days}\n")
             f.write(f"PARTY_FLAGS={saved_party_flags}\nPARTY_MODE_FLAGS={saved_party_mode_flags}\n")
             f.write(f"SELF_HP_ROI_X1={SELF_HP_ROI[0]}\nSELF_HP_ROI_Y1={SELF_HP_ROI[1]}\nSELF_HP_ROI_X2={SELF_HP_ROI[2]}\nSELF_HP_ROI_Y2={SELF_HP_ROI[3]}\n")
             if SELF_HP_100_REF is not None: f.write(f"SELF_HP_100_REF={SELF_HP_100_REF}\n")
@@ -1559,6 +1586,7 @@ if loaded_pwd:
         if _is_code_expired(cs_info, cs_start):
             ctypes.windll.user32.MessageBoxW(0, "사용 기간이 만료된 코드입니다.", "만료", 0x10)
             sys.exit()
+        _sync_expire_cache(cs_info, cs_start)
         authenticated = True
     elif cs_result == "REGISTER":
         # HWID 자동 등록 시도
@@ -1568,6 +1596,9 @@ if loaded_pwd:
                 reg_req = urllib.request.Request(GAS_API_URL, data=reg_data, headers={"Content-Type": "application/json"})
                 reg_resp = json.loads(urllib.request.urlopen(reg_req, timeout=8).read())
                 if reg_resp.get("result") == "OK":
+                    _r, _i, _s = check_google_sheet(loaded_pwd)
+                    if _r not in ("ERROR",):
+                        _sync_expire_cache(_i, _s)
                     authenticated = True
                 else:
                     ctypes.windll.user32.MessageBoxW(0, "HWID 등록 실패. 관리자에게 문의하세요.", "등록 오류", 0x10)
@@ -1592,16 +1623,6 @@ if loaded_pwd:
     else:
         authenticated = False
 
-# 첫 사용일 자동 저장
-if authenticated and cs_info and cs_info != "0":
-    try: int(cs_info)  # 숫자(일수)인 경우만 첫사용일 저장
-    except: pass
-    else:
-        if not saved_expire_start or saved_expire_start == "":
-            saved_expire_start = datetime.now().strftime("%Y-%m-%d")
-            try: save_hidden_config(loaded_pwd if loaded_pwd else "")
-            except: pass
-
 else:
     auth_root = ctk.CTk()
     auth_root.title("뚱시스템 VIP 인증")
@@ -1618,13 +1639,10 @@ else:
         if user_com: SERIAL_PORT = user_com
         server_result, server_info, server_start = check_google_sheet(pwd)
         if server_result == "PASS":
-            global saved_expire_start, saved_expire_days
             if server_info == "0":
                 err_lbl.configure(text="만료된 코드입니다")
                 return
-            elif server_info != "":
-                saved_expire_start = server_start or datetime.now().strftime("%Y-%m-%d"); saved_expire_days = server_info
-            else: saved_expire_start = ""; saved_expire_days = "0"
+            _sync_expire_cache(server_info, server_start)
             save_hidden_config(pwd); loaded_pwd = pwd; authenticated = True
             auth_root.destroy()
         elif server_result == "REGISTER":
@@ -1635,8 +1653,9 @@ else:
                     reg_req = urllib.request.Request(GAS_API_URL, data=reg_data, headers={"Content-Type": "application/json"})
                     reg_resp = json.loads(urllib.request.urlopen(reg_req, timeout=8).read())
                     if reg_resp.get("result") == "OK":
-                        if server_info != "0": saved_expire_start = datetime.now().strftime("%Y-%m-%d"); saved_expire_days = server_info
-                        else: saved_expire_start = ""; saved_expire_days = "0"
+                        _r, _i, _s = check_google_sheet(pwd)
+                        if _r not in ("ERROR",):
+                            _sync_expire_cache(_i, _s)
                         save_hidden_config(pwd); loaded_pwd = pwd; authenticated = True
                         auth_root.destroy()
                     else:
@@ -2518,7 +2537,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-12 13:40"
+PATCH_UPDATED_AT = "2026-08-13 16:35"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2675,6 +2694,8 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🕹️ 뚱박스 — [IP설정] 한글 안내, [설정도구] 누르면 중국어 프로그램+한글 통역 창 같이 열림",
+    "🔑 만료일 — 구글시트 D열(만료일) 기준으로 표시·판정 (license.dat 안 씀, 1분마다 동기화)",
     "🩹 F3 버프 직후 자힐이 F3의 F9를 누르던 문제 — 힐 전 반드시 F1 단축창으로 복귀",
     "🔴 자힐 — 확률% 제거, 평소 힐만 / 피50%↓ 위험 시 물약+힐 같이 (타이밍만 사람처럼)",
     "🩹 파티힐 멈칫 — 파티창 깜빡여도 바로 안 끊기게, 타겟 짧은 홀드",
@@ -2805,22 +2826,12 @@ def get_safe_int(var, default=1200):
 def update_ui_timer():
     global running, root, lbl_buff, lbl_status
     global last_buff_seq, BUFF_SEQ_GAP, last_auth_check, loaded_pwd, last_log, lbl_log
-    global shutdown_time, lbl_auth, saved_expire_start, saved_expire_days
+    global shutdown_time, lbl_auth, sheet_expire_info, sheet_expire_end
     global chk_buff_on, _buff_cfg, buff_next_due, last_buff_global
     _upd_boot = True
     while True:
         if root and lbl_auth:
-            auth_text = ""
-            if saved_expire_start and saved_expire_days and saved_expire_days != "0":
-                try:
-                    start_dt = datetime.strptime(saved_expire_start, "%Y-%m-%d")
-                    days_left = int(saved_expire_days) - (datetime.now() - start_dt).days
-                    if days_left < 0: days_left = 0
-                    from datetime import timedelta as td
-                    expire_dt = start_dt + td(days=int(saved_expire_days))
-                    auth_text = f"🔑 {days_left}일 남음 ({expire_dt.strftime('%m/%d')} 만료)"
-                except: auth_text = "🔑 영구 사용"
-            elif loaded_pwd: auth_text = "🔑 영구 사용"
+            auth_text = _auth_expire_text()
             root.after(0, lambda t=auth_text: lbl_auth.configure(text=t))
         if root and lbl_log and last_log:
             txt = last_log
@@ -2845,9 +2856,8 @@ def update_ui_timer():
                 check_for_update(force=False)
             except Exception:
                 pass
-        # 5분마다 구글시트 재검증 (실행 중이 아니어도 만료되면 프로그램 강제 종료)
-        # ERROR(네트워크 일시장애)는 만료가 아니므로 강제종료하지 않음 — USB/뚱박스와 무관
-        if loaded_pwd and (now_ts - last_auth_check > 300):
+        # 1분마다 구글시트에서 만료일 재조회 (표시·만료 판정 모두 시트 기준)
+        if loaded_pwd and (now_ts - last_auth_check > 60):
             last_auth_check = now_ts
             cs_result, cs_info, cs_start = check_google_sheet(loaded_pwd)
             if cs_result == "ERROR":
@@ -2857,6 +2867,8 @@ def update_ui_timer():
                 force_auth_exit("인증 만료")
             elif cs_result != "ERROR" and _is_code_expired(cs_info, cs_start):
                 force_auth_exit("코드 만료")
+            elif cs_result not in ("ERROR",):
+                _sync_expire_cache(cs_info, cs_start)
         if running:
             now = time.time(); txt_parts = []
             gap_remain = max(0, int(BUFF_SEQ_GAP - (now - last_buff_seq)))
@@ -3150,11 +3162,8 @@ def _kmbox_setup_action(kind):
                 subprocess.Popen([path], cwd=os.path.dirname(path), shell=True)
                 msg = "랜드라이버 설치를 실행했어요.\n설치 후 PC 재부팅을 권장합니다."
             elif kind == "setup":
-                path = _kmbox_find_file("kmboxNet_setup.exe")
-                if not path:
-                    raise RuntimeError("kmboxNet_setup.exe 없음")
-                subprocess.Popen([path], cwd=os.path.dirname(path), shell=True)
-                msg = "Net 설정도구를 실행했어요."
+                launch_kmbox_official_setup_with_guide()
+                msg = "뚱박스 설정도구 + 한글 통역 창을 열었어요.\n통역 창 보면서 连接盒子(연결) 하세요."
             else:
                 path = _kmbox_find_file("랜설정_메뉴얼.html", "랜설정_메뉴얼.txt")
                 if not path:
@@ -3182,10 +3191,110 @@ def _kmbox_setup_action(kind):
 
     Thread(target=_work, daemon=True).start()
 
+def launch_kmbox_official_setup_with_guide():
+    """중국어 kmboxNet_setup.exe 실행 + 한글 통역 창 동시 오픈."""
+    path = _kmbox_find_file("kmboxNet_setup.exe")
+    if not path:
+        raise RuntimeError("kmboxNet_setup.exe 없음")
+    subprocess.Popen([path], cwd=os.path.dirname(path), shell=True)
+    guide = _kmbox_find_file("설정도구_한글통역.html")
+    if guide:
+        os.startfile(guide)
+
+def _kmbox_suggest_pc_ip(box_ip):
+    """박스 IP와 같은 대역의 PC용 IP 제안."""
+    try:
+        parts = str(box_ip or "").strip().split(".")
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            last = int(parts[3])
+            pc_last = 100 if last != 100 else 101
+            return ".".join(parts[:3] + [str(pc_last)])
+    except Exception:
+        pass
+    return "192.168.2.100"
+
+def open_kmbox_korean_setup():
+    """Net 설정 — 한글 안내 (중국어 kmboxNet_setup.exe 대신)."""
+    global root
+    if not root:
+        return
+    try:
+        ensure_kmbox_setup_pack()
+    except Exception:
+        pass
+    box_ip = (ent_km_ip.get().strip() if 'ent_km_ip' in globals() and ent_km_ip else KM_IP) or "192.168.2.188"
+    pc_ip = _kmbox_suggest_pc_ip(box_ip)
+    dlg = ctk.CTkToplevel(root)
+    dlg.title("뚱박스 Net IP 설정 (한글)")
+    dlg.attributes("-topmost", True)
+    dlg.configure(fg_color="#1e1e2e")
+    sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+    dlg.geometry(f"420x520+{int((sw-420)/2)}+{int((sh-520)/2)}")
+    ctk.CTkLabel(dlg, text="뚱박스 랜(IP) 설정", font=("Malgun Gothic", 14, "bold"), text_color="#cba6f7").pack(pady=(12, 4))
+    ctk.CTkLabel(dlg, text="박스 화면 IP와 PC가 같은 대역이어야 연결됩니다.", font=("Malgun Gothic", 10), text_color="#a6adc8").pack(pady=(0, 8))
+    info = ctk.CTkFrame(dlg, fg_color="#313244", corner_radius=8)
+    info.pack(fill="x", padx=14, pady=4)
+    ctk.CTkLabel(info, text=f"박스 IP (위 입력칸):  {box_ip}", font=("Malgun Gothic", 11, "bold"), text_color="#a6e3a1").pack(anchor="w", padx=12, pady=(10, 2))
+    ctk.CTkLabel(info, text=f"PC에 넣을 IP 예시:  {pc_ip}", font=("Malgun Gothic", 11, "bold"), text_color="#89b4fa").pack(anchor="w", padx=12, pady=(2, 10))
+    txt = ctk.CTkTextbox(dlg, width=392, height=240, font=("Malgun Gothic", 10), fg_color="#181825", text_color="#cdd6f4")
+    txt.pack(padx=14, pady=8)
+    guide = (
+        "【설정 순서】\n"
+        "1. [드라이버] 버튼으로 랜드라이버 설치 (처음 1회)\n"
+        "2. 아래 [네트워크 어댑터 열기] 클릭\n"
+        "3. 새로 생긴 이더넷(USB/WCH 등) 우클릭 → 속성\n"
+        "4. IPv4 → 다음 IP 주소 사용\n"
+        f"     IP: {pc_ip}\n"
+        "     서브넷: 255.255.255.0\n"
+        "     게이트웨이·DNS: 비워둠\n"
+        "5. 위 폼에 박스 IP·포트·UUID 입력 후 [설정저장]\n\n"
+        "※ Wi-Fi/인터넷 쓰는 어댑터는 건드리지 마세요.\n"
+        "※ ping 테스트: cmd → ping " + box_ip + "\n"
+    )
+    txt.insert("1.0", guide)
+    txt.configure(state="disabled")
+    btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+    btn_row.pack(fill="x", padx=14, pady=4)
+    btn_row.grid_columnconfigure(0, weight=1)
+    btn_row.grid_columnconfigure(1, weight=1)
+
+    def _open_adapters():
+        try:
+            subprocess.Popen(["ncpa.cpl"], shell=True)
+        except Exception as ex:
+            messagebox.showerror("뚱박스 셋팅", str(ex))
+
+    def _open_manual():
+        path = _kmbox_find_file("랜설정_메뉴얼.html", "랜설정_메뉴얼.txt")
+        if path:
+            os.startfile(path)
+        else:
+            messagebox.showinfo("뚱박스 셋팅", "메뉴얼 파일을 찾지 못했어요.")
+
+    def _open_chinese_tool():
+        def _work():
+            try:
+                ok, info = ensure_kmbox_setup_pack()
+                if not ok:
+                    root.after(0, lambda: messagebox.showerror("뚱박스 셋팅", str(info)))
+                    return
+                launch_kmbox_official_setup_with_guide()
+            except Exception as ex:
+                root.after(0, lambda: messagebox.showerror("뚱박스 셋팅", str(ex)))
+        Thread(target=_work, daemon=True).start()
+
+    ctk.CTkButton(btn_row, text="네트워크 어댑터 열기", command=_open_adapters, height=30, font=("Malgun Gothic", 10, "bold"), fg_color="#89b4fa", hover_color="#74c7ec", text_color="#1e1e2e").grid(row=0, column=0, padx=(0, 4), sticky="ew")
+    ctk.CTkButton(btn_row, text="한글 메뉴얼", command=_open_manual, height=30, font=("Malgun Gothic", 10, "bold"), fg_color="#313244", hover_color="#45475a").grid(row=0, column=1, padx=(4, 0), sticky="ew")
+    ctk.CTkButton(dlg, text="공식 설정도구 + 한글통역", command=_open_chinese_tool, height=28, font=("Malgun Gothic", 10, "bold"), fg_color="#a6e3a1", hover_color="#7bd88f", text_color="#1e1e2e").pack(fill="x", padx=14, pady=(4, 2))
+    ctk.CTkButton(dlg, text="닫기", command=dlg.destroy, height=28, font=("Malgun Gothic", 10, "bold"), fg_color="#45475a", hover_color="#585b70").pack(fill="x", padx=14, pady=(2, 12))
+
 def on_kmbox_driver_click():
     _kmbox_setup_action("driver")
 
 def on_kmbox_setup_click():
+    open_kmbox_korean_setup()
+
+def on_kmbox_net_setup_click():
     _kmbox_setup_action("setup")
 
 def on_kmbox_manual_click():
@@ -4087,8 +4196,8 @@ _km_btn_kw = dict(
     text_color="#e2e8f0",
 )
 ctk.CTkButton(_kmr_tools, text="드라이버", command=on_kmbox_driver_click, **_km_btn_kw).grid(row=0, column=0, padx=(2, 1), sticky="ew")
-ctk.CTkButton(_kmr_tools, text="설정도구", command=on_kmbox_setup_click, **_km_btn_kw).grid(row=0, column=1, padx=1, sticky="ew")
-ctk.CTkButton(_kmr_tools, text="메뉴얼", command=on_kmbox_manual_click, **_km_btn_kw).grid(row=0, column=2, padx=(1, 2), sticky="ew")
+ctk.CTkButton(_kmr_tools, text="IP설정", command=on_kmbox_setup_click, **_km_btn_kw).grid(row=0, column=1, padx=1, sticky="ew")
+ctk.CTkButton(_kmr_tools, text="설정도구", command=on_kmbox_net_setup_click, **_km_btn_kw).grid(row=0, column=2, padx=(1, 2), sticky="ew")
 
 def _toggle_km_fields():
     """뚱박스 입력칸 보이기/숨기기만 — 재연결 요청은 여기서 안 함."""

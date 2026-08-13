@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>뚱박스 설정도구 — 한글 통역</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: "Malgun Gothic", sans-serif; margin: 0; background: #1e1e2e; color: #cdd6f4; font-size: 14px; line-height: 1.55; }
+.wrap { max-width: 900px; margin: 0 auto; padding: 12px 16px 24px; }
+h1 { font-size: 18px; color: #cba6f7; margin: 0 0 6px; }
+.sub { color: #a6adc8; font-size: 13px; margin-bottom: 14px; }
+.sticky { position: sticky; top: 0; background: #181825; border-bottom: 2px solid #45475a; padding: 10px 0; z-index: 10; margin-bottom: 12px; }
+.step { background: #313244; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; border-left: 4px solid #89b4fa; }
+.step b { color: #89b4fa; }
+.warn { background: #452326; border-left-color: #f38ba8; color: #f9e2af; }
+.ok { background: #1e3a2f; border-left-color: #a6e3a1; }
+img { width: 100%; border: 2px solid #585b70; border-radius: 6px; margin: 8px 0; }
+table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+th { background: #45475a; color: #fff; padding: 8px; text-align: left; }
+td { border: 1px solid #45475a; padding: 7px 8px; vertical-align: top; }
+td.cn { color: #fab387; font-weight: bold; white-space: nowrap; }
+td.kr { color: #a6e3a1; }
+h2 { font-size: 15px; color: #89b4fa; margin: 18px 0 8px; }
+.note { font-size: 12px; color: #9399b2; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="sticky">
+  <h1>뚱박스 설정도구 — 실시간 한글 통역</h1>
+  <div class="sub">옆에 뜬 <b>중국어 프로그램(kmboxNet)</b> 보면서 이 창만 보세요. 뚱힐러만 쓸 거면 IP/포트/UUID는 뚱힐러 입력칸에 넣으면 됩니다.</div>
+</div>
+
+<div class="step ok">
+  <b>① 가장 먼저 할 일</b><br>
+  중국어 창 왼쪽 위 <span class="cn" style="color:#fab387">连接盒子</span> = <b>「뚱박스 연결」</b> 버튼 클릭<br>
+  IP / Port / UUID는 <b>뚱박스 LCD 화면</b> 숫자 그대로 입력 (틀리면 연결 안 됨)
+</div>
+
+<div class="step warn">
+  <b>② 뚱힐러 사용자 필수</b><br>
+  <span class="cn" style="color:#fab387">禁用Bypass</span> 체크 = <b>Bypass 끄기(KM 모드)</b> — 뚱힐러는 이 상태여야 합니다.<br>
+  <span class="cn" style="color:#fab387">启用Bypass</span> = Bypass 켜기 — 초보는 건드리지 마세요.
+</div>
+
+<h2>설정도구 화면 (중국어 → 한글)</h2>
+<img src="manual_img/1762512743361.png" alt="설정도구 전체 화면">
+<p class="note">※ 위 그림: 제조사 설정 프로그램 전체 화면. 빨간 숫자는 공식 순서.</p>
+
+<h2>자주 보는 글자 빠른 찾기</h2>
+<table>
+<tr><th>중국어 (프로그램)</th><th>한글 뜻</th><th>뚱힐러에서</th></tr>
+<tr><td class="cn">连接盒子</td><td class="kr">뚱박스 연결</td><td>뚱힐러 Insert 시작이 대신 연결</td></tr>
+<tr><td class="cn">IP / Port / UUID</td><td class="kr">IP / 포트 / UUID</td><td>뚱힐러 상단 입력칸에 동일하게</td></tr>
+<tr><td class="cn">网络畅通</td><td class="kr">네트워크 연결 OK</td><td>ping 성공이면 이 상태</td></tr>
+<tr><td class="cn">网络不通</td><td class="kr">네트워크 연결 실패</td><td>드라이버·PC IP·선 확인</td></tr>
+<tr><td class="cn">启用Bypass</td><td class="kr">Bypass(드라이버直通) 켜기</td><td>뚱힐러: 끄기</td></tr>
+<tr><td class="cn">禁用Bypass</td><td class="kr">Bypass 끄기 = KM 모드</td><td>뚱힐러: 이거 체크</td></tr>
+<tr><td class="cn">键鼠功能测试</td><td class="kr">키보드·마우스 테스트</td><td>연결 확인용, 안 써도 됨</td></tr>
+<tr><td class="cn">设备端参数设置</td><td class="kr">뚱박스 내부 설정</td><td>고급, 건드리지 마세요</td></tr>
+<tr><td class="cn">主机端参数设置</td><td class="kr">PC(호스트) 쪽 설정</td><td>고급, 건드리지 마세요</td></tr>
+<tr><td class="cn">硬件曲线修正</td><td class="kr">마우스 궤적 보정</td><td>기본 끔 — 체크 해제 유지</td></tr>
+<tr><td class="cn">监听键鼠</td><td class="kr">키·마우스 감시</td><td>개발자용, 끔</td></tr>
+<tr><td class="cn">盒子固件升级</td><td class="kr">뚱박스 펌웨어 업그레이드</td><td>필요할 때만</td></tr>
+<tr><td class="cn">恢复出厂设置</td><td class="kr">공장 초기화</td><td>망가졌을 때만</td></tr>
+<tr><td class="cn">相对移动</td><td class="kr">마우스 상대 이동 테스트</td><td>테스트용</td></tr>
+<tr><td class="cn">模拟Win键</td><td class="kr">윈도우 키 테스트</td><td>테스트용</td></tr>
+</table>
+
+<h2>뚱박스 LCD 아이콘 (화면 작은 그림)</h2>
+<table>
+<tr><th>표시</th><th>한글</th></tr>
+<tr><td>游戏机口 ✓</td><td>게임 PC(1번 USB) 연결됨</td></tr>
+<tr><td>网口 ✓</td><td>뚱힐러/설정도구가 뚱박스에 연결됨</td></tr>
+<tr><td>键盘口 / 鼠标口 ✓</td><td>키보드·마우스 연결됨</td></tr>
+<tr><td>打叉 ✗</td><td>연결 끊김 — 선·재시작 확인</td></tr>
+</table>
+
+<h2>뚱힐러만 쓸 때 (설정도구 최소 사용)</h2>
+<div class="step">
+  1. [드라이버] 설치 → 재부팅<br>
+  2. PC 랜 IP 맞추기 (메뉴얼 참고)<br>
+  3. ping 뚱박스IP 성공 확인<br>
+  4. 설정도구에서 <b>连接盒子</b> 한 번 + <b>禁用Bypass</b> 체크<br>
+  5. 뚱힐러에 IP/포트/UUID 입력 → 설정저장 → 시작
+</div>
+
+<p class="note" style="margin-top:20px;">이 통역창은 뚱힐러/뚱박스 셋팅 패키지에 포함됩니다. exe 안 글자는 제조사 파일이라 한글로 바꿀 수 없고, 이 창으로 대신 안내합니다.</p>
+</div>
+</body>
+</html>
