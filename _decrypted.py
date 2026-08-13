@@ -107,7 +107,16 @@ def get_hwid():
         seed = str(uuid.getnode())
     return hashlib.md5(seed.encode()).hexdigest()[:8].upper()
 
+def get_hwid_legacy():
+    """구버전(MAC) PC ID — 시트 B열이 예전 방식일 때 호환용."""
+    return hashlib.md5(str(uuid.getnode()).encode()).hexdigest()[:8].upper()
+
 MY_HWID = get_hwid()
+MY_HWID_LEGACY = get_hwid_legacy()
+
+def hwid_matches(db_hwid):
+    u = (db_hwid or "").strip().upper()
+    return u in (MY_HWID, MY_HWID_LEGACY)
 
 def auto_find_arduino():
     ports = serial.tools.list_ports.comports()
@@ -805,7 +814,7 @@ def check_google_sheet(input_code):
                         return "REGISTER", db_expire, db_start
                     if db_hwid == "ANY":
                         return "PASS", db_expire, db_start
-                    if db_hwid != MY_HWID:
+                    if not hwid_matches(db_hwid):
                         return "ALREADY_IN_USE", "", ""
                     return "PASS", db_expire, db_start
         return "NOT_FOUND", "", "" 
@@ -1085,7 +1094,7 @@ def save_hidden_config(pwd_to_save):
                             on_s, sec_s = parts[0], parts[1]
                     f.write(f"BUFF_{hb}_{slot}={on_s}:{sec_s}\n")
             f.write(f"HW_MODE={cur_hw}\nKM_IP={cur_km_ip}\nKM_PORT={cur_km_port}\nKM_MAC={cur_km_mac}\n")
-            f.write(f"WIN_W={saved_win_w}\nWIN_H={saved_win_h}\n")
+            f.write(f"WIN_W={saved_win_w}\n")
             f.write(f"PARTY_FLAGS={saved_party_flags}\nPARTY_MODE_FLAGS={saved_party_mode_flags}\n")
             f.write(f"SELF_HP_ROI_X1={SELF_HP_ROI[0]}\nSELF_HP_ROI_Y1={SELF_HP_ROI[1]}\nSELF_HP_ROI_X2={SELF_HP_ROI[2]}\nSELF_HP_ROI_Y2={SELF_HP_ROI[3]}\n")
             if SELF_HP_100_REF is not None: f.write(f"SELF_HP_100_REF={SELF_HP_100_REF}\n")
@@ -1711,6 +1720,7 @@ else:
     com_entry.pack(pady=5); com_entry.insert(0, SERIAL_PORT)
     err_lbl = ctk.CTkLabel(auth_root, text="", text_color="#ef4444", font=("Malgun Gothic", 9))
     err_lbl.pack(pady=(0, 5))
+    ctk.CTkLabel(auth_root, text=f"PC ID: {MY_HWID}", text_color="#6c7086", font=("Consolas", 9)).pack(pady=(0, 4))
     ctk.CTkButton(auth_root, text="시스템 잠금 해제", command=check_login, fg_color='#89b4fa', hover_color="#74c7ec", text_color='#1e1e2e', font=('Malgun Gothic', 11, 'bold'), width=180, height=30).pack(pady=15)
     auth_root.mainloop()
 
@@ -2570,7 +2580,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 00:25"
+PATCH_UPDATED_AT = "2026-08-14 00:30"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2699,7 +2709,10 @@ def check_for_update(force=False, manual=False):
             def _ok():
                 _set_lbl(f"업데이트 {_short}", "#a6e3a1")
                 try:
-                    messagebox.showinfo("업데이트 확인", "최신이에요.\n다시 받을 필요 없어요.")
+                    messagebox.showinfo(
+                        "업데이트 확인",
+                        "최신이에요.\n다시 받을 필요 없어요.\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
+                    )
                 except Exception:
                     pass
             try:
@@ -2757,6 +2770,8 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "📐 접이식 접으면 창 높이 자동 축소 — 저장된 높이(WIN_H) 안 씀, 너비만 저장",
+    "🔑 PC ID — MachineGuid 기준 + 예전 MAC ID 시트 호환 / 로그인창에 PC ID 표시",
     "📐 접이식(옵션/버프/힐) 접으면 창 높이 자동으로 줄어들게 복구",
     "🔄 격수도 상단 [업데이트] — 뚱힐러처럼 확인 후 껐다 켜서 최신 적용",
     "📐 창 크기 — 오른쪽 아래 ◢ 드래그로 뚱힐러·격수 창 조절 (크기 저장)",
@@ -4213,17 +4228,18 @@ _WIN_MIN_W, _WIN_MAX_W = 165, 420
 _WIN_MIN_H, _WIN_MAX_H = 180, 900
 
 def sync_window_height():
-    """내용 높이에 맞춰 창 높이 동기화 (펼침·접힘 모두)."""
+    """내용 높이에 맞춰 창 높이 동기화 (펼침·접힘 모두). 높이는 저장 안 함."""
     try:
         if root and root.winfo_exists() and not _ui_busy():
+            root.update_idletasks()
             req_h = root.winfo_reqheight()
-            cur_h = root.winfo_height()
             w = root.winfo_width()
             if w < 120:
                 w = saved_win_w
-            if req_h > 200 and abs(req_h - cur_h) > 4:
+            if req_h > 200:
                 nh = max(_WIN_MIN_H, min(_WIN_MAX_H, req_h))
-                root.geometry(f"{int(w)}x{int(nh)}+{root.winfo_x()}+{root.winfo_y()}")
+                if abs(nh - root.winfo_height()) > 2:
+                    root.geometry(f"{int(w)}x{int(nh)}+{root.winfo_x()}+{root.winfo_y()}")
     except Exception:
         pass
 
@@ -4241,17 +4257,17 @@ def _do_resize(event):
     root.geometry(f"{int(nw)}x{int(nh)}+{root.winfo_x()}+{root.winfo_y()}")
 
 def _end_resize(event):
-    global saved_win_w, saved_win_h
+    global saved_win_w
     try:
         saved_win_w = root.winfo_width()
-        saved_win_h = root.winfo_height()
+        sync_window_height()
         if loaded_pwd:
             save_hidden_config(loaded_pwd)
     except Exception:
         pass
 
 root = ctk.CTk()
-root.geometry(f"{saved_win_w}x{saved_win_h}+0+0")
+root.geometry(f"{saved_win_w}x380+0+0")
 root.attributes("-topmost", True)
 def auto_resize_height():
     sync_window_height()
@@ -4822,4 +4838,5 @@ resize_grip.place(relx=1.0, rely=1.0, anchor="se")
 resize_grip.bind("<ButtonPress-1>", _start_resize)
 resize_grip.bind("<B1-Motion>", _do_resize)
 resize_grip.bind("<ButtonRelease-1>", _end_resize)
+root.after(300, sync_window_height)
 root.mainloop()
