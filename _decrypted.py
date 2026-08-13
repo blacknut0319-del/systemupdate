@@ -2674,6 +2674,14 @@ def human_mouse_move(tx, ty, fast=False, roi=None):
             except: break
             time.sleep(human_delay(*step_sleep))
 
+def _fix_shift_down():
+    try: keyboard.press('shift')
+    except Exception: pass
+
+def _fix_shift_up():
+    try: keyboard.release('shift')
+    except Exception: pass
+
 def attack_click_active():
     """무한클릭(따라클릭) 중일 때만 True. 고정은 Shift만(클릭 없음)."""
     return bool(chk_follow and chk_follow.get())
@@ -2696,6 +2704,7 @@ def _pause_attack_click():
         return False, False
     try:
         if was_fixed:
+            _fix_shift_up()
             ser.write(b'U'); time.sleep(0.05)
         elif was_follow:
             ser.write(b'T'); time.sleep(0.06)
@@ -2708,11 +2717,8 @@ def _resume_attack_click(was_fixed, was_follow):
         return
     try:
         if was_fixed and chk_fix and chk_fix.get():
-            ser.write(b'H'); time.sleep(0.04)   # 고정 복구
-            # 시리얼 씹힘 대비: 'H'는 절대상태 지정(누름)이라 중복 전송해도 안전 → 한 번 더 보내 유실 확률 낮춤
-            time.sleep(0.05)
-            ser.write(b'H'); time.sleep(0.04)
-        elif was_follow and chk_follow and chk_follow.get():
+            _fix_shift_down()
+        elif was_follow and chk_follow and chk_follow.get() and not (chk_fix and chk_fix.get()):
             ser.write(b'T'); time.sleep(0.04)
     except Exception:
         pass
@@ -2774,7 +2780,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 04:50"
+PATCH_UPDATED_AT = "2026-08-14 05:00"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3023,7 +3029,7 @@ def on_update_check_click():
 
 LATEST_PATCH = [
     "🖱️ 클릭 좌표 jitter 10% — 힐 이동·자동클릭마다 좌표 살짝 흔들림",
-    "⌨️ Home 고정 = U 후 H(Shift만·클릭 없음) — 펌업 추가 없음",
+    "⌨️ Home 고정 — U로 클릭만 끄고 Shift는 PC키 (H 안 씀, 펌업 없음)",
     "✨ 버프 클릭 — Home(클릭) 꺼져 있으면 버프키 후 K로 대상 지정",
     "💚 휠힐(힐만) — F9와 M 분리 전송, 버프/해독은 K 그대로",
     "✨ 버프·자버프 초 설정 저장 — 슬롯 체크/초 입력 바꿀 때마다 저장, 껐다 켜도 유지",
@@ -3166,12 +3172,13 @@ def stop_everything(reason="💤 대기 중"):
                 except: pass
             root.after(0, lambda: chk_follow.set(False))
         if chk_fix and chk_fix.get():
+            _fix_shift_up()
             if ser and ser.is_open:
-                try: time.sleep(0.05); ser.write(b'U'); time.sleep(0.1) 
+                try: time.sleep(0.05); ser.write(b'U'); time.sleep(0.1)
                 except: pass
             root.after(0, lambda: chk_fix.set(False))
         if lbl_status: root.after(0, lambda: lbl_status.configure(text=reason, text_color="#f38ba8"))
-    try: keyboard.release('shift'); time.sleep(0.01)
+    try: _fix_shift_up(); time.sleep(0.01)
     except: pass
     if ser and ser.is_open:
         try: time.sleep(0.05); ser.write(b'U'); time.sleep(0.1) 
@@ -3284,22 +3291,25 @@ def _apply_attack_mode(mode):
     global ser, running, root, chk_follow, chk_fix
     if not running or not ser or not getattr(ser, "is_open", False):
         return
+    # UI 먼저 갱신 — 힐 직후 resume이 T로 클릭 다시 켜는 레이스 방지
+    if root:
+        if mode == 'follow':
+            chk_fix.set(False)
+            chk_follow.set(True)
+        else:
+            chk_follow.set(False)
+            chk_fix.set(True)
     try:
-        keyboard.release('shift')
+        _fix_shift_up()
         time.sleep(0.01)
         if mode == 'follow':
             ser.write(b'R'); time.sleep(0.05)
             ser.write(b'T'); time.sleep(0.06)
         else:
-            ser.write(b'U'); time.sleep(0.05)
-            ser.write(b'H'); time.sleep(0.04)
+            ser.write(b'U'); time.sleep(0.05)   # 무한클릭 OFF (H 안 씀 — 구펌이 클릭 다시 켤 수 있음)
+            _fix_shift_down()                   # Shift는 PC 쪽만
     except Exception:
         return
-    if root:
-        if mode == 'follow':
-            root.after(0, lambda: (chk_fix.set(False), chk_follow.set(True)))
-        else:
-            root.after(0, lambda: (chk_follow.set(False), chk_fix.set(True)))
 
 def on_home_click_toggle(e=None):
     """Home — 따라클릭 ↔ 고정(제자리, 클릭 없음) 토글. Insert는 시작/종료만."""
@@ -5232,12 +5242,15 @@ def udp_macro_slot(n):
         key = UDP_SLOT_KEYS.get(n, '5')
         time.sleep(0.02)
         is_fixed = chk_fix.get() if chk_fix else False
-        if is_fixed: ser.write(b'R'); time.sleep(0.10)
+        if is_fixed:
+            _fix_shift_up()
+            ser.write(b'R'); time.sleep(0.10)
         ser.write(b'3'); time.sleep(random.uniform(0.30, 0.45))
         ser.write(key.encode()); time.sleep(0.15)
         ser.write(b'K'); time.sleep(0.10)
         ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
-        if is_fixed: ser.write(b'H'); time.sleep(0.05)
+        if is_fixed:
+            _fix_shift_down()
     except: pass
 def udp_listener():
     """격수모니터 → 뚱힐러 UDP 수신 (포트 9999).
