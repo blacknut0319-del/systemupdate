@@ -68,6 +68,7 @@ import numpy as np
 import socket
 import struct
 import json
+from queue import Queue, Empty
 
 try:
     import kmNet
@@ -576,6 +577,8 @@ _stream_client = None
 _stream_client_lock = Lock()
 _stream_roi = (0, 0, 0, 0)   # 0=미설정 → 주 모니터 전체
 _remote_control_until = 0.0
+_remote_mouse_lock = Lock()
+_remote_mouse_queue = Queue(maxsize=32)
 attacker_hp_udp = 100.0
 attacker_poisoned = False
 attacker_petrified = False
@@ -1062,6 +1065,7 @@ def load_hidden_config():
     global MNA_ROI, MNA_100_REF, mna_threshold, MNA_HOTBAR, MNA_SLOT
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
+    global _stream_roi
     global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna, saved_chk_end_bert, saved_chk_wheel_heal
     global strong_heal_pct, saved_win_w, saved_win_h
     
@@ -1115,6 +1119,7 @@ def load_hidden_config():
             self_roi_vals = [0, 0, 0, 0]
             danger_roi_vals = [0, 0, 0, 0]
             mna_roi_vals = [0, 0, 0, 0]
+            stream_roi_vals = [0, 0, 0, 0]
             party_roi_vals = [[0,0,0,0] for _ in range(8)]
             party_name_roi_vals = [[0,0,0,0] for _ in range(8)]
             
@@ -1161,6 +1166,10 @@ def load_hidden_config():
                 if key == "MNA_ROI_Y1": mna_roi_vals[1] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
                 if key == "MNA_ROI_X2": mna_roi_vals[2] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
                 if key == "MNA_ROI_Y2": mna_roi_vals[3] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
+                if key == "STREAM_ROI_X1": stream_roi_vals[0] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
+                if key == "STREAM_ROI_Y1": stream_roi_vals[1] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
+                if key == "STREAM_ROI_X2": stream_roi_vals[2] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
+                if key == "STREAM_ROI_Y2": stream_roi_vals[3] = int(val_str) if val_str.lstrip('-').isdigit() else 0; continue
                 if key == "MNA_100_REF": MNA_100_REF = int(val_str) if val_str.lstrip('-').isdigit() else None; continue
                 if key == "MNA_THRESHOLD": mna_threshold = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
                 if key == "MNA_HOTBAR": MNA_HOTBAR = val_str if val_str in BUFF_HOTBARS else "F2"; continue
@@ -1217,6 +1226,8 @@ def load_hidden_config():
         if self_roi_vals[0] != 0 or self_roi_vals[2] != 0: SELF_HP_ROI = tuple(self_roi_vals)
         if danger_roi_vals[0] != 0 or danger_roi_vals[2] != 0: DANGER_HP_ROI = tuple(danger_roi_vals)
         if mna_roi_vals[0] != 0 or mna_roi_vals[2] != 0: MNA_ROI = tuple(mna_roi_vals)
+        if stream_roi_vals[2] > stream_roi_vals[0] and stream_roi_vals[3] > stream_roi_vals[1]:
+            _stream_roi = tuple(stream_roi_vals)
         for pi in range(8):
             if party_roi_vals[pi][0] != 0 or party_roi_vals[pi][2] != 0: PARTY_ROIS[pi] = tuple(party_roi_vals[pi])
             if party_name_roi_vals[pi][0] != 0 or party_name_roi_vals[pi][2] != 0: PARTY_NAME_ROIS[pi] = tuple(party_name_roi_vals[pi])
@@ -1303,6 +1314,7 @@ def save_hidden_config(pwd_to_save):
             if DANGER_HP_100_REF is not None: f.write(f"DANGER_HP_100_REF={DANGER_HP_100_REF}\n")
             f.write(f"SELF_HP_THRESHOLD={self_hp_threshold}\nDANGER_HP_THRESHOLD={danger_hp_threshold}\nATTACKER_HP_THRESHOLD={int(attacker_hp_threshold)}\n")
             f.write(f"MNA_ROI_X1={MNA_ROI[0]}\nMNA_ROI_Y1={MNA_ROI[1]}\nMNA_ROI_X2={MNA_ROI[2]}\nMNA_ROI_Y2={MNA_ROI[3]}\n")
+            f.write(f"STREAM_ROI_X1={_stream_roi[0]}\nSTREAM_ROI_Y1={_stream_roi[1]}\nSTREAM_ROI_X2={_stream_roi[2]}\nSTREAM_ROI_Y2={_stream_roi[3]}\n")
             if MNA_100_REF is not None: f.write(f"MNA_100_REF={MNA_100_REF}\n")
             f.write(f"MNA_THRESHOLD={mna_threshold}\n")
             cur_mna_hb = mna_hotbar_var.get() if ('mna_hotbar_var' in globals() and mna_hotbar_var) else MNA_HOTBAR
@@ -1664,6 +1676,65 @@ def _open_admin_panel_impl():
         tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
         ov.bind("<Escape>",lambda e:ov.destroy())
 
+    def refresh_stream_roi_preview(preview_label, roi_lbl):
+        roi = _stream_roi
+        if roi[2] <= roi[0] or roi[3] <= roi[1]:
+            if roi_lbl:
+                roi_lbl.configure(text="미설정 → 격수 쫄화면에 주 모니터 전체 송출", text_color="#6c7086")
+            return
+        import mss as _mss
+        sct = _mss.MSS()
+        x1, y1, x2, y2 = roi
+        img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
+        arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
+        try:
+            h, w = arr.shape[:2]; pw = min(w*2, 180); ph = max(int(h * pw / max(w, 1)), 3)
+            pil_img = Image.fromarray(arr).resize((pw, ph), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(pil_img); preview_label.config(image=photo); preview_label.image = photo
+        except Exception:
+            pass
+        if roi_lbl:
+            roi_lbl.configure(text=f"송출 ROI=({x1},{y1}) {x2-x1}x{y2-y1}", text_color="#f0f0f0")
+
+    def open_stream_roi_overlay():
+        ov = tk.Toplevel(admin); ov.overrideredirect(True)
+        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
+        sx = ctypes.windll.user32.GetSystemMetrics(76); sy = ctypes.windll.user32.GetSystemMetrics(77)
+        sw = ctypes.windll.user32.GetSystemMetrics(78); sh = ctypes.windll.user32.GetSystemMetrics(79)
+        ov.geometry(f"{sw}x{sh}+{sx}+{sy}"); ov.attributes("-alpha",0.35)
+        ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
+        cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
+        d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
+        def dn(e):
+            d["x1"],d["y1"]=e.x_root,e.y_root
+            d["r"]=cv.create_rectangle(e.x_root-sx,e.y_root-sy,e.x_root-sx,e.y_root-sy,outline="#a6e3a1",width=4)
+        def mv(e):
+            if d["r"]: cv.coords(d["r"],d["x1"]-sx,d["y1"]-sy,e.x_root-sx,e.y_root-sy)
+        def up(e):
+            d["x2"],d["y2"]=e.x_root,e.y_root
+            x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
+            if x2-x1<20 or y2-y1<20: ov.destroy(); return
+            global _stream_roi
+            _stream_roi = (x1, y1, x2, y2)
+            save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+            ov.destroy()
+            admin.after(300, lambda: refresh_stream_roi_preview(stream_roi_preview, stream_roi_lbl))
+        cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
+        tk.Label(ov,text="📡 격수 쫄화면 송출 영역 드래그 (게임창)",fg="#a6e3a1",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+        tk.Label(ov,text="ESC=취소 · 격수 PC에서 📡전송 ON 후 쫄화면으로 확인",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+        ov.bind("<Escape>",lambda e:ov.destroy())
+
+    def clear_stream_roi():
+        global _stream_roi
+        _stream_roi = (0, 0, 0, 0)
+        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+        try:
+            stream_roi_preview.config(image="")
+            stream_roi_preview.image = None
+        except Exception:
+            pass
+        stream_roi_lbl.configure(text="미설정 → 격수 쫄화면에 주 모니터 전체 송출", text_color="#6c7086")
+
     # --- 쫄법 피통 섹션 ---
     row_self_btns = ctk.CTkFrame(scrollable_frame, fg_color="transparent"); row_self_btns.pack(fill="x", pady=1)
     ctk.CTkButton(row_self_btns, text="🖱️ 쫄법 피통 셋팅", height=22, fg_color="#1f538d", hover_color="#14375e", font=("Malgun Gothic", 9, "bold"), command=open_self_hp_overlay).pack(side="left", padx=1)
@@ -1677,6 +1748,16 @@ def _open_admin_panel_impl():
     ctk.CTkButton(row_mna_btns, text="💯 100% 기준", height=22, fg_color="#fbbf24", hover_color="#d97706", text_color="#000", font=("Malgun Gothic", 9, "bold"), command=set_mna_100ref).pack(side="left", padx=1)
     mna_roi_preview = tk.Label(scrollable_frame, bg="black"); mna_roi_preview.pack(pady=1)
     mna_roi_lbl = ctk.CTkLabel(scrollable_frame, text="", text_color="#f0f0f0", font=("Consolas", 9)); mna_roi_lbl.pack(pady=(0, 2))
+    ctk.CTkLabel(scrollable_frame, text="-"*70, text_color="#45475a", height=10).pack(pady=1)
+    # --- 쫄화면 송출 ROI ---
+    ctk.CTkLabel(scrollable_frame, text="📡 격수 쫄화면 송출 영역", text_color="#bac2de", font=("Malgun Gothic", 10, "bold"), height=15).pack(anchor="w", pady=(0, 2))
+    row_stream_btns = ctk.CTkFrame(scrollable_frame, fg_color="transparent"); row_stream_btns.pack(fill="x", pady=1)
+    ctk.CTkButton(row_stream_btns, text="📡 송출 영역 드래그", height=22, fg_color="#166534", hover_color="#15803d", font=("Malgun Gothic", 9, "bold"), command=open_stream_roi_overlay).pack(side="left", padx=1)
+    ctk.CTkButton(row_stream_btns, text="전체화면", height=22, fg_color="#374151", hover_color="#4b5563", font=("Malgun Gothic", 9, "bold"), command=clear_stream_roi).pack(side="left", padx=1)
+    stream_roi_preview = tk.Label(scrollable_frame, bg="black"); stream_roi_preview.pack(pady=1)
+    stream_roi_lbl = ctk.CTkLabel(scrollable_frame, text="미설정 → 격수 쫄화면에 주 모니터 전체 송출", text_color="#6c7086", font=("Consolas", 9)); stream_roi_lbl.pack(pady=(0, 2))
+    if _stream_roi[2] > _stream_roi[0] and _stream_roi[3] > _stream_roi[1]:
+        admin.after(150, lambda: refresh_stream_roi_preview(stream_roi_preview, stream_roi_lbl))
     ctk.CTkLabel(scrollable_frame, text="-"*70, text_color="#45475a", height=10).pack(pady=1)
     
     ctk.CTkLabel(scrollable_frame, text="👥 파티원 좌표 / ROI / 힐% (ROI 드래그로 설정)", text_color="#bac2de", font=("Malgun Gothic", 10, "bold"), height=15).pack(anchor="w", pady=(0, 2))
@@ -1752,6 +1833,8 @@ def _open_admin_panel_impl():
         if not _admin_ui_pause:
             if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF, strict=False)
             if MNA_ROI[0] != 0: refresh_preview(mna_roi_preview, mna_roi_lbl, MNA_ROI, MNA_100_REF, True)
+            if _stream_roi[2] > _stream_roi[0] and _stream_roi[3] > _stream_roi[1]:
+                refresh_stream_roi_preview(stream_roi_preview, stream_roi_lbl)
             for pi in range(8):
                 pv = entries.get(f"P{pi+1}_PREVIEW")
                 if pv: refresh_preview(pv, None, PARTY_ROIS[pi], PARTY_HP_100_REF[pi])
@@ -2926,7 +3009,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 06:18"
+PATCH_UPDATED_AT = "2026-08-14 05:30"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -5408,7 +5491,37 @@ def _remote_mouse_move(fx, fy):
     if not ser or not getattr(ser, "is_open", False):
         return
     tx, ty = _stream_point_from_frac(fx, fy)
-    human_mouse_move(tx, ty, fast=True, remote=True)
+    with _remote_mouse_lock:
+        _remote_mouse_move_fast(tx, ty)
+
+def _remote_mouse_move_fast(tx, ty):
+    """원격 조종용 빠른 이동 — human_mouse_move(다단계) 대신 1패킷."""
+    global ser
+    if not ser or not getattr(ser, "is_open", False):
+        return
+    pt = POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    cx, cy = pt.x, pt.y
+    tx, ty = _clamp_to_screen(int(tx), int(ty))
+    dx, dy = tx - cx, ty - cy
+    if abs(dx) < 2 and abs(dy) < 2:
+        return
+    _km = (hw_var.get() in ("뚱박스", "KMBox")) if ('hw_var' in globals() and hw_var) else (HW_MODE in ("뚱박스", "KMBox"))
+    try:
+        if _km and hasattr(ser, "move_smooth"):
+            dist = (dx * dx + dy * dy) ** 0.5
+            ms = int(max(20, min(90, dist * 0.35)))
+            ser.move_smooth(int(dx), int(dy), ms)
+            return
+        while abs(dx) > 100 or abs(dy) > 100:
+            sx, sy = max(-100, min(100, dx)), max(-100, min(100, dy))
+            ser.write(f"<{sx},{sy}>".encode())
+            dx -= sx
+            dy -= sy
+        if dx or dy:
+            ser.write(f"<{dx},{dy}>".encode())
+    except Exception:
+        pass
 
 def _remote_mouse_click(fx, fy, button="left", down=True):
     global ser
@@ -5416,24 +5529,26 @@ def _remote_mouse_click(fx, fy, button="left", down=True):
     if not ser or not getattr(ser, "is_open", False):
         return
     tx, ty = _stream_point_from_frac(fx, fy)
-    human_mouse_move(tx, ty, fast=True, remote=True)
-    time.sleep(0.02)
-    btn = (button or "left").lower()
-    if btn == "middle":
-        if down:
-            ser.write(b'M')
-        return
-    if btn == "left" and down:
-        ser.write(b'K')
+    with _remote_mouse_lock:
+        _remote_mouse_move_fast(tx, ty)
+        time.sleep(0.02)
+        btn = (button or "left").lower()
+        if btn == "middle":
+            if down:
+                ser.write(b'M')
+            return
+        if btn == "left" and down:
+            ser.write(b'K')
 
 def _remote_mouse_scroll(delta):
     global ser
     _touch_remote_control()
     if not ser or not getattr(ser, "is_open", False):
         return
-    if hasattr(ser, "wheel"):
-        ser.wheel(delta)
-        return
+    with _remote_mouse_lock:
+        if hasattr(ser, "wheel"):
+            ser.wheel(delta)
+            return
     # 뚱USB: 스크롤 미지원
 
 def _handle_remote_udp_json(msg):
@@ -5447,14 +5562,74 @@ def _handle_remote_udp_json(msg):
     elif t == "ms":
         _remote_mouse_scroll(int(msg.get("d", 0)))
 
+def _enqueue_remote_udp_json(msg):
+    """UDP 수신 스레드에서 바로 ser/kmNet 건드리지 않게 큐로 넘김."""
+    if not isinstance(msg, dict):
+        return
+    t = msg.get("t")
+    if t == "mm":
+        try:
+            while True:
+                old = _remote_mouse_queue.get_nowait()
+                if not isinstance(old, dict) or old.get("t") != "mm":
+                    _remote_mouse_queue.put_nowait(old)
+                    break
+        except Empty:
+            pass
+    try:
+        _remote_mouse_queue.put_nowait(msg)
+    except Exception:
+        try:
+            _remote_mouse_queue.get_nowait()
+            _remote_mouse_queue.put_nowait(msg)
+        except Exception:
+            pass
+
+def _remote_mouse_worker():
+    while timer_thread_active:
+        try:
+            msg = _remote_mouse_queue.get(timeout=0.25)
+        except Empty:
+            continue
+        try:
+            _handle_remote_udp_json(msg)
+        except Exception:
+            pass
+
+def _stream_capture_bgr():
+    """스트림용 BGR 프레임 — 기존 camera 우선(게임 캡처), 실패 시 스레드별 mss."""
+    global camera
+    sx, sy, sw, sh = _get_stream_rect()
+    try:
+        if camera:
+            full = camera.get_latest_frame()
+            if full is not None and getattr(full, "size", 0) > 0:
+                fh, fw = full.shape[:2]
+                x1 = max(0, min(int(sx), fw - 1))
+                y1 = max(0, min(int(sy), fh - 1))
+                x2 = max(x1 + 1, min(int(sx + sw), fw))
+                y2 = max(y1 + 1, min(int(sy + sh), fh))
+                crop = full[y1:y2, x1:x2]
+                if crop.size > 0:
+                    return cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
+    except Exception:
+        pass
+    try:
+        import mss as _mss
+        if not hasattr(_stream_capture_bgr, "_local"):
+            _stream_capture_bgr._local = _threading.local()
+        sct = getattr(_stream_capture_bgr._local, "sct", None)
+        if sct is None:
+            sct = _mss.mss()
+            _stream_capture_bgr._local.sct = sct
+        img = sct.grab({"left": int(sx), "top": int(sy), "width": int(sw), "height": int(sh)})
+        return cv2.cvtColor(np.array(img, dtype=np.uint8), cv2.COLOR_BGRA2BGR)
+    except Exception:
+        return None
+
 def _stream_send_loop():
     """JPEG 프레임 송출 — 격수 TCP 연결 시에만."""
     global _stream_active, _stream_client
-    import mss as _mss
-    try:
-        sct = _mss.mss()
-    except Exception:
-        return
     while _stream_active:
         with _stream_client_lock:
             conn = _stream_client
@@ -5462,20 +5637,22 @@ def _stream_send_loop():
             time.sleep(0.05)
             continue
         try:
+            frame = _stream_capture_bgr()
+            if frame is None or frame.size == 0:
+                time.sleep(0.05)
+                continue
             sx, sy, sw, sh = _get_stream_rect()
-            img = sct.grab({"left": sx, "top": sy, "width": sw, "height": sh})
-            frame = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
             pt = POINT()
             ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
             lcx, lcy = pt.x - sx, pt.y - sy
             if 0 <= lcx < sw and 0 <= lcy < sh:
-                cv2.circle(frame, (lcx, lcy), 6, (0, 255, 255), -1)
+                cv2.circle(frame, (int(lcx), int(lcy)), 6, (0, 255, 255), -1)
             max_w, max_h = 1280, 720
             h, w = frame.shape[:2]
             scale = min(max_w / max(w, 1), max_h / max(h, 1), 1.0)
             if scale < 1.0:
                 frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
             if not ok:
                 time.sleep(0.02)
                 continue
@@ -5492,7 +5669,7 @@ def _stream_send_loop():
                 except Exception:
                     pass
                 _stream_client = None
-        time.sleep(0.033)
+        time.sleep(0.04)
 
 def _stream_accept_loop():
     global _stream_active, _stream_client
@@ -5616,7 +5793,7 @@ def udp_listener():
             elif len(data) >= 2 and data[0:1] == b'{':
                 try:
                     msg = json.loads(data.decode("utf-8"))
-                    _handle_remote_udp_json(msg)
+                    _enqueue_remote_udp_json(msg)
                 except Exception:
                     pass
             elif len(data) == 4:
@@ -5664,6 +5841,7 @@ Thread(target=expert_logic, daemon=True).start()
 Thread(target=lcd_logo_worker, daemon=True).start()
 Thread(target=update_ui_timer, daemon=True).start()
 Thread(target=udp_listener, daemon=True).start()
+Thread(target=_remote_mouse_worker, daemon=True).start()
 Thread(target=_typing_poll_worker, daemon=True).start()
 Thread(target=_user_keys_passthrough_worker, daemon=True).start()
 update_udp_hp_label()

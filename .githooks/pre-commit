@@ -1,0 +1,6 @@
+#!/bin/sh
+# 커밋 직전 pack_data → PATCH_UPDATED_AT = 현재 시각, data.txt / version 동기화
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || exit 1
+python pack_data.py || exit 1
+git add data.txt version.txt attacker_version.txt _decrypted.py attacker_hp.pyw

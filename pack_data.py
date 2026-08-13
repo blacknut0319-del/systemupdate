@@ -1,8 +1,13 @@
-"""_decrypted.py → data.txt (AES-GCM, ddong_loader.py와 동일) + version.txt 동기화."""
+"""_decrypted.py → data.txt (AES-GCM) + version.txt 동기화.
+
+PATCH_UPDATED_AT 은 실행 시점(로컬 시각)으로 자동 갱신.
+pre-commit 훅에서 커밋 직전에 호출하면 커밋 완료 시각과 일치.
+"""
 import base64
 import os
 import re
 import zlib
+from datetime import datetime
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -13,9 +18,26 @@ DST = os.path.join(ROOT, "data.txt")
 VER = os.path.join(ROOT, "version.txt")
 ATTACKER_SRC = os.path.join(ROOT, "attacker_hp.pyw")
 ATTACKER_VER = os.path.join(ROOT, "attacker_version.txt")
+_PATCH_RE = re.compile(r'(PATCH_UPDATED_AT\s*=\s*")[^"]+(")')
+
+
+def stamp_patch_time(paths):
+    """소스의 PATCH_UPDATED_AT 을 현재 로컬 시각(분 단위)으로 맞춤."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        new_text, n = _PATCH_RE.subn(rf'\g<1>{now}\g<2>', text, count=1)
+        if n:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_text)
+    return now
 
 
 def main():
+    stamp_patch_time([SRC, ATTACKER_SRC])
     with open(SRC, encoding="utf-8") as f:
         code = f.read()
     raw = zlib.compress(code.encode("utf-8"))

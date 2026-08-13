@@ -4,7 +4,7 @@
 """
 import numpy as np
 import sys, subprocess
-for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard")]:
+for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard"),("cv2","opencv-python-headless")]:
     try: __import__(mod)
     except: subprocess.check_call([sys.executable,"-m","pip","install",pkg,"--quiet"])
 
@@ -16,8 +16,9 @@ import mss
 import keyboard
 import ctypes
 import win32gui
+import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 06:12"
+PATCH_UPDATED_AT = "2026-08-14 05:30"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -643,6 +644,8 @@ stream_view_photo = None
 stream_view_label = None
 lbl_stream_status = None
 stream_view_img_rect = (0, 0, 1, 1)
+_stream_last_mm = 0.0
+_STREAM_MM_INTERVAL = 0.04
 
 def _alt_held():
     return bool(ctypes.windll.user32.GetAsyncKeyState(VK_MENU) & 0x8000)
@@ -667,8 +670,13 @@ def _stream_frac_from_event(e, label):
     return round(lx / iw, 4), round(ly / ih, 4)
 
 def _on_stream_motion(e):
+    global _stream_last_mm
     if not _alt_held():
         return
+    now = time.time()
+    if now - _stream_last_mm < _STREAM_MM_INTERVAL:
+        return
+    _stream_last_mm = now
     frac = _stream_frac_from_event(e, stream_view_label)
     if not frac:
         return
@@ -728,8 +736,12 @@ def _stream_tcp_loop():
                 if not raw:
                     break
                 try:
-                    from io import BytesIO
-                    pil = Image.open(BytesIO(raw))
+                    arr = np.frombuffer(raw, dtype=np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if frame is None:
+                        continue
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil = Image.fromarray(rgb)
                     iw, ih = pil.size
                     lw = max(stream_view_label.winfo_width(), 200)
                     lh = max(stream_view_label.winfo_height(), 150)
@@ -746,7 +758,7 @@ def _stream_tcp_loop():
                         global stream_view_photo
                         stream_view_photo = p
                         if stream_view_label.winfo_exists():
-                            stream_view_label.configure(image=p)
+                            stream_view_label.configure(image=p, text="")
 
                     root.after(0, _upd)
                 except Exception:
@@ -811,7 +823,7 @@ def toggle_stream_view():
 
     stream_view_label = tk.Label(stream_view_win, bg="#000", text="쫄화면 전송 ON 후 대기...", fg="#6c7086")
     stream_view_label.pack(fill="both", expand=True, padx=4, pady=4)
-    for ev, fn in [
+    _stream_binds = [
         ("<Motion>", _on_stream_motion),
         ("<ButtonPress-1>", lambda e: _on_stream_btn(e, True)),
         ("<ButtonPress-2>", lambda e: _on_stream_btn(e, True)),
@@ -820,8 +832,10 @@ def toggle_stream_view():
         ("<ButtonRelease-2>", lambda e: _on_stream_btn(e, False)),
         ("<ButtonRelease-3>", lambda e: _on_stream_btn(e, False)),
         ("<MouseWheel>", _on_stream_scroll),
-    ]:
-        stream_view_label.bind(ev, fn)
+    ]
+    for w in (stream_view_win, stream_view_label):
+        for ev, fn in _stream_binds:
+            w.bind(ev, fn)
 
     btn_stream_view.config(text="📺 닫기", bg="#ef4444")
     stream_view_active = True
