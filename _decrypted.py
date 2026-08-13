@@ -1736,7 +1736,7 @@ def _open_admin_panel_impl():
 
 def open_guide_panel():
     guide = ctk.CTkToplevel(root)
-    guide.title("📖 뚱시스템 사용 가이드")
+    guide.title("📖 뚱힐러 사용 가이드")
     w, h = 460, 680
     sw = guide.winfo_screenwidth(); sh = guide.winfo_screenheight()
     guide.geometry(f"{w}x{h}+{int((sw-w)/2)}+{int((sh-h)/2)}")
@@ -1745,7 +1745,7 @@ def open_guide_panel():
 
     hdr = ctk.CTkFrame(guide, fg_color="#1e1e2e", corner_radius=0)
     hdr.pack(fill="x", padx=0, pady=0)
-    ctk.CTkLabel(hdr, text="📖 뚱시스템 가이드", text_color="#f9e2af",
+    ctk.CTkLabel(hdr, text="📖 뚱힐러 가이드", text_color="#f9e2af",
                  font=("Malgun Gothic", 15, "bold")).pack(pady=(10, 2))
     ctk.CTkLabel(hdr, text="⚠️ 사용 책임은 사용자에게 있습니다 · 항상 후원 감사합니다 ❤️",
                  text_color="#a6adc8", font=("Malgun Gothic", 9)).pack(pady=(0, 8))
@@ -1769,6 +1769,7 @@ def open_guide_panel():
                      justify="left", wraplength=380).pack(anchor="w", padx=14, pady=2)
 
     add_t("🚀 시작하기", "#a6e3a1")
+    add_w("리니지 클래식 — 휠고정 무조건 하세요 (게임 설정에서 마우스 휠 고정)")
     add_w("Insert 로 시작 · 다시 누르면 정지 (시작할 때 자동클릭은 안 켜짐)")
     add_w("시작 전 제어판에서 파티원 HP바·100% 기준 저장 필수")
     add_sep()
@@ -2822,7 +2823,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:32"
+PATCH_UPDATED_AT = "2026-08-14 05:39"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
