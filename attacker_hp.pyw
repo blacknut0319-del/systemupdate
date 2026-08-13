@@ -17,7 +17,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 02:35"
+PATCH_UPDATED_AT = "2026-08-14 02:40"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
@@ -58,28 +58,29 @@ _update_available = False
 _update_notified = False
 lbl_update = None
 
+# Windows 네이티브 알림 — overrideredirect+topmost tk 창에서 tkinter messagebox가 안 보임
+_MB_ICONINFORMATION = 0x00000040
+_MB_ICONWARNING = 0x00000030
+_MB_ICONERROR = 0x00000010
+_MB_YESNO = 0x00000004
+_MB_TOPMOST = 0x00040000
+_IDYES = 6
+
 def _show_msgbox(kind, title, message):
-    """overrideredirect+topmost 창에서 알림이 뒤에 가려지지 않게 parent 지정."""
     try:
-        if not root or not root.winfo_exists():
-            return None
-        was_top = bool(root.attributes("-topmost"))
-        root.attributes("-topmost", False)
-        root.update_idletasks()
-        fn = {
-            "info": messagebox.showinfo,
-            "warning": messagebox.showwarning,
-            "error": messagebox.showerror,
-            "yesno": messagebox.askyesno,
-        }[kind]
+        style = _MB_TOPMOST
+        if kind == "info":
+            style |= _MB_ICONINFORMATION
+        elif kind == "warning":
+            style |= _MB_ICONWARNING
+        elif kind == "error":
+            style |= _MB_ICONERROR
+        elif kind == "yesno":
+            style |= _MB_YESNO | _MB_ICONINFORMATION
+        ret = ctypes.windll.user32.MessageBoxW(0, str(message), str(title), style)
         if kind == "yesno":
-            result = fn(title, message, parent=root)
-        else:
-            fn(title, message, parent=root)
-            result = None
-        if was_top:
-            root.attributes("-topmost", True)
-        return result
+            return ret == _IDYES
+        return None
     except Exception:
         return None
 
@@ -362,10 +363,13 @@ header = tk.Frame(root, bg="#141420", height=24)
 header.pack(fill="x")
 header.pack_propagate(False)
 _upd_short = PATCH_UPDATED_AT[5:] if len(PATCH_UPDATED_AT) > 5 else PATCH_UPDATED_AT
-lbl_update = tk.Label(header, text="업데이트 %s" % _upd_short, bg="#21262d", fg="#e2e8f0",
-                      font=("Malgun Gothic", 7, "bold"), padx=4, cursor="hand2")
+lbl_update = tk.Button(
+    header, text="업데이트 %s" % _upd_short, bg="#21262d", fg="#e2e8f0",
+    font=("Malgun Gothic", 7, "bold"), padx=4, pady=0, bd=0, highlightthickness=0,
+    activebackground="#30363d", activeforeground="#e2e8f0", cursor="hand2",
+    command=on_update_check_click,
+)
 lbl_update.pack(side="left", padx=4, pady=2)
-lbl_update.bind("<Button-1>", lambda e: on_update_check_click())
 title_lbl = tk.Label(header, text="격수", bg="#141420", fg="#cba6f7", font=("Malgun Gothic", 8, "bold"))
 title_lbl.place(relx=0.5, rely=0.5, anchor="center")
 # 닫기
@@ -385,7 +389,7 @@ def start_move(e):
 def do_move(e):
     if hasattr(root, "_dx"):
         root.geometry("+%d+%d" % (root.winfo_x() + e.x - root._dx, root.winfo_y() + e.y - root._dy))
-for _w in (header, title_lbl, lbl_update):
+for _w in (header, title_lbl):
     _w.bind("<ButtonPress-1>", start_move)
     _w.bind("<B1-Motion>", do_move)
 
