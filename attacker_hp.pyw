@@ -17,7 +17,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 00:20"
+PATCH_UPDATED_AT = "2026-08-14 01:05"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
@@ -49,6 +49,7 @@ if os.path.exists(CONFIG_FILE):
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/attacker_version.txt"
 _ATTACKER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/attacker_hp.pyw"
 UPDATE_SKIP_FILE = os.path.join(SCRIPT_DIR, "attacker_update_skip.txt")
+UPDATE_ATTEMPT_FILE = os.path.join(SCRIPT_DIR, "attacker_update_attempt.flag")
 _last_update_check = 0.0
 _update_available = False
 _update_notified = False
@@ -79,15 +80,29 @@ def fetch_remote_version():
         ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request(
             _VERSION_URL + "?t=%d" % int(time.time()),
-            headers={"User-Agent": "ddong-attacker", "Cache-Control": "no-cache"},
+            headers={
+                "User-Agent": "ddong-attacker",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
         )
         with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
             return r.read().decode("utf-8", errors="replace").strip().splitlines()[0].strip()
     except Exception:
         return None
 
+def _mark_update_attempt(remote_ver):
+    try:
+        with open(UPDATE_ATTEMPT_FILE, "w", encoding="utf-8") as f:
+            f.write("%f|%s" % (time.time(), remote_ver or ""))
+    except Exception:
+        pass
+
 def restart_with_update():
     global running
+    remote = fetch_remote_version()
+    if remote:
+        _mark_update_attempt(remote)
     try:
         import ssl
         import urllib.request
@@ -96,7 +111,11 @@ def restart_with_update():
         ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request(
             _ATTACKER_URL + "?t=%d" % int(time.time()),
-            headers={"User-Agent": "ddong-attacker", "Cache-Control": "no-cache"},
+            headers={
+                "User-Agent": "ddong-attacker",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
         )
         with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
             data = r.read()
@@ -166,11 +185,19 @@ def check_for_update(force=False, manual=False):
     if remote == PATCH_UPDATED_AT:
         _update_available = False
         _save_update_skip("")
+        try:
+            if os.path.isfile(UPDATE_ATTEMPT_FILE):
+                os.remove(UPDATE_ATTEMPT_FILE)
+        except Exception:
+            pass
         if manual:
             def _ok():
                 _set_lbl("업데이트 %s" % _short, "#a6e3a1")
                 try:
-                    messagebox.showinfo("업데이트 확인", "최신이에요.\n다시 받을 필요 없어요.")
+                    messagebox.showinfo(
+                        "업데이트 확인",
+                        "최신이에요.\n다시 받을 필요 없어요.\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
+                    )
                 except Exception:
                     pass
             try:
@@ -181,8 +208,17 @@ def check_for_update(force=False, manual=False):
         return
     _update_available = True
     if manual:
-        _update_notified = False
-    elif _load_update_skip() == remote:
+        def _manual_restart():
+            _set_lbl("업데이트중...", "#f9e2af")
+            _save_update_skip("")
+            restart_with_update()
+        try:
+            if root:
+                root.after(0, _manual_restart)
+        except Exception:
+            pass
+        return
+    if _load_update_skip() == remote:
         def _skipped():
             _set_lbl("⚠️업데이트있음", "#f9e2af")
         try:
@@ -200,7 +236,8 @@ def check_for_update(force=False, manual=False):
             try:
                 if messagebox.askyesno(
                     "업데이트",
-                    "업데이트가 있습니다.\n업데이트하시겠습니까?",
+                    "업데이트가 있습니다.\n\n서버: %s\n현재: %s\n\n업데이트하시겠습니까?"
+                    % (remote, PATCH_UPDATED_AT),
                 ):
                     _save_update_skip("")
                     restart_with_update()
@@ -307,16 +344,16 @@ def close_app():
     except: pass
     root.destroy()
 
-# 드래그 이동
+# 드래그 이동 (뚱힐러와 동일)
 def start_move(e):
-    root.start_x, root.start_y = e.x_root, e.y_root
+    root._dx = e.x
+    root._dy = e.y
 def do_move(e):
-    if hasattr(root, "start_x"):
-        root.geometry(f"+{e.x_root - root.start_x}+{e.y_root - root.start_y}")
-header.bind("<Button-1>", start_move)
-header.bind("<B1-Motion>", do_move)
-title_lbl.bind("<Button-1>", start_move)
-title_lbl.bind("<B1-Motion>", do_move)
+    if hasattr(root, "_dx"):
+        root.geometry("+%d+%d" % (root.winfo_x() + e.x - root._dx, root.winfo_y() + e.y - root._dy))
+for _w in (header, title_lbl, lbl_update):
+    _w.bind("<ButtonPress-1>", start_move)
+    _w.bind("<B1-Motion>", do_move)
 
 # 닫기
 close_btn.bind("<Button-1>", lambda e: close_app())
