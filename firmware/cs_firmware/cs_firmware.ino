@@ -147,6 +147,12 @@ void loop() {
     if (cmd == '[') { Keyboard.press(KEY_LEFT_CTRL); continue; }
     if (cmd == ']') { Keyboard.release(KEY_LEFT_CTRL); continue; }
     if (cmd == 'T') { autoClick = !autoClick; continue; }
+    if (cmd == 'q') { autoClick = false; continue; }  // 무한클릭 강제 OFF (토글 아님)
+    if (cmd == 'w') { autoClick = true; continue; }   // 무한클릭 강제 ON
+    if (cmd == 'q') { autoClick = false; continue; }  // 무한클릭 강제 OFF (토글 아님)
+    if (cmd == 'w') { autoClick = true; continue; }   // 무한클릭 강제 ON
+    if (cmd == 'q') { autoClick = false; continue; }  // 무한클릭 강제 OFF (토글 아님)
+    if (cmd == 'w') { autoClick = true; continue; }   // 무한클릭 강제 ON
 
     // DDONG-WDT4 = WDT3 + 확장 마우스/키 (M J O L Alt Ctrl End Del PgDn)
     if (cmd == 'V') {
