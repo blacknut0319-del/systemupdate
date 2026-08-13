@@ -17,9 +17,28 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 02:45"
+PATCH_UPDATED_AT = "2026-08-14 02:50"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
+
+def _sync_attacker_from_new():
+    """업데이트로 받은 .new → attacker_hp.pyw 동기화 (hp_start.bat 경로 유지)."""
+    new_path = ATTACKER_MAIN + ".new"
+    if not os.path.isfile(new_path):
+        return
+    try:
+        import shutil
+        shutil.copy2(new_path, ATTACKER_MAIN)
+    except Exception:
+        pass
+    try:
+        os.remove(new_path)
+    except Exception:
+        pass
+
+if __file__.lower().endswith(".new"):
+    _sync_attacker_from_new()
 
 TARGET_IP = "192.168.0.100"
 TARGET_PORT = 9999
@@ -135,8 +154,44 @@ def _resolve_pythonw():
             return pyw
     return exe
 
+def _spawn_attacker(script_path):
+    """뚱힐러 dloader 실행과 같이 — 새 pythonw 프로세스를 먼저 띄움."""
+    exe = _resolve_pythonw()
+    script_path = os.path.abspath(script_path)
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+    flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    subprocess.Popen(
+        [exe, script_path],
+        cwd=SCRIPT_DIR,
+        close_fds=True,
+        creationflags=flags,
+    )
+
+def _exit_attacker():
+    global running
+    running = False
+    try:
+        keyboard.unhook_all()
+        sock.close()
+    except Exception:
+        pass
+    try:
+        root.destroy()
+    except Exception:
+        pass
+    os._exit(0)
+
+def restart_app():
+    """다운로드 없이 격수만 다시 켜기."""
+    script = os.path.abspath(__file__)
+    if not os.path.isfile(script):
+        script = ATTACKER_MAIN
+    _spawn_attacker(script)
+    time.sleep(0.45)
+    _exit_attacker()
+
 def restart_with_update():
-    """최신 attacker_hp.pyw 받은 뒤 배치로 교체·재실행 (실행 중 파일 덮어쓰기 회피)."""
+    """최신 attacker_hp.pyw 받은 뒤 .new로 새 프로세스 실행 → 지금 창 종료."""
     global running
     remote = fetch_remote_version()
     if remote:
@@ -159,29 +214,11 @@ def restart_with_update():
             data = r.read()
         if not data or b"PATCH_UPDATED_AT" not in data:
             raise RuntimeError("다운로드한 파일이 올바르지 않습니다.")
-        dest = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
-        new_path = dest + ".new"
+        new_path = ATTACKER_MAIN + ".new"
         with open(new_path, "wb") as f:
             f.write(data)
-        exe = _resolve_pythonw()
-        bat_path = os.path.join(SCRIPT_DIR, "_attacker_upd.bat")
-        bat = (
-            "@echo off\r\n"
-            "ping 127.0.0.1 -n 2 >nul\r\n"
-            'move /y "%s" "%s"\r\n'
-            'start "" "%s" "%s"\r\n'
-            'del "%%~f0"\r\n'
-        ) % (new_path, dest, exe, dest)
-        with open(bat_path, "w", encoding="utf-8") as f:
-            f.write(bat)
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-        subprocess.Popen(
-            ["cmd", "/c", bat_path],
-            cwd=SCRIPT_DIR,
-            close_fds=True,
-            creationflags=flags,
-        )
-        time.sleep(0.3)
+        _spawn_attacker(new_path)
+        time.sleep(0.45)
     except Exception as e:
         _show_msgbox(
             "error",
@@ -189,17 +226,7 @@ def restart_with_update():
             "다시 받기에 실패했어요.\nhp_start.bat 으로 실행해 주세요.\n\n%s" % e,
         )
         return
-    running = False
-    try:
-        keyboard.unhook_all()
-        sock.close()
-    except Exception:
-        pass
-    try:
-        root.destroy()
-    except Exception:
-        pass
-    os._exit(0)
+    _exit_attacker()
 
 def check_for_update(force=False, manual=False):
     global _last_update_check, _update_available, _update_notified
@@ -239,11 +266,12 @@ def check_for_update(force=False, manual=False):
         if manual:
             def _ok():
                 _set_lbl("업데이트 %s" % _short, "#a6e3a1")
-                _show_msgbox(
-                    "info",
+                if _show_msgbox(
+                    "yesno",
                     "업데이트 확인",
-                    "최신이에요.\n다시 받을 필요 없어요.\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
-                )
+                    "최신이에요.\n다시 실행할까요?\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
+                ):
+                    restart_app()
             try:
                 if root:
                     root.after(0, _ok)
