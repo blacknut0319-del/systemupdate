@@ -880,27 +880,49 @@ debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0}
 # 파랭이·버프·줍기·해독이 영구 정지됨(힐은 예외라 혼자만 동작). → 수정자/매크로키는 무시.
 last_typing_time = 0.0
 TYPING_PAUSE_SEC = 1.5
-_TYPING_IGNORE_KEYS = {f"f{i}" for i in range(1, 13)} | {
-    "shift", "left shift", "right shift",
-    "ctrl", "control", "left ctrl", "right ctrl", "left control", "right control",
-    "alt", "left alt", "right alt",
-    "cmd", "windows", "left windows", "right windows",
-    "caps lock", "num lock", "scroll lock",
-    "esc", "escape", "up", "down", "left", "right",
-    "home", "end", "page up", "page down", "insert", "delete",
-    "print screen", "pause", "menu", "tab",
-}
-def _on_any_keypress(e):
+_fix_shift_hold_off_until = 0.0   # 고정 중 Tab 등 사용자 키 누를 때 Shift 잠깐 해제
+_USER_PASS_VKS = (0x09, 0x1B, 0x0D)  # Tab, Esc, Enter
+_TYPING_POLL_VKS = list(range(0x30, 0x3A)) + list(range(0x41, 0x5B)) + [0x20, 0x0D, 0x08]
+
+def _typing_poll_worker():
+    """채팅 타이핑 감지 — 전역 키 후킹 없이 폴링(게임 Tab 등 간섭 방지)."""
     global last_typing_time
-    try:
-        name = (getattr(e, "name", "") or "").lower()
-        if not name or name in _TYPING_IGNORE_KEYS:
-            return
-        # 채팅에 들어가는 키만 (문자/숫자/공백/엔터/백스페이스)
-        if len(name) == 1 or name in ("space", "enter", "backspace"):
-            last_typing_time = time.time()
-    except Exception:
-        pass
+    user32 = ctypes.windll.user32
+    GetAsyncKeyState = user32.GetAsyncKeyState
+    while timer_thread_active:
+        try:
+            if running:
+                for vk in _TYPING_POLL_VKS:
+                    if GetAsyncKeyState(vk) & 0x8000:
+                        last_typing_time = time.time()
+                        break
+        except Exception:
+            pass
+        time.sleep(0.05)
+
+def _user_keys_passthrough_worker():
+    """고정(Shift) 중 Tab·Esc·Enter 누르면 Shift 잠깐 풀어서 게임에 키가 들어가게."""
+    global _fix_shift_hold_off_until
+    user32 = ctypes.windll.user32
+    GetAsyncKeyState = user32.GetAsyncKeyState
+    was_down = {vk: False for vk in _USER_PASS_VKS}
+    while timer_thread_active:
+        try:
+            if running and chk_fix and chk_fix.get():
+                for vk in _USER_PASS_VKS:
+                    down = bool(GetAsyncKeyState(vk) & 0x8000)
+                    if down and not was_down[vk]:
+                        _fix_shift_hold_off_until = time.time() + 0.55
+                        _fix_shift_up()
+                    was_down[vk] = down
+                if time.time() >= _fix_shift_hold_off_until:
+                    _fix_shift_down()
+            else:
+                for vk in _USER_PASS_VKS:
+                    was_down[vk] = False
+        except Exception:
+            pass
+        time.sleep(0.02)
 current_f9_prob = 0.3  # 예전 확률% — 자힐은 do_self_heal로 대체됨 (호환용 잔존)
 last_self_heal = 0
 last_party_heal = 0
@@ -2796,6 +2818,9 @@ def human_mouse_move(tx, ty, fast=False, roi=None, remote=False):
             time.sleep(human_delay(*step_sleep))
 
 def _fix_shift_down():
+    global _fix_shift_hold_off_until
+    if time.time() < _fix_shift_hold_off_until:
+        return
     try: keyboard.press('shift')
     except Exception: pass
 
@@ -2901,7 +2926,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 06:05"
+PATCH_UPDATED_AT = "2026-08-14 06:18"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3476,6 +3501,8 @@ def _start_worker():
                 force_auth_exit("인증 만료")
                 return
         running = True; now = time.time()
+        _fix_shift_up()
+        _fix_shift_hold_off_until = 0.0
         last_loot = now; loot_interval = random.uniform(4.0, 7.0)
         last_buff_seq = now
         last_buff_global = now
@@ -5624,7 +5651,6 @@ def toggle_gui(e=None):
     if is_gui_hidden: root.deiconify(); is_gui_hidden = False
     else: root.withdraw(); is_gui_hidden = True
 
-keyboard.on_press(_on_any_keypress)   # 채팅 타이핑 감지용 — F1~F12 제외, 콜백은 시간기록만 하고 즉시 반환(후킹 안전)
 keyboard.on_release_key('delete', toggle_gui) 
 keyboard.on_release_key('space', on_space_save) 
 keyboard.on_release_key('home', on_home_click_toggle)
@@ -5638,6 +5664,8 @@ Thread(target=expert_logic, daemon=True).start()
 Thread(target=lcd_logo_worker, daemon=True).start()
 Thread(target=update_ui_timer, daemon=True).start()
 Thread(target=udp_listener, daemon=True).start()
+Thread(target=_typing_poll_worker, daemon=True).start()
+Thread(target=_user_keys_passthrough_worker, daemon=True).start()
 update_udp_hp_label()
 
 lbl_log = ctk.CTkTextbox(root, height=55, fg_color="#0d1117", text_color="#a6e3a1",

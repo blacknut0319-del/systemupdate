@@ -228,7 +228,7 @@ def restart_app():
     _exit_attacker()
 
 def restart_with_update():
-    """최신 attacker_hp.pyw 받은 뒤 .new로 새 프로세스 실행 → 지금 창 종료."""
+    """최신 attacker_hp.pyw 받아 main에 저장 후 새 프로세스 실행 → 지금 창 종료."""
     global running
     remote = fetch_remote_version()
     if remote:
