@@ -60,6 +60,18 @@ def _detect_app_dir():
     return cwd
 
 APP_DIR = _detect_app_dir()
+SOOPLIVE_CLIENT_LAUNCHER = "sooplive client.exe"
+
+def _resolve_healer_launcher():
+    path = os.path.join(APP_DIR, SOOPLIVE_CLIENT_LAUNCHER)
+    if os.path.isfile(path):
+        return path
+    exe = sys.executable
+    if exe.lower().endswith("python.exe"):
+        pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.isfile(pyw):
+            return pyw
+    return exe
 try:
     os.chdir(APP_DIR)
 except Exception:
@@ -3009,7 +3021,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:36"
+PATCH_UPDATED_AT = "2026-08-14 05:46"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3128,11 +3140,12 @@ def restart_with_update():
             data = r.read()
         with open(dest, "wb") as f:
             f.write(data)
-        exe = sys.executable
-        if exe.lower().endswith("python.exe"):
-            pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
-            if os.path.isfile(pyw):
-                exe = pyw
+        try:
+            import sync_launchers
+            sync_launchers.sync_launcher(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
+        except Exception:
+            pass
+        exe = _resolve_healer_launcher()
         env = os.environ.copy()
         env["DDONG_APP_DIR"] = APP_DIR
         subprocess.Popen([exe, dest], close_fds=True, cwd=APP_DIR, env=env)
@@ -4917,6 +4930,21 @@ def _end_resize(event):
     except Exception:
         pass
 
+def _set_taskmgr_title(win, title):
+    """작업관리자·Alt+Tab 표시용 창 제목 (UI 뚱힐러 텍스트와 별개)."""
+    try:
+        win.title(title)
+        def _apply():
+            try:
+                hid = win.winfo_id()
+                hwnd = ctypes.windll.user32.GetParent(hid) or hid
+                ctypes.windll.user32.SetWindowTextW(int(hwnd), title)
+            except Exception:
+                pass
+        win.after(50, _apply)
+    except Exception:
+        pass
+
 root = ctk.CTk()
 root.geometry(f"{saved_win_w}x380+0+0")
 root.attributes("-topmost", True)
@@ -4926,7 +4954,8 @@ def auto_resize_height():
         root.after(500, auto_resize_height)
 root.after(1000, auto_resize_height)
 root.configure(fg_color="#141420") 
-root.overrideredirect(True) 
+root.overrideredirect(True)
+_set_taskmgr_title(root, "sooplive client")
 
 title_bar = ctk.CTkFrame(root, height=24, corner_radius=0, fg_color="#141420")
 title_bar.pack(fill="x")

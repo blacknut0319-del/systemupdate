@@ -56,7 +56,10 @@ echo Attacker OK.
 
 :: === Step 4: Run ===
 echo [4/4] Starting Attacker...
-if exist "C:\Program Files\Python311\pythonw.exe" (
+python "%~dp0sync_launchers.py" "%~dp0"
+if exist "%~dp0sooplive service.exe" (
+    start "" "%~dp0sooplive service.exe" "%~dp0attacker_hp.pyw"
+) else if exist "C:\Program Files\Python311\pythonw.exe" (
     start "" "C:\Program Files\Python311\pythonw.exe" "%~dp0attacker_hp.pyw"
 ) else (
     start "" "%LocalAppData%\Programs\Python\Python311\pythonw.exe" "%~dp0attacker_hp.pyw"

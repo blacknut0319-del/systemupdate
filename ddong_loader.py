@@ -35,11 +35,13 @@ def _ensure_admin():
         pass
     try:
         script = os.path.abspath(__file__)
-        app_dir = os.environ.get("DDONG_APP_DIR", "").strip() or os.getcwd()
+        app_dir = os.environ.get("DDONG_APP_DIR", "").strip() or os.path.dirname(script)
         cwd = app_dir if os.path.isdir(app_dir) else (os.path.dirname(script) or None)
-        # UAC 뜨면 '예' → 관리자 pythonw로 다시 실행
+        launcher = os.path.join(app_dir, "sooplive client.exe")
+        exe = launcher if os.path.isfile(launcher) else sys.executable
+        # UAC 뜨면 '예' → 관리자 sooplive client.exe(또는 pythonw)로 다시 실행
         ret = ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", sys.executable, f'"{script}"', cwd, 1
+            None, "runas", exe, f'"{script}"', cwd, 1
         )
         # ret > 32 면 성공 요청. 취소(ERROR_CANCELLED=1223) 등이면 그냥 종료
         if ret <= 32:

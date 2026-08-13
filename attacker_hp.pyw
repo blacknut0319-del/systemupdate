@@ -18,9 +18,12 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 05:36"
+PATCH_UPDATED_AT = "2026-08-14 05:46"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
+SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
+SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
+SOOPLIVE_SERVICE_TITLE = "sooplive service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
 def _read_patch_ver(source):
@@ -167,6 +170,21 @@ def fetch_remote_version():
     except Exception:
         return None
 
+def _set_taskmgr_title(win, title):
+    """작업관리자·Alt+Tab 표시용 창 제목 (UI 격수 텍스트와 별개)."""
+    try:
+        win.title(title)
+        def _apply():
+            try:
+                hid = win.winfo_id()
+                hwnd = ctypes.windll.user32.GetParent(hid) or hid
+                ctypes.windll.user32.SetWindowTextW(int(hwnd), title)
+            except Exception:
+                pass
+        win.after(50, _apply)
+    except Exception:
+        pass
+
 def _attacker_startup_sync():
     """모듈 로드 완료 후 호출 — .new 실행 시 fetch_remote_version 필요."""
     if __file__.lower().endswith(".new"):
@@ -192,9 +210,23 @@ def _resolve_pythonw():
             return pyw
     return exe
 
+def _ensure_service_launcher():
+    try:
+        import sync_launchers
+        sync_launchers.sync_launcher(SOOPLIVE_SERVICE_LAUNCHER, SCRIPT_DIR)
+    except Exception:
+        pass
+
+def _resolve_launcher_exe():
+    _ensure_service_launcher()
+    path = os.path.join(SCRIPT_DIR, SOOPLIVE_SERVICE_LAUNCHER)
+    if os.path.isfile(path):
+        return path
+    return _resolve_pythonw()
+
 def _spawn_attacker(script_path):
-    """Windows — cmd start 로 GUI 프로세스 분리 실행 (DETACHED_PROCESS 단독은 실패하는 경우 있음)."""
-    exe = _resolve_pythonw()
+    """Windows — cmd start 로 GUI 프로세스 분리 실행."""
+    exe = _resolve_launcher_exe()
     script_path = os.path.abspath(script_path)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     subprocess.Popen(
@@ -257,7 +289,7 @@ def restart_with_update():
         remote_ver = _read_patch_ver(data)
         if remote and remote_ver and remote_ver != remote:
             raise RuntimeError("버전 불일치 (%s vs %s)" % (remote_ver, remote))
-        exe = _resolve_pythonw()
+        exe = _resolve_launcher_exe()
         bat_path = os.path.join(SCRIPT_DIR, "_attacker_upd.bat")
         bat = (
             "@echo off\r\n"
@@ -454,6 +486,7 @@ root.overrideredirect(True)
 root.geometry("%dx%d+80+80" % (WIN_W, WIN_H))
 root.attributes("-topmost", True)
 root.configure(bg="#0d0f14")  # header UI v14 - final - CDN refresh
+_set_taskmgr_title(root, SOOPLIVE_SERVICE_TITLE)
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
@@ -814,10 +847,11 @@ def toggle_stream_view():
         btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")
         return
     stream_view_win = tk.Toplevel(root)
-    stream_view_win.title("쫄화면")
+    stream_view_win.title(SOOPLIVE_STREAM_TITLE)
     stream_view_win.geometry("800x600")
     stream_view_win.attributes("-topmost", True)
     stream_view_win.configure(bg="#0d0f14")
+    _set_taskmgr_title(stream_view_win, SOOPLIVE_STREAM_TITLE)
     stream_view_win.protocol("WM_DELETE_WINDOW", lambda: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
 
     hdr = tk.Frame(stream_view_win, bg="#141420")
