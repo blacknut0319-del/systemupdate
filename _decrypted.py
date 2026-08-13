@@ -206,7 +206,15 @@ class Collapsible(ctk.CTkFrame):
             self.body.pack_forget()
         top = self.winfo_toplevel()
         if top and top.winfo_exists():
-            top.after(50, lambda: top.update_idletasks())
+            def _sync():
+                try:
+                    top.update_idletasks()
+                    fn = globals().get("sync_window_height")
+                    if fn:
+                        fn()
+                except Exception:
+                    pass
+            top.after(50, _sync)
 
 
 
@@ -2562,7 +2570,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 00:20"
+PATCH_UPDATED_AT = "2026-08-14 00:25"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2749,6 +2757,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "📐 접이식(옵션/버프/힐) 접으면 창 높이 자동으로 줄어들게 복구",
     "🔄 격수도 상단 [업데이트] — 뚱힐러처럼 확인 후 껐다 켜서 최신 적용",
     "📐 창 크기 — 오른쪽 아래 ◢ 드래그로 뚱힐러·격수 창 조절 (크기 저장)",
     "🔑 PC ID 고정 — 윈도우 기기 ID로 등록 (WiFi/VPN 바뀌어도 같은 PC면 B열 안 흔들림) / B열 ANY=여러 PC",
@@ -4203,6 +4212,21 @@ def expert_logic():
 _WIN_MIN_W, _WIN_MAX_W = 165, 420
 _WIN_MIN_H, _WIN_MAX_H = 180, 900
 
+def sync_window_height():
+    """내용 높이에 맞춰 창 높이 동기화 (펼침·접힘 모두)."""
+    try:
+        if root and root.winfo_exists() and not _ui_busy():
+            req_h = root.winfo_reqheight()
+            cur_h = root.winfo_height()
+            w = root.winfo_width()
+            if w < 120:
+                w = saved_win_w
+            if req_h > 200 and abs(req_h - cur_h) > 4:
+                nh = max(_WIN_MIN_H, min(_WIN_MAX_H, req_h))
+                root.geometry(f"{int(w)}x{int(nh)}+{root.winfo_x()}+{root.winfo_y()}")
+    except Exception:
+        pass
+
 def _start_resize(event):
     root._rs_x = event.x_root
     root._rs_y = event.y_root
@@ -4230,18 +4254,7 @@ root = ctk.CTk()
 root.geometry(f"{saved_win_w}x{saved_win_h}+0+0")
 root.attributes("-topmost", True)
 def auto_resize_height():
-    try:
-        if root and root.winfo_exists() and not _ui_busy():
-            req_h = root.winfo_reqheight()
-            cur_h = root.winfo_height()
-            w = root.winfo_width()
-            if w < 120:
-                w = saved_win_w
-            if req_h > cur_h + 4:
-                x = root.winfo_x(); y = root.winfo_y()
-                root.geometry(f"{int(w)}x{req_h}+{x}+{y}")
-    except Exception:
-        pass
+    sync_window_height()
     if root:
         root.after(500, auto_resize_height)
 root.after(1000, auto_resize_height)
@@ -4380,12 +4393,7 @@ def _toggle_km_fields():
     # 높이 다시 맞춤 (버튼 줄 가려지지 않게)
     try:
         root.update_idletasks()
-        h = root.winfo_reqheight()
-        if h > saved_win_h + 4:
-            w = root.winfo_width()
-            if w < 120:
-                w = saved_win_w
-            root.geometry(f"{int(w)}x{h}+{root.winfo_x()}+{root.winfo_y()}")
+        sync_window_height()
     except Exception:
         pass
 
