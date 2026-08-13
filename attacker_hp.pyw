@@ -17,7 +17,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 01:05"
+PATCH_UPDATED_AT = "2026-08-14 01:10"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
@@ -208,17 +208,8 @@ def check_for_update(force=False, manual=False):
         return
     _update_available = True
     if manual:
-        def _manual_restart():
-            _set_lbl("업데이트중...", "#f9e2af")
-            _save_update_skip("")
-            restart_with_update()
-        try:
-            if root:
-                root.after(0, _manual_restart)
-        except Exception:
-            pass
-        return
-    if _load_update_skip() == remote:
+        _update_notified = False
+    elif _load_update_skip() == remote:
         def _skipped():
             _set_lbl("⚠️업데이트있음", "#f9e2af")
         try:
