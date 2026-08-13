@@ -18,7 +18,7 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 05:46"
+PATCH_UPDATED_AT = "2026-08-14 05:50"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
@@ -184,6 +184,28 @@ def _set_taskmgr_title(win, title):
         win.after(50, _apply)
     except Exception:
         pass
+
+def _apply_win_icon(win, color="#141420"):
+    """Tk 기본 깃털 아이콘 대신 단색 미리보기 아이콘."""
+    try:
+        img = tk.PhotoImage(width=32, height=32)
+        img.put(color, to=(0, 0, 32, 32))
+        win.iconphoto(True, img)
+        win._icon_img_ref = img
+    except Exception:
+        pass
+    def _hwnd_icon():
+        try:
+            hid = win.winfo_id()
+            hwnd = ctypes.windll.user32.GetParent(hid) or hid
+            WM_SETICON = 0x0080
+            ctypes.windll.user32.SendMessageW(int(hwnd), WM_SETICON, 0, 0)
+            ctypes.windll.user32.SendMessageW(int(hwnd), WM_SETICON, 1, 0)
+            if getattr(win, "_icon_img_ref", None):
+                win.iconphoto(True, win._icon_img_ref)
+        except Exception:
+            pass
+    win.after(80, _hwnd_icon)
 
 def _attacker_startup_sync():
     """모듈 로드 완료 후 호출 — .new 실행 시 fetch_remote_version 필요."""
@@ -850,15 +872,33 @@ def toggle_stream_view():
     stream_view_win.title(SOOPLIVE_STREAM_TITLE)
     stream_view_win.geometry("800x600")
     stream_view_win.attributes("-topmost", True)
-    stream_view_win.configure(bg="#0d0f14")
+    stream_view_win.configure(bg="#0f172a")
+    stream_view_win.overrideredirect(True)
     _set_taskmgr_title(stream_view_win, SOOPLIVE_STREAM_TITLE)
+    _apply_win_icon(stream_view_win)
     stream_view_win.protocol("WM_DELETE_WINDOW", lambda: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
 
-    hdr = tk.Frame(stream_view_win, bg="#141420")
+    def _stream_start_move(e):
+        stream_view_win._mv_x = e.x_root - stream_view_win.winfo_x()
+        stream_view_win._mv_y = e.y_root - stream_view_win.winfo_y()
+
+    def _stream_do_move(e):
+        stream_view_win.geometry("+%d+%d" % (e.x_root - stream_view_win._mv_x, e.y_root - stream_view_win._mv_y))
+
+    hdr = tk.Frame(stream_view_win, bg="#141420", height=26)
     hdr.pack(fill="x")
+    hdr.pack_propagate(False)
     lbl_stream_status = tk.Label(hdr, text="연결 중...", bg="#141420", fg="#fbbf24", font=("Malgun Gothic", 8))
-    lbl_stream_status.pack(side="left", padx=6, pady=4)
-    tk.Label(hdr, text="Alt+마우스 = 쫄 조종", bg="#141420", fg="#94a3b8", font=("Malgun Gothic", 8)).pack(side="right", padx=6)
+    lbl_stream_status.pack(side="left", padx=6, pady=3)
+    stream_title_lbl = tk.Label(hdr, text=SOOPLIVE_STREAM_TITLE, bg="#141420", fg="#e2e8f0", font=("Malgun Gothic", 9, "bold"))
+    stream_title_lbl.pack(side="left", padx=8)
+    tk.Label(hdr, text="Alt+마우스", bg="#141420", fg="#94a3b8", font=("Malgun Gothic", 8)).pack(side="right", padx=4)
+    stream_close = tk.Label(hdr, text="✕", bg="#141420", fg="#f38ba8", font=("Malgun Gothic", 11), cursor="hand2")
+    stream_close.pack(side="right", padx=6, pady=2)
+    stream_close.bind("<Button-1>", lambda e: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
+    for w in (hdr, stream_title_lbl):
+        w.bind("<ButtonPress-1>", _stream_start_move)
+        w.bind("<B1-Motion>", _stream_do_move)
 
     stream_view_label = tk.Label(stream_view_win, bg="#000", text="쫄화면 전송 ON 후 대기...", fg="#6c7086")
     stream_view_label.pack(fill="both", expand=True, padx=4, pady=4)

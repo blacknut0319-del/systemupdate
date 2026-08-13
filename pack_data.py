@@ -61,6 +61,12 @@ def main():
             with open(ATTACKER_VER, "w", encoding="utf-8") as f:
                 f.write(am.group(1).strip() + "\n")
             print(f"attacker_version.txt={am.group(1).strip()}")
+    try:
+        import sync_launchers
+        sync_launchers.sync_all(ROOT)
+        print(f"launchers: {sync_launchers.CLIENT}, {sync_launchers.SERVICE}")
+    except Exception as e:
+        print(f"launcher sync skip: {e}")
 
 
 if __name__ == "__main__":
