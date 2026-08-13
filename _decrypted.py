@@ -90,8 +90,22 @@ except:
     except: pass
 
 def get_hwid():
-    mac = str(uuid.getnode())
-    return hashlib.md5(mac.encode()).hexdigest()[:8].upper()
+    """PC ID — 윈도우 MachineGuid(기기 고유값). MAC/VPN 바뀌어도 동일 PC면 같음."""
+    seed = ""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Cryptography",
+        )
+        seed, _ = winreg.QueryValueEx(key, "MachineGuid")
+        winreg.CloseKey(key)
+        seed = str(seed).strip()
+    except Exception:
+        pass
+    if not seed:
+        seed = str(uuid.getnode())
+    return hashlib.md5(seed.encode()).hexdigest()[:8].upper()
 
 MY_HWID = get_hwid()
 
@@ -773,7 +787,7 @@ def check_google_sheet(input_code):
             cols = [c.strip('"') for c in line.split(',')]
             if len(cols) >= 1:
                 db_code = cols[0].strip()
-                db_hwid = cols[1].strip() if len(cols) >= 2 else ""
+                db_hwid = cols[1].strip().upper() if len(cols) >= 2 else ""
                 db_expire = cols[2].strip() if len(cols) >= 3 else ""
                 db_start = cols[3].strip() if len(cols) >= 4 else ""
                 if input_code == db_code:
@@ -2537,7 +2551,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-13 17:15"
+PATCH_UPDATED_AT = "2026-08-13 23:50"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 # 뚱헌터와 동일 — 랜드라이버 / Net설정도구 / 메뉴얼 올인원
@@ -2724,6 +2738,7 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "🔑 PC ID 고정 — 윈도우 기기 ID로 등록 (WiFi/VPN 바뀌어도 같은 PC면 B열 안 흔들림) / B열 ANY=여러 PC",
     "🔄 업데이트 반복 알림 — '아니요' 누르면 같은 버전은 다시 안 뜸 / '예' 후 최신 적용 캐시 문제 수정",
     "🕹️ 뚱박스 [설정도구] — 한글 통역 창이 앱 안에서 같이 뜨게 수정 (옛 캐시도 zip 재다운)",
     "🔑 만료일 — 구글시트 D열(만료일) 기준으로 표시·판정 (license.dat 안 씀, 1분마다 동기화)",
