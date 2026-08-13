@@ -614,6 +614,7 @@ MNA_SLOT = "F8"     # 파랭이가 실제로 있는 슬롯(F5~F12) — 기본값
 mna_hotbar_var = None
 mna_slot_var = None
 strong_heal_pct = 30
+self_strong_heal_pct = 30
 chk_strong_heal = None
 last_mna_potion = 0
 chk_mna = None
@@ -1082,7 +1083,7 @@ def load_hidden_config():
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
     global _stream_roi
     global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna, saved_chk_end_bert, saved_chk_wheel_heal
-    global strong_heal_pct, saved_win_w, saved_win_h
+    global strong_heal_pct, self_strong_heal_pct, saved_win_w, saved_win_h
     
     text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11",
                        "PARTY_FLAGS", "PARTY_MODE_FLAGS", "BUFF_ON"}
@@ -1190,6 +1191,7 @@ def load_hidden_config():
                 if key == "MNA_HOTBAR": MNA_HOTBAR = val_str if val_str in BUFF_HOTBARS else "F2"; continue
                 if key == "MNA_SLOT": MNA_SLOT = val_str if val_str in BUFF_SLOT_LABELS else "F8"; continue
                 if key == "STRONG_HEAL_PCT": strong_heal_pct = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
+                if key == "SELF_STRONG_HEAL_PCT": self_strong_heal_pct = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
                 if key == "CHK_SELF_HEAL": saved_chk_self_heal = val_str; continue
                 if key == "CHK_DANGER": saved_chk_danger = val_str; continue
                 if key == "CHK_STRONG_HEAL": saved_chk_strong_heal = val_str; continue
@@ -1335,7 +1337,7 @@ def save_hidden_config(pwd_to_save):
             cur_mna_hb = mna_hotbar_var.get() if ('mna_hotbar_var' in globals() and mna_hotbar_var) else MNA_HOTBAR
             cur_mna_slot = mna_slot_var.get() if ('mna_slot_var' in globals() and mna_slot_var) else MNA_SLOT
             f.write(f"MNA_HOTBAR={cur_mna_hb}\nMNA_SLOT={cur_mna_slot}\n")
-            f.write(f"STRONG_HEAL_PCT={strong_heal_pct}\n")
+            f.write(f"STRONG_HEAL_PCT={strong_heal_pct}\nSELF_STRONG_HEAL_PCT={self_strong_heal_pct}\n")
             def _sw01(var, fallback):
                 if var is not None:
                     try: return "1" if var.get() else "0"
@@ -1939,8 +1941,8 @@ def open_guide_panel():
 
     add_t("🛡️ 옵션 설명")
     add_d("버프", "▶ 버프 펼침 → 단축창(F1~F3) · 슬롯(F5~F12) 체크·초 설정")
-    add_d("자힐", "평소 힐만 · 피 50% 이하면 물약+힐 · 상위힐% 이하면 F7")
-    add_d("상위힐", "설정% 이하일 때 강한 힐 자동 (좌클릭 대상)")
+    add_d("자힐", "평소 힐만 · 50% 이하 물약+힐 · 자힐 상위% 이하면 F7")
+    add_d("상위힐", "파티·격수용 % (자힐 상위%는 자힐 슬라이더 옆)")
     add_d("독 해독", "본인 독 → F2단축창 엔줄복용(F9) 자동")
     add_d("격수 해독", "격수 독 → F2단축창 큐어포이즌(F10) 자동")
     add_d("파티 해독", "파티원 HP바 초록(독) → 큐어포이즌+대상 클릭")
@@ -3037,7 +3039,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 07:37"
+PATCH_UPDATED_AT = "2026-08-14 07:48"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -4663,7 +4665,7 @@ def expert_logic():
     global last_self_heal, last_party_heal, last_party_cure, last_noparty_heal
     global party_mode_flags, selected_party_flags
     global SELF_HP_ROI, SELF_HP_100_REF, DANGER_HP_ROI, DANGER_HP_100_REF
-    global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold, mna_threshold, strong_heal_pct, chk_strong_heal
+    global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold, mna_threshold, strong_heal_pct, self_strong_heal_pct, chk_strong_heal
     global attacker_hp_udp, attacker_poisoned, attacker_petrified
     global MNA_ROI, MNA_100_REF, last_mna_potion, chk_mna, chk_self_heal_sw, chk_danger_sw, chk_attacker_sw
     global buff_next_due, last_buff_global, _buff_cfg, _self_buff_cfg
@@ -4836,7 +4838,7 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < strong_heal_pct
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < self_strong_heal_pct
                         tag = do_self_heal(self_hp, end_delay=1.0, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
@@ -4877,7 +4879,7 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < strong_heal_pct
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < self_strong_heal_pct
                         tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
@@ -4922,7 +4924,7 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < strong_heal_pct
+                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < self_strong_heal_pct
                         tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; action_taken = True
                         log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
@@ -5388,6 +5390,21 @@ def update_self_hp_thr(*a):
     self_hp_threshold = self_hp_var.get(); self_hp_lbl.configure(text=f"{self_hp_threshold}%")
     save_hidden_config(loaded_pwd)
 self_hp_var.trace_add("write", update_self_hp_thr)
+
+frame_self_strong = ctk.CTkFrame(heal_body, fg_color="transparent")
+frame_self_strong.pack(pady=1, padx=2, fill='x')
+ctk.CTkLabel(frame_self_strong, text="⚡ 자힐상위", text_color="#a6adc8", font=("Malgun Gothic", 9, "bold"), width=58).pack(side='left', padx=(8, 2))
+self_strong_var = ctk.IntVar(value=self_strong_heal_pct)
+self_strong_sld = ctk.CTkSlider(frame_self_strong, from_=5, to=70, variable=self_strong_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8")
+self_strong_sld.pack(side='left', padx=2)
+self_strong_lbl = ctk.CTkLabel(frame_self_strong, text=f"{self_strong_heal_pct}%", text_color="#f38ba8", font=('Malgun Gothic', 10, 'bold'), width=28)
+self_strong_lbl.pack(side='left')
+def update_self_strong_thr(*a):
+    global self_strong_heal_pct
+    self_strong_heal_pct = self_strong_var.get()
+    self_strong_lbl.configure(text=f"{self_strong_heal_pct}%")
+    save_hidden_config(loaded_pwd)
+self_strong_var.trace_add("write", update_self_strong_thr)
 
 frame_dangerhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_dangerhp.pack(pady=1, padx=2, fill='x')

@@ -18,7 +18,7 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 07:37"
+PATCH_UPDATED_AT = "2026-08-14 07:48"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
@@ -58,14 +58,16 @@ def _sync_attacker_from_new():
     if not os.path.isfile(new_path):
         return
     remote = fetch_remote_version()
-    if not remote or _read_patch_ver(new_path) != remote:
+    if remote and _read_patch_ver(new_path) != remote:
         _cleanup_stale_new(remote)
         return
-    try:
-        import shutil
-        shutil.copy2(new_path, ATTACKER_MAIN)
-    except Exception:
-        pass
+    import shutil
+    for _ in range(6):
+        try:
+            shutil.copy2(new_path, ATTACKER_MAIN)
+            break
+        except Exception:
+            time.sleep(0.4)
     try:
         os.remove(new_path)
     except Exception:
@@ -105,6 +107,7 @@ _GH_RAW = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/
 _GH_API = "https://api.github.com/repos/blacknut0319-del/systemupdate/contents/"
 UPDATE_SKIP_FILE = os.path.join(SCRIPT_DIR, "attacker_update_skip.txt")
 UPDATE_ATTEMPT_FILE = os.path.join(SCRIPT_DIR, "attacker_update_attempt.flag")
+UPDATE_LOG_FILE = os.path.join(SCRIPT_DIR, "attacker_update.log")
 _last_update_check = 0.0
 _update_available = False
 _update_notified = False
@@ -159,8 +162,15 @@ def _github_ssl_ctx():
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
-def _github_download(rel_path, timeout=20):
-    """raw GitHub → API 순으로 다운로드 (CDN/캐시·차단 회피)."""
+def _log_update_err(step, err):
+    try:
+        with open(UPDATE_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write("%s %s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), step, err))
+    except Exception:
+        pass
+
+def _github_download(rel_path, timeout=25, retries=3):
+    """GitHub API → raw 순으로 다운로드 (raw 차단 PC 대비)."""
     import urllib.request
     import json
     import base64
@@ -170,37 +180,43 @@ def _github_download(rel_path, timeout=20):
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
     }
+    api_path = rel_path.replace(" ", "%20")
     ts = int(time.time())
     last_err = None
-    raw_url = _GH_RAW + rel_path.replace(" ", "%20") + "?t=%d" % ts
-    try:
-        with urllib.request.urlopen(urllib.request.Request(raw_url, headers=headers), timeout=timeout, context=ctx) as r:
-            data = r.read()
-        if data:
-            return data
-    except Exception as e:
-        last_err = e
-    api_path = rel_path.replace(" ", "%20")
-    try:
+
+    def _try_api_raw():
         api_url = _GH_API + api_path
         with urllib.request.urlopen(
             urllib.request.Request(api_url, headers={**headers, "Accept": "application/vnd.github.raw"}),
             timeout=timeout,
             context=ctx,
         ) as r:
-            data = r.read()
-        if data:
-            return data
-    except Exception as e:
-        last_err = e
-    try:
-        with urllib.request.urlopen(urllib.request.Request(_GH_API + api_path, headers=headers), timeout=timeout, context=ctx) as r:
+            return r.read()
+
+    def _try_api_b64():
+        with urllib.request.urlopen(
+            urllib.request.Request(_GH_API + api_path, headers=headers),
+            timeout=timeout,
+            context=ctx,
+        ) as r:
             j = json.loads(r.read().decode("utf-8", errors="replace"))
-        data = base64.b64decode(j.get("content") or b"")
-        if data:
-            return data
-    except Exception as e:
-        last_err = e
+        return base64.b64decode(j.get("content") or b"")
+
+    def _try_raw():
+        raw_url = _GH_RAW + api_path + "?t=%d" % ts
+        with urllib.request.urlopen(urllib.request.Request(raw_url, headers=headers), timeout=timeout, context=ctx) as r:
+            return r.read()
+
+    for attempt in range(max(1, retries)):
+        if attempt:
+            time.sleep(0.8)
+        for fn in (_try_api_raw, _try_api_b64, _try_raw):
+            try:
+                data = fn()
+                if data and (rel_path.endswith(".txt") or b"PATCH_UPDATED_AT" in data or len(data) > 50000):
+                    return data
+            except Exception as e:
+                last_err = e
     raise RuntimeError(last_err or "다운로드 실패")
 
 def _valid_launcher(path):
@@ -256,6 +272,7 @@ def _apply_win_icon(win, color="#141420"):
 def _attacker_startup_sync():
     """모듈 로드 완료 후 호출 — .new 실행 시 fetch_remote_version 필요."""
     if __file__.lower().endswith(".new"):
+        time.sleep(1.0)
         _sync_attacker_from_new()
         if os.path.isfile(ATTACKER_MAIN):
             _spawn_attacker(ATTACKER_MAIN)
@@ -333,7 +350,7 @@ def restart_app():
     _exit_attacker()
 
 def restart_with_update():
-    """최신 attacker_hp.pyw → .new 저장 후 배치로 교체·재실행 (실행 중 파일 잠금 회피)."""
+    """최신 attacker_hp.pyw → .new 저장 후 .new 로 재실행 (배치 없이)."""
     global running
     remote = fetch_remote_version()
     if remote:
@@ -343,34 +360,19 @@ def restart_with_update():
         if not data or b"PATCH_UPDATED_AT" not in data:
             raise RuntimeError("다운로드한 파일이 올바르지 않습니다.")
         new_path = os.path.abspath(ATTACKER_MAIN + ".new")
-        dest = os.path.abspath(ATTACKER_MAIN)
         with open(new_path, "wb") as f:
             f.write(data)
         remote_ver = _read_patch_ver(data)
         if not remote_ver:
             raise RuntimeError("다운로드한 파일 버전을 읽을 수 없습니다.")
-        exe = _resolve_launcher_exe()
-        pyw = _resolve_pythonw()
-        if not _valid_launcher(exe):
-            exe = pyw
-        bat_path = os.path.join(SCRIPT_DIR, "_attacker_upd.bat")
-        bat = (
-            "@echo off\r\n"
-            "ping 127.0.0.1 -n 3 >nul\r\n"
-            'move /y "%s" "%s"\r\n'
-            'start "" "%s" "%s"\r\n'
-            'del "%~f0"\r\n'
-        ) % (new_path, dest, exe, dest)
-        with open(bat_path, "w", encoding="utf-8") as f:
-            f.write(bat)
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-        subprocess.Popen(["cmd.exe", "/c", bat_path], cwd=SCRIPT_DIR, creationflags=flags)
-        time.sleep(0.25)
+        _spawn_attacker(new_path)
+        time.sleep(0.5)
     except Exception as e:
+        _log_update_err("restart_with_update", e)
         _show_msgbox(
             "error",
             "업데이트 실패",
-            "다시 받기에 실패했어요.\nhp_start.bat 으로 실행해 주세요.\n\n%s" % e,
+            "다시 받기에 실패했어요.\nhp_start.bat 으로 실행해 주세요.\n\n%s\n\n(로그: attacker_update.log)" % e,
         )
         return
     _exit_attacker()
