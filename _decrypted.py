@@ -164,6 +164,8 @@ _hw_ui_ready = False         # UI 초기화 끝나기 전엔 재연결 요청 �
 _hw_lock = Lock()            # connect_hardware 동시호출(시작버튼+워커) 직렬화
 _hw_status_gen = 0           # 장치 라벨 갱신 세대번호 — 예전 after 콜백이 최신 상태를 덮어쓰지 않게
 _fw_flash_busy = False       # 아두이노 펌업 진행 중 (연타 방지)
+_fw_version_str = ""         # probe_arduino_fw 응답 (DDONG-WDT3 / DDONG-WDT4 등)
+_fw_wdt4 = False             # WDT4만 휠힐(M) 지원
 _toggle_busy = False         # Insert 시작/정지 처리 중 — 연타해도 중복 실행 방지 (키보드 후킹 콜백은 항상 즉시 반환)
 _logo_frames = []            # 뚱박스 LCD 로고 프레임 (BGR flatten)
 _logo_delay = 0.08           # 프레임 간격(초)
@@ -597,6 +599,7 @@ saved_chk_strong_heal = "1"
 saved_chk_attacker = "1"
 saved_chk_mna = "0"
 saved_chk_end_bert = "0"
+saved_chk_wheel_heal = "0"
 
 LOG_FILE = os.path.join(APP_DIR, "ddong.log")
 last_log = ""
@@ -843,6 +846,8 @@ chk_target_poison = None
 chk_party_poison = None
 chk_loot = None
 chk_end_bert = None
+chk_wheel_heal = None
+toggle_wheel_heal = None
 lbl_status = None
 lbl_buff = None
 lbl_saved_coord = None
@@ -947,7 +952,7 @@ def load_hidden_config():
     global MNA_ROI, MNA_100_REF, mna_threshold, MNA_HOTBAR, MNA_SLOT
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
-    global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna, saved_chk_end_bert
+    global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna, saved_chk_end_bert, saved_chk_wheel_heal
     global strong_heal_pct, saved_win_w, saved_win_h
     
     text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11",
@@ -968,6 +973,7 @@ def load_hidden_config():
     saved_chk_attacker = "1"
     saved_chk_mna = "0"
     saved_chk_end_bert = "0"
+    saved_chk_wheel_heal = "0"
     
     if os.path.exists(AUTH_FILE):
         ctypes.windll.kernel32.SetFileAttributesW(AUTH_FILE, 2)
@@ -1056,6 +1062,7 @@ def load_hidden_config():
                 if key == "CHK_ATTACKER": saved_chk_attacker = val_str; continue
                 if key == "CHK_MNA": saved_chk_mna = val_str; continue
                 if key == "CHK_END_BERT": saved_chk_end_bert = val_str; continue
+                if key == "CHK_WHEEL_HEAL": saved_chk_wheel_heal = val_str; continue
                 if key == "SELF_BUFF_ON": saved_self_buff_on = val_str; continue
                 if key == "SELF_BUFF_HOTBAR":
                     saved_self_buff_hotbar = val_str if val_str in BUFF_HOTBARS else "F1"; continue
@@ -1203,13 +1210,15 @@ def save_hidden_config(pwd_to_save):
             cur_atk = _sw01(chk_attacker_sw if 'chk_attacker_sw' in globals() else None, saved_chk_attacker)
             cur_mna = _sw01(chk_mna, saved_chk_mna)
             cur_end_bert = _sw01(chk_end_bert if 'chk_end_bert' in globals() else None, saved_chk_end_bert)
+            cur_wheel_heal = _sw01(chk_wheel_heal if 'chk_wheel_heal' in globals() else None, saved_chk_wheel_heal)
             globals()['saved_chk_self_heal'] = cur_self
             globals()['saved_chk_danger'] = cur_danger
             globals()['saved_chk_strong_heal'] = cur_strong
             globals()['saved_chk_attacker'] = cur_atk
             globals()['saved_chk_mna'] = cur_mna
             globals()['saved_chk_end_bert'] = cur_end_bert
-            f.write(f"CHK_SELF_HEAL={cur_self}\nCHK_DANGER={cur_danger}\nCHK_STRONG_HEAL={cur_strong}\nCHK_ATTACKER={cur_atk}\nCHK_MNA={cur_mna}\nCHK_END_BERT={cur_end_bert}\n")
+            globals()['saved_chk_wheel_heal'] = cur_wheel_heal
+            f.write(f"CHK_SELF_HEAL={cur_self}\nCHK_DANGER={cur_danger}\nCHK_STRONG_HEAL={cur_strong}\nCHK_ATTACKER={cur_atk}\nCHK_MNA={cur_mna}\nCHK_END_BERT={cur_end_bert}\nCHK_WHEEL_HEAL={cur_wheel_heal}\n")
             for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
                 on_sb = "1" if cb_sb.get() else "0"
                 hb_sb = hb_var.get() if hb_var.get() in BUFF_HOTBARS else "F1"
@@ -2683,7 +2692,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 02:20"
+PATCH_UPDATED_AT = "2026-08-14 02:30"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -2931,7 +2940,8 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
-    "🏃 END 베르 — 옵션 체크 후 END키로 귀환 즉시 (쫄·격수 키보드 모두)",
+    "🖱️ 휠힐 — WDT4 펌웨어+옵션 ON일 때만 파티힐 M, 구펌은 K 그대로",
+    "🏃 강제베르(end) — 옵션 체크 후 END키로 귀환 즉시 (쫄·격수 키보드 모두)",
     "⚡ 자기 버프 — 버프 칸에 헤이스트(자신) 추가, 슬롯 키 2번 연타 + 초 설정",
     "🔄 업데이트 반복 알림 수정 — 예 눌러도 버전 안 바뀌면 뚱시작.bat 안내 후 알림 숨김",
     "📐 접이식 접으면 창 높이 자동 축소 — 저장된 높이(WIN_H) 안 씀, 너비만 저장",
@@ -3036,14 +3046,14 @@ def do_manual_bert():
         return
     if not ser or not getattr(ser, "is_open", False):
         try:
-            log_event("🏃 END 베르 실패(장치 미연결)")
+            log_event("🏃 강제베르 실패(장치 미연결)")
         except Exception:
             pass
         return
     try:
         focus_lineage_window()
         ser.write(b"C")
-        log_event("🏃 END 베르")
+        log_event("🏃 강제베르")
     except Exception:
         pass
 
@@ -3850,6 +3860,44 @@ def check_fw_wdt(ser_obj=None):
         return False, ver
     return False, ""
 
+def _fw_is_wdt4(ver=None):
+    v = (ver if ver is not None else _fw_version_str) or ""
+    return "DDONG-WDT4" in v.upper().replace(" ", "")
+
+def refresh_fw_version(ser_obj=None, log=False):
+    """연결·펌확인·펌업 후 펌 버전 캐시 갱신."""
+    global _fw_version_str, _fw_wdt4
+    ver = probe_arduino_fw(ser_obj)
+    _fw_version_str = ver
+    _fw_wdt4 = _fw_is_wdt4(ver)
+    if root:
+        try:
+            root.after(0, _apply_wheel_heal_ui)
+        except Exception:
+            pass
+    if log and ver:
+        extra = " (휠힐 가능)" if _fw_wdt4 else ""
+        log_event(f"🔌 펌 {ver}{extra}")
+    return ver
+
+def _apply_wheel_heal_ui():
+    """WDT4 아니면 휠힐 옵션 끄고 비활성 표시."""
+    tw = globals().get("toggle_wheel_heal")
+    cw = globals().get("chk_wheel_heal")
+    if not tw or not cw:
+        return
+    if _fw_wdt4:
+        tw.lbl.configure(text="휠힐(WDT4)", text_color="#cdd6f4")
+    else:
+        cw.set(False)
+        tw.lbl.configure(text="휠힐(WDT4필요)", text_color="#6c7086")
+
+def heal_click_key():
+    """파티힐 클릭 — WDT4+옵션 ON일 때만 M, 그 외 K."""
+    if _fw_wdt4 and chk_wheel_heal and chk_wheel_heal.get():
+        return "M"
+    return "K"
+
 def on_fw_check_click():
     """제어판 [확인] — 연결된 뚱USB가 워치독 펌인지 조회."""
     if hw_var.get() in ("뚱박스", "KMBox"):
@@ -3873,8 +3921,9 @@ def on_fw_check_click():
             pass
         return
     ok, detail = check_fw_wdt()
+    refresh_fw_version(ser, log=False)
     if ok:
-        log_event(f"✅ 펌 확인 OK — {detail} (워치독 포함)")
+        log_event(f"✅ 펌 확인 OK — {detail} (워치독 포함)" + (" · 휠힐 가능" if _fw_wdt4 else ""))
         try:
             lbl_ard.configure(text=f"● WDT OK", text_color="#3fb950")
         except Exception:
@@ -4024,6 +4073,7 @@ def on_fw_flash_click():
                     pass
                 time.sleep(0.5)
                 wdt_ok, wdt_detail = check_fw_wdt()
+                refresh_fw_version(ser, log=False)
         except Exception as e:
             ok, msg = False, str(e)
         def _done():
@@ -4135,7 +4185,19 @@ def connect_hardware():
                     globals()['SERIAL_PORT'] = found
                 ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
                 _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)
-            return bool(ser and getattr(ser, "is_open", False))
+            connected = bool(ser and getattr(ser, "is_open", False))
+            if connected:
+                if _hw in ("뚱박스", "KMBox"):
+                    globals()["_fw_version_str"] = ""
+                    globals()["_fw_wdt4"] = False
+                    if root:
+                        try:
+                            root.after(0, _apply_wheel_heal_ui)
+                        except Exception:
+                            pass
+                else:
+                    Thread(target=lambda s=ser: refresh_fw_version(s, log=False), daemon=True).start()
+            return connected
         except Exception:
             ser = None
             _set_hw_label("○ 연결실패", '#f85149', gen)
@@ -4386,8 +4448,8 @@ def expert_logic():
                             human_mouse_move(best_tx + random.randint(-3, 3), best_ty + random.randint(-2, 2), fast=True); time.sleep(0.02)
                             use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
                             heal_key = '7' if use_strong else 'A'
-                            # F1 보장 후 힐→K — F2/F3 버프 직후 잘못된 단축창 F9 방지
-                            execute_keys(['1', heal_key, 'K'], 0.08, skip_follow_toggle=True, key_gap=(0.05, 0.12))
+                            # F1 보장 후 힐→클릭 — WDT4+휠힐옵션만 M, 그 외 K
+                            execute_keys(['1', heal_key, heal_click_key()], 0.08, skip_follow_toggle=True, key_gap=(0.05, 0.12))
                             human_mouse_move(orig_x + random.randint(-2, 2), orig_y + random.randint(-2, 2), fast=True)
                             _resume_attack_click(was_fixed, was_follow)
                             last_party_heal = now; healed = True
@@ -4674,12 +4736,29 @@ RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=l
 RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=2, column=1, padx=3, pady=2, sticky="w")
 chk_end_bert = ctk.BooleanVar(value=saved_chk_end_bert in ("1", "true", "True"))
 def _on_end_bert_sw():
-    log_event(f"🏃 END베르 {'ON' if chk_end_bert.get() else 'OFF'}")
+    log_event(f"🏃 강제베르 {'ON' if chk_end_bert.get() else 'OFF'}")
     try:
         save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception:
         pass
-RoundedToggle(frame_opt, "END 베르", "#f9e2af", var=chk_end_bert, cmd=_on_end_bert_sw).grid(row=3, column=0, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "강제베르(end)", "#f9e2af", var=chk_end_bert, cmd=_on_end_bert_sw).grid(row=3, column=0, padx=3, pady=2, sticky="w")
+chk_wheel_heal = ctk.BooleanVar(value=saved_chk_wheel_heal in ("1", "true", "True"))
+def _on_wheel_heal_sw():
+    if not _fw_wdt4:
+        chk_wheel_heal.set(False)
+        log_event("⚠️ 휠힐 — WDT4 펌웨어 필요 (펌업 후 [확인])")
+        return
+    log_event(f"🖱️ 휠힐 {'ON' if chk_wheel_heal.get() else 'OFF'}")
+    try:
+        save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception:
+        pass
+toggle_wheel_heal = RoundedToggle(frame_opt, "휠힐(WDT4필요)", "#a371f7", var=chk_wheel_heal, cmd=_on_wheel_heal_sw)
+toggle_wheel_heal.grid(row=3, column=1, padx=3, pady=2, sticky="w")
+try:
+    root.after(200, _apply_wheel_heal_ui)
+except Exception:
+    pass
 
 # ─── 접이식: 버프 그리드 ───
 coll_buff = Collapsible(root, "버프", start_open=False)

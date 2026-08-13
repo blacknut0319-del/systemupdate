@@ -17,7 +17,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 01:10"
+PATCH_UPDATED_AT = "2026-08-14 02:35"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
@@ -29,6 +29,7 @@ WIN_W = 340
 WIN_H = 420
 _WIN_MIN_W, _WIN_MAX_W = 240, 520
 _WIN_MIN_H, _WIN_MAX_H = 120, 900
+END_BERT_ON = False
 
 if os.path.exists(CONFIG_FILE):
     try:
@@ -44,6 +45,8 @@ if os.path.exists(CONFIG_FILE):
         if "win_h" in cfg:
             try: WIN_H = max(_WIN_MIN_H, min(_WIN_MAX_H, int(cfg["win_h"])))
             except Exception: pass
+        if "end_bert" in cfg:
+            END_BERT_ON = bool(cfg.get("end_bert"))
     except: pass
 
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/attacker_version.txt"
@@ -54,6 +57,31 @@ _last_update_check = 0.0
 _update_available = False
 _update_notified = False
 lbl_update = None
+
+def _show_msgbox(kind, title, message):
+    """overrideredirect+topmost 창에서 알림이 뒤에 가려지지 않게 parent 지정."""
+    try:
+        if not root or not root.winfo_exists():
+            return None
+        was_top = bool(root.attributes("-topmost"))
+        root.attributes("-topmost", False)
+        root.update_idletasks()
+        fn = {
+            "info": messagebox.showinfo,
+            "warning": messagebox.showwarning,
+            "error": messagebox.showerror,
+            "yesno": messagebox.askyesno,
+        }[kind]
+        if kind == "yesno":
+            result = fn(title, message, parent=root)
+        else:
+            fn(title, message, parent=root)
+            result = None
+        if was_top:
+            root.attributes("-topmost", True)
+        return result
+    except Exception:
+        return None
 
 def _load_update_skip():
     try:
@@ -133,10 +161,14 @@ def restart_with_update():
         time.sleep(0.4)
     except Exception as e:
         try:
-            messagebox.showerror(
-                "업데이트 실패",
-                "다시 받기에 실패했어요.\nhp_start.bat 으로 실행해 주세요.\n\n%s" % e,
-            )
+            def _err():
+                _show_msgbox(
+                    "error",
+                    "업데이트 실패",
+                    "다시 받기에 실패했어요.\nhp_start.bat 으로 실행해 주세요.\n\n%s" % e,
+                )
+            if root:
+                root.after(0, _err)
         except Exception:
             pass
         return
@@ -172,10 +204,7 @@ def check_for_update(force=False, manual=False):
         if manual:
             def _fail():
                 _set_lbl("업데이트 %s" % _short, "#e2e8f0")
-                try:
-                    messagebox.showwarning("업데이트 확인", "확인 실패.\n인터넷 연결을 확인해 주세요.")
-                except Exception:
-                    pass
+                _show_msgbox("warning", "업데이트 확인", "확인 실패.\n인터넷 연결을 확인해 주세요.")
             try:
                 if root:
                     root.after(0, _fail)
@@ -193,13 +222,11 @@ def check_for_update(force=False, manual=False):
         if manual:
             def _ok():
                 _set_lbl("업데이트 %s" % _short, "#a6e3a1")
-                try:
-                    messagebox.showinfo(
-                        "업데이트 확인",
-                        "최신이에요.\n다시 받을 필요 없어요.\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
-                    )
-                except Exception:
-                    pass
+                _show_msgbox(
+                    "info",
+                    "업데이트 확인",
+                    "최신이에요.\n다시 받을 필요 없어요.\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
+                )
             try:
                 if root:
                     root.after(0, _ok)
@@ -222,10 +249,11 @@ def check_for_update(force=False, manual=False):
     def _ui():
         global _update_notified
         _set_lbl("⚠️업데이트있음", "#f9e2af")
-        if not _update_notified:
+        if manual or not _update_notified:
             _update_notified = True
             try:
-                if messagebox.askyesno(
+                if _show_msgbox(
+                    "yesno",
                     "업데이트",
                     "업데이트가 있습니다.\n\n서버: %s\n현재: %s\n\n업데이트하시겠습니까?"
                     % (remote, PATCH_UPDATED_AT),
@@ -265,7 +293,7 @@ running = True; hp_pct = 0.0
 # ============================================================
 # 원격 제어 (UDP 1byte)
 # ============================================================
-DEBOUNCE = {'insert': 0, 'home': 0, 'page up': 0, 'f4': 0}
+DEBOUNCE = {'insert': 0, 'home': 0, 'page up': 0, 'f4': 0, 'end': 0}
 CMD_MAP = {'insert': b'I', 'home': b'H', 'page up': b'P', 'f4': b'L'}
 CMD_NAMES = {b'I':'시작', b'H':'따라', b'P':'고정', b'L':'줍기'}
 
@@ -304,6 +332,21 @@ def on_slot_hotkey(n):
 
 for i in range(1, 9):
     keyboard.add_hotkey('alt+%d' % i, on_slot_hotkey(i))
+
+def on_end_bert_key(e=None):
+    now = time.time()
+    if now - DEBOUNCE.get('end', 0) < 0.5:
+        return
+    if not end_bert_var.get():
+        return
+    DEBOUNCE['end'] = now
+    try:
+        sock.sendto(b'C', (ip_var.get(), TARGET_PORT))
+        lbl_status.config(text="베르 전송", fg="#f9e2af")
+    except Exception:
+        lbl_status.config(text="베르 실패", fg="#ef4444")
+
+keyboard.on_release_key('end', on_end_bert_key)
 
 # ============================================================
 # 메인 GUI
@@ -401,6 +444,13 @@ lbl_status = tk.Label(frm2, text="● 전송중", bg="#0d0f14", fg="#10b981", fo
 lbl_status.pack(side='left')
 tk.Label(frm2, text="IP:%s" % MY_IP, bg="#0d0f14", fg="#6c7086", font=('Consolas',7)).pack(side='right')
 
+opt_frm = tk.Frame(root, bg="#0d0f14")
+opt_frm.pack(fill='x', padx=6, pady=(0, 2))
+end_bert_var = tk.BooleanVar(value=END_BERT_ON)
+tk.Checkbutton(opt_frm, text="강제베르(end)", variable=end_bert_var, bg="#0d0f14", fg="#f9e2af",
+               selectcolor="#313244", activebackground="#0d0f14", activeforeground="#f9e2af",
+               font=("Malgun Gothic", 8), command=lambda: save_cfg()).pack(side='left')
+
 # --- ROI + 미리보기 + 중독 ---
 lbl_roi = tk.Label(root, text="ROI=%s" % str(HP_ROI), bg="#0d0f14", fg="#45475a", font=('Consolas',7))
 lbl_roi.pack(pady=(0,1))
@@ -421,6 +471,7 @@ def save_cfg():
     cfg["hp_roi"] = tuple(int(v) for v in HP_ROI)
     cfg["win_w"] = WIN_W
     cfg["win_h"] = WIN_H
+    cfg["end_bert"] = bool(end_bert_var.get())
     if HP_100_REF is not None:
         cfg["hp_100_ref"] = HP_100_REF
     if os.path.exists(CONFIG_FILE): ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 128)
