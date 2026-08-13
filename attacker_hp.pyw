@@ -371,7 +371,7 @@ running = True; hp_pct = 0.0
 # ============================================================
 DEBOUNCE = {'insert': 0, 'home': 0, 'f4': 0, 'end': 0}
 CMD_MAP = {'insert': b'I', 'home': b'H', 'f4': b'L'}
-CMD_NAMES = {b'I':'시작', b'H':'클릭', b'P':'고정', b'L':'줍기'}
+CMD_NAMES = {b'I':'시작', b'H':'따라가기', b'P':'고정', b'L':'줍기'}
 
 def send_remote_cmd(cmd_byte):
     try:
@@ -600,7 +600,7 @@ ctl_frame = tk.Frame(root, bg="#0d0f14")
 ctl_frame.pack(fill='x', padx=6)
 ctl_btns = [
     ("▶ 시작", b'I', "#10b981"),
-    ("👣 클릭", b'H', "#3b82f6"),
+    ("👣 따라가기", b'H', "#3b82f6"),
     ("📌 고정", b'P', "#f59e0b"),
     ("🎒 줍기", b'L', "#8b5cf6"),
 ]

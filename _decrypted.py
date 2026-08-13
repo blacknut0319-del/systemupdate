@@ -1775,17 +1775,17 @@ def open_guide_panel():
 
     add_t("⌨️ 단축키")
     add_d("Insert", "시작 / 정지")
-    add_d("Home", "따라클릭 ↔ 고정 (사냥 중에만)")
+    add_d("Home", "따라가기 ↔ 고정 (사냥 중에만)")
     add_d("Delete", "창 숨기기 / 다시 보이기")
     add_d("F4", "주변 줍기 켜기 / 끄기")
     add_sep()
 
-    add_t("🖱️ Home — 따라클릭 / 고정", "#cba6f7")
-    add_d("1번 누름", "따라클릭 ON — 몹 따라가며 자동 공격")
+    add_t("🖱️ Home — 따라가기 / 고정", "#cba6f7")
+    add_d("1번 누름", "따라가기 ON — 몹 따라가며 자동 공격")
     add_d("2번 누름", "고정 — 제자리에서 Shift만 (자동공격 끔, 힐하기 좋음)")
-    add_d("다시 Home", "따라클릭으로 복귀")
-    add_w("옵션 칸의 [클릭]·[고정] 스위치로도 같은 동작")
-    add_w("격수 모니터 [클릭]·[고정] 버튼도 동일")
+    add_d("다시 Home", "따라가기으로 복귀")
+    add_w("옵션 칸의 [따라가기]·[고정] 스위치로도 같은 동작")
+    add_w("격수 모니터 [따라가기]·[고정] 버튼도 동일")
     add_sep()
 
     add_t("💚 힐 · 휠힐 설정", "#94e2d5")
@@ -2710,7 +2710,7 @@ def _fix_shift_up():
     except Exception: pass
 
 def attack_click_active():
-    """무한클릭(따라클릭) 중일 때만 True. 고정은 Shift만(클릭 없음)."""
+    """무한클릭(따라가기) 중일 때만 True. 고정은 Shift만(클릭 없음)."""
     return bool(chk_follow and chk_follow.get())
 
 def _buff_target_click():
@@ -2724,7 +2724,7 @@ def _buff_target_click():
     time.sleep(human_delay(0.03, 0.08))
 
 def _pause_attack_click():
-    """고정(Shift만) / 따라클릭 잠시 해제. 복구용 상태 반환."""
+    """고정(Shift만) / 따라가기 잠시 해제. 복구용 상태 반환."""
     was_fixed = bool(chk_fix and chk_fix.get())
     was_follow = bool(chk_follow and chk_follow.get()) and not was_fixed
     if not ser or not getattr(ser, "is_open", False):
@@ -2807,7 +2807,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:15"
+PATCH_UPDATED_AT = "2026-08-14 05:20"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3056,7 +3056,7 @@ def on_update_check_click():
 
 LATEST_PATCH = [
     "🖱️ Home 고정 — 자동공격 끄고 제자리 고정(Shift만), 힐하기 편하게 개선",
-    "🖱️ Home 따라클릭 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 고정",
+    "🖱️ Home 따라가기 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 고정",
     "💚 휠힐 — 최신 펌웨어에서 일반 힐은 가운데 휠클릭 (항상 켜짐)",
     "⚡ 상위힐 — 일반힐과 달리 좌클릭으로 대상 지정 (더 정확)",
     "🖱️ 클릭 위치 — 힐·공격할 때마다 좌표가 살짝씩 달라져서 덜 눈에 띔",
@@ -3307,7 +3307,7 @@ def on_space_save(e=None):
         with open(COORD_FILE, 'a', encoding='utf-8') as f: f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{cx},{cy},{r},{g},{b}\n") 
 
 def _apply_attack_mode(mode):
-    """mode='follow' 따라클릭 ON / mode='fix' 고정(Shift만, 클릭 OFF)."""
+    """mode='follow' 따라가기 ON / mode='fix' 고정(Shift만, 클릭 OFF)."""
     global ser, running, root, chk_follow, chk_fix
     if not running or not ser or not getattr(ser, "is_open", False):
         return
@@ -3332,7 +3332,7 @@ def _apply_attack_mode(mode):
         return
 
 def on_home_click_toggle(e=None):
-    """Home — 따라클릭 ↔ 고정(제자리, 클릭 없음) 토글. Insert는 시작/종료만."""
+    """Home — 따라가기 ↔ 고정(제자리, 클릭 없음) 토글. Insert는 시작/종료만."""
     global debounce, running, chk_follow
     if time.time() - debounce['caps'] < 0.15:
         return
@@ -3344,7 +3344,7 @@ def on_home_click_toggle(e=None):
         log_event("📌 고정 (클릭 OFF)")
     else:
         _apply_attack_mode('follow')
-        log_event("🖱️ 따라클릭 ON")
+        log_event("🖱️ 따라가기 ON")
 
 def on_f4_toggle(e=None):
     global debounce, chk_loot, root, last_loot_sent_time
@@ -4902,20 +4902,20 @@ def _on_fix_sw():
         log_event("📌 고정 (클릭 OFF)")
     else:
         _apply_attack_mode('follow')
-        log_event("🖱️ 따라클릭 ON")
+        log_event("🖱️ 따라가기 ON")
 
 def _on_follow_sw():
     if not running:
         return
     if chk_follow.get():
         _apply_attack_mode('follow')
-        log_event("🖱️ 따라클릭 ON")
+        log_event("🖱️ 따라가기 ON")
     else:
         _apply_attack_mode('fix')
         log_event("📌 고정 (클릭 OFF)")
 
 RoundedToggle(frame_opt, "고정", "#a371f7", var=chk_fix, cmd=_on_fix_sw).grid(row=0, column=0, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "클릭(Home)", "#a371f7", var=chk_follow, cmd=_on_follow_sw).grid(row=0, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "따라가기(Home)", "#a371f7", var=chk_follow, cmd=_on_follow_sw).grid(row=0, column=1, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: log_event(f"☠️ 독해독 {'ON' if chk_poison.get() else 'OFF'}")).grid(row=1, column=0, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=1, column=1, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=lambda: log_event(f"💚 파티해독 {'ON' if chk_party_poison.get() else 'OFF'}")).grid(row=2, column=0, padx=3, pady=2, sticky="w")
