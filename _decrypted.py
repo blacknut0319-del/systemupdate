@@ -1737,7 +1737,7 @@ def _open_admin_panel_impl():
 def open_guide_panel():
     guide = ctk.CTkToplevel(root)
     guide.title("📖 뚱시스템 사용 가이드")
-    w, h = 440, 600
+    w, h = 460, 680
     sw = guide.winfo_screenwidth(); sh = guide.winfo_screenheight()
     guide.geometry(f"{w}x{h}+{int((sw-w)/2)}+{int((sh-h)/2)}")
     guide.attributes("-topmost", True); guide.focus_force(); guide.grab_set()
@@ -1799,24 +1799,39 @@ def open_guide_panel():
     add_d("버프", "▶ 버프 펼침 → 단축창(F1~F3) · 슬롯(F5~F12) 체크·초 설정")
     add_d("자힐", "평소 힐만 · 피 50% 이하면 물약+힐")
     add_d("상위힐", "설정% 이하일 때 강한 힐 자동 (좌클릭 대상)")
-    add_d("독 해독", "본인 독 → 엔틸독트 자동")
-    add_d("격수 해독", "격수 독 → 큐어포이즌 자동")
-    add_d("파티 해독", "파티원 HP바 초록(독)이면 해독 시전")
+    add_d("독 해독", "본인 독 → F2단축창 엔줄복용(F9) 자동")
+    add_d("격수 해독", "격수 독 → F2단축창 큐어포이즌(F10) 자동")
+    add_d("파티 해독", "파티원 HP바 초록(독) → 큐어포이즌+대상 클릭")
     add_d("파랭이", "엠통% 이하 시 10분마다 파란물약")
     add_d("격수 HP", "격수 모니터 연결 시 체력% 표시")
     add_sep()
 
     add_t("🚨 주의사항")
-    add_w("파티 모드: 쫄법사 파티창이 켜져 있어야 함 (안 그러면 베르)")
-    add_w("노파티: 파티창 없을 때 배경 오탐 방지 — 아이콘 ROI 설정 권장")
+    add_w("파티창 UI를 켜 두지 않아도 파티힐 됩니다 (제어판 HP바 ROI만 맞으면 됨)")
+    add_w("노파티: 배경 오탐 방지용 아이콘 ROI 설정 권장")
     add_w("채팅 중: 힐·귀환은 계속, 버프·줍기·해독만 잠깐 쉼")
     add_sep()
 
-    add_t("🕹️ 장치")
-    add_w("뚱USB: USB 꽂으면 자동 인식")
-    add_w("뚱박스: IP·포트·UUID 입력 후 Insert로 연결")
-    add_w("[펌업]: 뚱USB 최신 펌웨어 설치 (정지 상태에서)")
-    add_w("[확인]: 워치독 펌웨어인지 조회")
+    add_t("🕹️ 뚱USB (아두이노)", "#f9e2af")
+    add_w("상단 [장치] → 뚱USB 선택")
+    add_w("USB 꽂으면 COM 포트 자동 표시 (대기 중에도 확인 가능)")
+    add_w("Insert 로 시작 · 정지할 때도 Insert")
+    add_w("[펌업] — 정지 상태에서만, 최신 펌웨어+워치독 설치")
+    add_w("[확인] — 워치독 펌인지 조회 (휠힐은 최신 펌 필요)")
+    add_sep()
+
+    add_t("🕹️ 뚱박스 — 처음 세팅", "#cba6f7")
+    add_w("① [장치] → 뚱박스 선택 → IP·포트·UUID 칸이 나타남")
+    add_w("② [드라이버] — 랜드라이버 설치 (처음 1회, 재부팅 권장)")
+    add_w("③ [IP설정] — PC 랜 IP 맞추기 (박스와 같은 대역, 예: 192.168.2.x)")
+    add_w("   · 네트워크 어댑터 열기 → USB 이더넷 → IPv4 수동 입력")
+    add_w("   · Wi-Fi/인터넷 어댑터는 건드리지 않기")
+    add_w("④ [설정도구] — 중국어 프로그램 + 한글 통역 창")
+    add_w("   · 连接盒子(연결) 클릭 · 박스 LCD의 IP/포트/UUID 입력")
+    add_w("   · 禁用Bypass 체크 (Bypass 끄기) ← 필수")
+    add_w("⑤ 뚱힐러 폼에 IP·포트·UUID 입력 → [설정저장]")
+    add_w("⑥ Insert 로 연결 · 사냥 중 박스 LCD에 로고 표시")
+    add_w("※ 연결 안 되면: ping 테스트 · 드라이버 · Bypass · IP 대역 재확인")
 
     ctk.CTkButton(guide, text="닫기", command=guide.destroy, fg_color="#313244",
                   hover_color="#45475a", text_color="#ffffff", font=("Malgun Gothic", 12, "bold"),
@@ -2807,7 +2822,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:25"
+PATCH_UPDATED_AT = "2026-08-14 05:32"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
