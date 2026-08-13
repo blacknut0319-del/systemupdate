@@ -4,7 +4,7 @@
 """
 import numpy as np
 import sys, subprocess
-for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard"),("cv2","opencv-python-headless")]:
+for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard"),("win32gui","pywin32"),("cv2","opencv-python-headless")]:
     try: __import__(mod)
     except: subprocess.check_call([sys.executable,"-m","pip","install",pkg,"--quiet"])
 
@@ -18,7 +18,7 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 05:30"
+PATCH_UPDATED_AT = "2026-08-14 05:36"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -193,15 +193,13 @@ def _resolve_pythonw():
     return exe
 
 def _spawn_attacker(script_path):
-    """뚱힐러 dloader 실행과 같이 — 새 pythonw 프로세스를 먼저 띄움."""
+    """Windows — cmd start 로 GUI 프로세스 분리 실행 (DETACHED_PROCESS 단독은 실패하는 경우 있음)."""
     exe = _resolve_pythonw()
     script_path = os.path.abspath(script_path)
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-    flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     subprocess.Popen(
-        [exe, script_path],
+        ["cmd.exe", "/c", "start", "", exe, script_path],
         cwd=SCRIPT_DIR,
-        close_fds=True,
         creationflags=flags,
     )
 
@@ -229,7 +227,7 @@ def restart_app():
     _exit_attacker()
 
 def restart_with_update():
-    """최신 attacker_hp.pyw 받아 main에 저장 후 새 프로세스 실행 → 지금 창 종료."""
+    """최신 attacker_hp.pyw → .new 저장 후 배치로 교체·재실행 (실행 중 파일 잠금 회피)."""
     global running
     remote = fetch_remote_version()
     if remote:
@@ -252,20 +250,27 @@ def restart_with_update():
             data = r.read()
         if not data or b"PATCH_UPDATED_AT" not in data:
             raise RuntimeError("다운로드한 파일이 올바르지 않습니다.")
-        new_path = ATTACKER_MAIN + ".new"
+        new_path = os.path.abspath(ATTACKER_MAIN + ".new")
+        dest = os.path.abspath(ATTACKER_MAIN)
         with open(new_path, "wb") as f:
             f.write(data)
         remote_ver = _read_patch_ver(data)
         if remote and remote_ver and remote_ver != remote:
             raise RuntimeError("버전 불일치 (%s vs %s)" % (remote_ver, remote))
-        import shutil
-        shutil.copy2(new_path, ATTACKER_MAIN)
-        try:
-            os.remove(new_path)
-        except Exception:
-            pass
-        _spawn_attacker(ATTACKER_MAIN)
-        time.sleep(0.45)
+        exe = _resolve_pythonw()
+        bat_path = os.path.join(SCRIPT_DIR, "_attacker_upd.bat")
+        bat = (
+            "@echo off\r\n"
+            "ping 127.0.0.1 -n 3 >nul\r\n"
+            'move /y "%s" "%s"\r\n'
+            'start "" "%s" "%s"\r\n'
+            'del "%~f0"\r\n'
+        ) % (new_path, dest, exe, dest)
+        with open(bat_path, "w", encoding="utf-8") as f:
+            f.write(bat)
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        subprocess.Popen(["cmd.exe", "/c", bat_path], cwd=SCRIPT_DIR, creationflags=flags)
+        time.sleep(0.25)
     except Exception as e:
         _show_msgbox(
             "error",
@@ -743,9 +748,9 @@ def _stream_tcp_loop():
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     pil = Image.fromarray(rgb)
                     iw, ih = pil.size
-                    lw = max(stream_view_label.winfo_width(), 200)
-                    lh = max(stream_view_label.winfo_height(), 150)
-                    scale = min(lw / iw, lh / ih, 1.0)
+                    lw = max(stream_view_label.winfo_width(), 400)
+                    lh = max(stream_view_label.winfo_height(), 300)
+                    scale = min(lw / iw, lh / ih)
                     nw = max(1, int(iw * scale))
                     nh = max(1, int(ih * scale))
                     disp = pil.resize((nw, nh), Image.Resampling.BILINEAR)
@@ -810,7 +815,7 @@ def toggle_stream_view():
         return
     stream_view_win = tk.Toplevel(root)
     stream_view_win.title("쫄화면")
-    stream_view_win.geometry("480x360")
+    stream_view_win.geometry("800x600")
     stream_view_win.attributes("-topmost", True)
     stream_view_win.configure(bg="#0d0f14")
     stream_view_win.protocol("WM_DELETE_WINDOW", lambda: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))

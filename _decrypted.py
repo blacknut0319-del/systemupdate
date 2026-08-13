@@ -3009,7 +3009,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:30"
+PATCH_UPDATED_AT = "2026-08-14 05:36"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -4634,7 +4634,7 @@ def expert_logic():
                     log_event(f"💙 파랭이 (MP:{mna_pct:.0f}%)")
                     continue
 
-            m = mode_var.get() if mode_var else "파티"
+            m = mode_var.get() if mode_var else "노파티"
 
             # 파티 해독 반응지연 진단용 — 초록(독)바가 화면에 실제로 처음 보인 시각을 기록.
             # 게이트(쿨다운·타이핑중·party_window_alive)와 무관하게 매 프레임 스캔해서,
@@ -4973,7 +4973,7 @@ keep_on_top()
 chk_fix = ctk.BooleanVar(value=False)
 chk_follow = ctk.BooleanVar(value=False)
 chk_space_save = ctk.BooleanVar(value=False) 
-mode_var = ctk.StringVar(value="파티")
+mode_var = ctk.StringVar(value="노파티")
 chk_buff_on = ctk.BooleanVar(value=saved_buff_on in ("1", "true", "True"))
 chk_poison = ctk.BooleanVar(value=False)
 chk_target_poison = ctk.BooleanVar(value=False)
