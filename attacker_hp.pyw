@@ -17,7 +17,7 @@ import keyboard
 import ctypes
 import win32gui
 
-PATCH_UPDATED_AT = "2026-08-14 02:55"
+PATCH_UPDATED_AT = "2026-08-14 06:05"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -453,6 +453,7 @@ close_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
 def close_app():
     global running, sock
     running = False
+    close_stream_view()
     try: sock.close()
     except: pass
     root.destroy()
@@ -612,6 +613,216 @@ for i, (text, cmd, color) in enumerate(ctl_btns):
     tk.Button(f, text=text, bg=color, fg="#fff", font=('',8,'bold'),
               relief='flat', padx=2, cursor="hand2",
               command=lambda c=cmd: send_remote_cmd(c)).pack(fill='x', pady=0)
+
+# ============================================================
+# 쫄화면 스트림 + 원격 마우스 (Alt+드래그)
+# ============================================================
+STREAM_TCP_PORT = 9100
+VK_MENU = 0x12
+stream_send_on = False
+stream_view_win = None
+stream_view_active = False
+stream_view_sock = None
+stream_view_photo = None
+stream_view_label = None
+lbl_stream_status = None
+stream_view_img_rect = (0, 0, 1, 1)
+
+def _alt_held():
+    return bool(ctypes.windll.user32.GetAsyncKeyState(VK_MENU) & 0x8000)
+
+def send_mouse_json(obj):
+    try:
+        sock.sendto(json.dumps(obj).encode("utf-8"), (ip_var.get(), TARGET_PORT))
+    except Exception:
+        pass
+
+def _stream_frac_from_event(e, label):
+    global stream_view_img_rect
+    lw = max(label.winfo_width(), 1)
+    lh = max(label.winfo_height(), 1)
+    ix, iy, iw, ih = stream_view_img_rect
+    if iw < 2 or ih < 2:
+        return 0.5, 0.5
+    lx = e.x - ix
+    ly = e.y - iy
+    if lx < 0 or ly < 0 or lx > iw or ly > ih:
+        return None
+    return round(lx / iw, 4), round(ly / ih, 4)
+
+def _on_stream_motion(e):
+    if not _alt_held():
+        return
+    frac = _stream_frac_from_event(e, stream_view_label)
+    if not frac:
+        return
+    send_mouse_json({"t": "mm", "fx": frac[0], "fy": frac[1]})
+
+def _on_stream_btn(e, down):
+    if not _alt_held():
+        return
+    frac = _stream_frac_from_event(e, stream_view_label)
+    if not frac:
+        return
+    btn = "left"
+    if e.num == 2:
+        btn = "middle"
+    elif e.num == 3:
+        btn = "right"
+    send_mouse_json({"t": "mc", "fx": frac[0], "fy": frac[1], "btn": btn, "down": down})
+
+def _on_stream_scroll(e):
+    if not _alt_held():
+        return
+    send_mouse_json({"t": "ms", "d": int(getattr(e, "delta", 0) or 0)})
+
+def _tcp_recv_exact(conn, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = conn.recv(n - len(buf))
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+def _stream_tcp_loop():
+    global stream_view_active, stream_view_sock, stream_view_photo, stream_view_img_rect
+    while stream_view_active:
+        ip = (ip_var.get() or "").strip()
+        if not ip:
+            time.sleep(0.5)
+            continue
+        conn = None
+        try:
+            conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            conn.settimeout(3.0)
+            conn.connect((ip, STREAM_TCP_PORT))
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            stream_view_sock = conn
+            if stream_view_label and stream_view_label.winfo_exists():
+                root.after(0, lambda: lbl_stream_status.config(text="연결됨", fg="#10b981"))
+            while stream_view_active:
+                hdr = _tcp_recv_exact(conn, 4)
+                if not hdr:
+                    break
+                n = int.from_bytes(hdr, "big")
+                if n <= 0 or n > 8_000_000:
+                    break
+                raw = _tcp_recv_exact(conn, n)
+                if not raw:
+                    break
+                try:
+                    from io import BytesIO
+                    pil = Image.open(BytesIO(raw))
+                    iw, ih = pil.size
+                    lw = max(stream_view_label.winfo_width(), 200)
+                    lh = max(stream_view_label.winfo_height(), 150)
+                    scale = min(lw / iw, lh / ih, 1.0)
+                    nw = max(1, int(iw * scale))
+                    nh = max(1, int(ih * scale))
+                    disp = pil.resize((nw, nh), Image.Resampling.BILINEAR)
+                    photo = ImageTk.PhotoImage(disp)
+                    ox = (lw - nw) // 2
+                    oy = (lh - nh) // 2
+                    stream_view_img_rect = (ox, oy, nw, nh)
+
+                    def _upd(p=photo):
+                        global stream_view_photo
+                        stream_view_photo = p
+                        if stream_view_label.winfo_exists():
+                            stream_view_label.configure(image=p)
+
+                    root.after(0, _upd)
+                except Exception:
+                    pass
+        except Exception:
+            if stream_view_label and stream_view_label.winfo_exists():
+                root.after(0, lambda: lbl_stream_status.config(text="연결 대기", fg="#fbbf24"))
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+            stream_view_sock = None
+        if stream_view_active:
+            time.sleep(0.5)
+
+def toggle_stream_send():
+    global stream_send_on
+    stream_send_on = not stream_send_on
+    try:
+        sock.sendto(b'V' if stream_send_on else b'v', (ip_var.get(), TARGET_PORT))
+        btn_stream_send.config(
+            text="📡 전송 ON" if stream_send_on else "📡 전송 OFF",
+            bg="#10b981" if stream_send_on else "#374151",
+        )
+        lbl_status.config(text="쫄화면 송출 %s" % ("시작" if stream_send_on else "정지"), fg="#10b981" if stream_send_on else "#94a3b8")
+    except Exception:
+        lbl_status.config(text="전송 실패", fg="#ef4444")
+
+def close_stream_view():
+    global stream_view_active, stream_view_win, stream_view_sock
+    stream_view_active = False
+    try:
+        if stream_view_sock:
+            stream_view_sock.close()
+    except Exception:
+        pass
+    stream_view_sock = None
+    if stream_view_win and stream_view_win.winfo_exists():
+        stream_view_win.destroy()
+    stream_view_win = None
+
+def toggle_stream_view():
+    global stream_view_active, stream_view_win, stream_view_label, lbl_stream_status
+    if stream_view_win and stream_view_win.winfo_exists():
+        close_stream_view()
+        btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")
+        return
+    stream_view_win = tk.Toplevel(root)
+    stream_view_win.title("쫄화면")
+    stream_view_win.geometry("480x360")
+    stream_view_win.attributes("-topmost", True)
+    stream_view_win.configure(bg="#0d0f14")
+    stream_view_win.protocol("WM_DELETE_WINDOW", lambda: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
+
+    hdr = tk.Frame(stream_view_win, bg="#141420")
+    hdr.pack(fill="x")
+    lbl_stream_status = tk.Label(hdr, text="연결 중...", bg="#141420", fg="#fbbf24", font=("Malgun Gothic", 8))
+    lbl_stream_status.pack(side="left", padx=6, pady=4)
+    tk.Label(hdr, text="Alt+마우스 = 쫄 조종", bg="#141420", fg="#94a3b8", font=("Malgun Gothic", 8)).pack(side="right", padx=6)
+
+    stream_view_label = tk.Label(stream_view_win, bg="#000", text="쫄화면 전송 ON 후 대기...", fg="#6c7086")
+    stream_view_label.pack(fill="both", expand=True, padx=4, pady=4)
+    for ev, fn in [
+        ("<Motion>", _on_stream_motion),
+        ("<ButtonPress-1>", lambda e: _on_stream_btn(e, True)),
+        ("<ButtonPress-2>", lambda e: _on_stream_btn(e, True)),
+        ("<ButtonPress-3>", lambda e: _on_stream_btn(e, True)),
+        ("<ButtonRelease-1>", lambda e: _on_stream_btn(e, False)),
+        ("<ButtonRelease-2>", lambda e: _on_stream_btn(e, False)),
+        ("<ButtonRelease-3>", lambda e: _on_stream_btn(e, False)),
+        ("<MouseWheel>", _on_stream_scroll),
+    ]:
+        stream_view_label.bind(ev, fn)
+
+    btn_stream_view.config(text="📺 닫기", bg="#ef4444")
+    stream_view_active = True
+    threading.Thread(target=_stream_tcp_loop, daemon=True).start()
+
+tk.Label(root, text="─"*28, bg="#0d0f14", fg="#2a2a3e", font=('',6)).pack(pady=(6,0))
+tk.Label(root, text="쫄화면 (Alt+마우스 조종)", bg="#0d0f14", fg="#f9e2af", font=("Malgun Gothic",8,"bold")).pack(pady=(0,2))
+stream_frame = tk.Frame(root, bg="#0d0f14")
+stream_frame.pack(fill='x', padx=6, pady=(0,2))
+stream_frame.grid_columnconfigure(0, weight=1)
+stream_frame.grid_columnconfigure(1, weight=1)
+btn_stream_send = tk.Button(stream_frame, text="📡 전송 OFF", bg="#374151", fg="#fff", font=('',8,'bold'),
+                            relief='flat', cursor="hand2", command=toggle_stream_send)
+btn_stream_send.grid(row=0, column=0, padx=1, pady=1, sticky="ew")
+btn_stream_view = tk.Button(stream_frame, text="📺 쫄화면", bg="#6366f1", fg="#fff", font=('',8,'bold'),
+                            relief='flat', cursor="hand2", command=toggle_stream_view)
+btn_stream_view.grid(row=0, column=1, padx=1, pady=1, sticky="ew")
 
 # ============================================================
 # Alt+숫자 매크로 (4x2 그리드)

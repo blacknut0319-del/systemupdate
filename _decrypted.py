@@ -570,6 +570,12 @@ NOPARTY_HP_COORD = [1040, 111]
 NOPARTY_RGB = [162, 146, 150]
 attacker_hp_threshold = 85.0
 UDP_ATTACKER_PORT = 9999
+STREAM_TCP_PORT = 9100
+_stream_active = False
+_stream_client = None
+_stream_client_lock = Lock()
+_stream_roi = (0, 0, 0, 0)   # 0=미설정 → 주 모니터 전체
+_remote_control_until = 0.0
 attacker_hp_udp = 100.0
 attacker_poisoned = False
 attacker_petrified = False
@@ -774,6 +780,19 @@ class KmBox:
             self._human_press(self.FKEY[cmd]); return
 
     def flush(self): pass
+
+    def wheel(self, delta):
+        if not self.is_open or kmNet is None:
+            return
+        fn = getattr(kmNet, "wheel", None) or getattr(kmNet, "mouse_wheel", None)
+        if not fn:
+            return
+        d = max(-127, min(127, int(delta)))
+        with self._lk:
+            try:
+                fn(d)
+            except Exception:
+                pass
 
     def lcd(self, frame):
         # LCD에 이미지 프레임 표시 (봇 명령이랑 같은 Lock으로 순서 보장)
@@ -1581,6 +1600,7 @@ def _open_admin_panel_impl():
             d["x2"],d["y2"]=e.x_root,e.y_root
             x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
             if x2-x1<8 or y2-y1<3: ov.destroy(); return
+            x1, y1, x2, y2 = _tighten_party_roi_from_drag(x1, y1, x2, y2)
             PARTY_ROIS[pi]=(x1,y1,x2,y2)
             PARTY_COORDS[pi]=[(x1+x2)//2,(y1+y2)//2]
             if f"P{pi+1}_BAR" in entries: entries[f"P{pi+1}_BAR"].set(1.0)
@@ -1592,8 +1612,8 @@ def _open_admin_panel_impl():
             if pv:
                 admin.after(300, lambda p=pi, w=pv: refresh_preview(w, None, PARTY_ROIS[p], PARTY_HP_100_REF[p]))
         cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
-        tk.Label(ov,text=f"🟢 P{pi+1} HP바 드래그",fg="#10b981",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
-        tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+        tk.Label(ov,text=f"🔴 P{pi+1} 빨간 막대 드래그 (넓게 잡아도 막대만 자동 맞춤)",fg="#ef4444",bg="black",font=("Malgun Gothic",12,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+        tk.Label(ov,text="ESC=취소 · 놓으면 빨간 HP막대만 ROI 저장",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
         ov.bind("<Escape>",lambda e:ov.destroy())
 
     def open_party_name_roi_overlay(pi):
@@ -2175,6 +2195,62 @@ def _hp_bar_band_cols(arr):
         return grn_cols, w, True
     return 0, w, False        # 빈칸·사망·게임배경(바 없음)
 
+def _tighten_party_roi_from_drag(x1, y1, x2, y2):
+    """드래그 박스 안에서 빨간(또는 독 초록) HP 막대만 추출해 타이트한 ROI 반환."""
+    w, h = max(x2 - x1, 1), max(y2 - y1, 1)
+    if w < 8 or h < 3:
+        return x1, y1, x2, y2
+    try:
+        import mss as _mss
+        img = _mss.mss().grab({"left": x1, "top": y1, "width": w, "height": h})
+        arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
+    except Exception:
+        return x1, y1, x2, y2
+    R = arr[:, :, 0].astype(int)
+    G = arr[:, :, 1].astype(int)
+    B = arr[:, :, 2].astype(int)
+    red, grn = _hp_fill_masks(R, G, B)
+    mask = red if int(red.sum()) >= int(grn.sum()) else grn
+    rows = mask.sum(axis=1)
+    if int(rows.max()) < 2:
+        return x1, y1, x2, y2
+    peak = int(rows.max())
+    py = int(np.argmax(rows))
+    lo, hi = py, py
+    while lo - 1 >= 0 and rows[lo - 1] >= peak * 0.4:
+        lo -= 1
+    while hi + 1 < h and rows[hi + 1] >= peak * 0.4:
+        hi += 1
+    sub = mask[lo:hi + 1]
+    bh = sub.shape[0]
+    need = max(2, math.ceil(bh * 0.6))
+    solid = sub.sum(axis=0) >= need
+    idx = np.nonzero(solid)[0]
+    if idx.size == 0:
+        return x1, y1, x2, y2
+    first = int(idx[0])
+    start_window = max(3, w // 8)
+    if first > start_window:
+        return x1, y1, x2, y2
+    gap_tol = max(2, w // 20)
+    run_end = first
+    gap = 0
+    for c in range(first, w):
+        if solid[c]:
+            run_end = c
+            gap = 0
+        else:
+            gap += 1
+            if gap > gap_tol:
+                break
+    tx1 = x1 + max(0, first - 1)
+    tx2 = x1 + min(w, run_end + 2)
+    ty1 = y1 + max(0, lo)
+    ty2 = y1 + min(h, hi + 1)
+    if tx2 - tx1 < 8 or ty2 - ty1 < 2:
+        return x1, y1, x2, y2
+    return tx1, ty1, tx2, ty2
+
 def _hp_filled_cols(bar_px):
     """호환용 — 채워진 '열' 수(가로)."""
     if bar_px.size == 0:
@@ -2675,13 +2751,15 @@ def _clamp_to_screen(x, y, margin=4):
         pass
     return x, y
 
-def human_mouse_move(tx, ty, fast=False, roi=None):
-    """fast=True: 파티힐용 — 기본보다 조금 빠르되, 텔포처럼 안 보이게 중간 속도."""
+def human_mouse_move(tx, ty, fast=False, roi=None, remote=False):
+    """fast=True: 파티힐용 — 기본보다 조금 빠르되, 텔포처럼 안 보이게 중간 속도.
+    remote=True: 격수 원격조종 — jitter 없이 정확 이동."""
     global ser
     if not ser or not ser.is_open: return
     pt = POINT(); ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     cx, cy = pt.x, pt.y
-    tx, ty = _click_jitter_xy(tx, ty, roi=roi)
+    if not remote:
+        tx, ty = _click_jitter_xy(tx, ty, roi=roi)
     tx, ty = _clamp_to_screen(tx, ty)    # 화면 밖/핫코너 진입 차단 (목표·복귀 좌표 모두 경유)
     # fast: 기본(20~30)보다 빠르되 텔포급(8~12)은 피함 → 12~18
     steps = random.randint(12, 18) if fast else random.randint(20, 30)
@@ -2823,7 +2901,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 05:39"
+PATCH_UPDATED_AT = "2026-08-14 06:05"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -4400,6 +4478,10 @@ def expert_logic():
             frame = camera.get_latest_frame() if camera else None
             if frame is None: time.sleep(0.01); continue 
 
+            if remote_control_active():
+                time.sleep(0.03)
+                continue
+
             # 석화(회색 피바): 일반/독은 빨강+초록, 석화일 때만 어두운 회색 열=채움 (빈칸=밝은 은색)
             _self_petrified = is_gray_bar(frame, SELF_HP_ROI) if SELF_HP_ROI[0] != 0 else False
 
@@ -5266,6 +5348,181 @@ def update_udp_hp_label():
     except: pass
 
 # UDP 원격 명령 매핑
+def _get_stream_rect():
+    """스트림 캡처 영역 (left, top, width, height)."""
+    global _stream_roi
+    if _stream_roi[2] > _stream_roi[0] and _stream_roi[3] > _stream_roi[1]:
+        x1, y1, x2, y2 = _stream_roi
+        return x1, y1, max(1, x2 - x1), max(1, y2 - y1)
+    try:
+        import mss as _mss
+        mon = _mss.mss().monitors[1]
+        return mon["left"], mon["top"], mon["width"], mon["height"]
+    except Exception:
+        return 0, 0, 1920, 1080
+
+def _stream_point_from_frac(fx, fy):
+    """격수 미리보기 0~1 좌표 → 쫄 화면 절대 좌표."""
+    sx, sy, sw, sh = _get_stream_rect()
+    fx = max(0.0, min(1.0, float(fx)))
+    fy = max(0.0, min(1.0, float(fy)))
+    return int(sx + fx * sw), int(sy + fy * sh)
+
+def _touch_remote_control():
+    global _remote_control_until
+    _remote_control_until = time.time() + 1.5
+
+def remote_control_active():
+    return time.time() < globals().get("_remote_control_until", 0)
+
+def _remote_mouse_move(fx, fy):
+    global ser
+    _touch_remote_control()
+    if not ser or not getattr(ser, "is_open", False):
+        return
+    tx, ty = _stream_point_from_frac(fx, fy)
+    human_mouse_move(tx, ty, fast=True, remote=True)
+
+def _remote_mouse_click(fx, fy, button="left", down=True):
+    global ser
+    _touch_remote_control()
+    if not ser or not getattr(ser, "is_open", False):
+        return
+    tx, ty = _stream_point_from_frac(fx, fy)
+    human_mouse_move(tx, ty, fast=True, remote=True)
+    time.sleep(0.02)
+    btn = (button or "left").lower()
+    if btn == "middle":
+        if down:
+            ser.write(b'M')
+        return
+    if btn == "left" and down:
+        ser.write(b'K')
+
+def _remote_mouse_scroll(delta):
+    global ser
+    _touch_remote_control()
+    if not ser or not getattr(ser, "is_open", False):
+        return
+    if hasattr(ser, "wheel"):
+        ser.wheel(delta)
+        return
+    # 뚱USB: 스크롤 미지원
+
+def _handle_remote_udp_json(msg):
+    if not isinstance(msg, dict):
+        return
+    t = msg.get("t")
+    if t == "mm":
+        _remote_mouse_move(msg.get("fx", 0.5), msg.get("fy", 0.5))
+    elif t == "mc":
+        _remote_mouse_click(msg.get("fx", 0.5), msg.get("fy", 0.5), msg.get("btn", "left"), bool(msg.get("down", True)))
+    elif t == "ms":
+        _remote_mouse_scroll(int(msg.get("d", 0)))
+
+def _stream_send_loop():
+    """JPEG 프레임 송출 — 격수 TCP 연결 시에만."""
+    global _stream_active, _stream_client
+    import mss as _mss
+    try:
+        sct = _mss.mss()
+    except Exception:
+        return
+    while _stream_active:
+        with _stream_client_lock:
+            conn = _stream_client
+        if not conn:
+            time.sleep(0.05)
+            continue
+        try:
+            sx, sy, sw, sh = _get_stream_rect()
+            img = sct.grab({"left": sx, "top": sy, "width": sw, "height": sh})
+            frame = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
+            pt = POINT()
+            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+            lcx, lcy = pt.x - sx, pt.y - sy
+            if 0 <= lcx < sw and 0 <= lcy < sh:
+                cv2.circle(frame, (lcx, lcy), 6, (0, 255, 255), -1)
+            max_w, max_h = 1280, 720
+            h, w = frame.shape[:2]
+            scale = min(max_w / max(w, 1), max_h / max(h, 1), 1.0)
+            if scale < 1.0:
+                frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            if not ok:
+                time.sleep(0.02)
+                continue
+            raw = buf.tobytes()
+            header = len(raw).to_bytes(4, "big")
+            with _stream_client_lock:
+                if _stream_client:
+                    _stream_client.sendall(header + raw)
+        except Exception:
+            with _stream_client_lock:
+                try:
+                    if _stream_client:
+                        _stream_client.close()
+                except Exception:
+                    pass
+                _stream_client = None
+        time.sleep(0.033)
+
+def _stream_accept_loop():
+    global _stream_active, _stream_client
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        srv.bind(("0.0.0.0", STREAM_TCP_PORT))
+        srv.listen(1)
+        srv.settimeout(1.0)
+    except Exception:
+        try:
+            srv.close()
+        except Exception:
+            pass
+        return
+    while _stream_active:
+        try:
+            conn, _addr = srv.accept()
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            with _stream_client_lock:
+                old = _stream_client
+                _stream_client = conn
+            if old:
+                try:
+                    old.close()
+                except Exception:
+                    pass
+        except socket.timeout:
+            continue
+        except Exception:
+            break
+    try:
+        srv.close()
+    except Exception:
+        pass
+
+def start_stream_server():
+    global _stream_active
+    if _stream_active:
+        return
+    _stream_active = True
+    Thread(target=_stream_accept_loop, daemon=True).start()
+    Thread(target=_stream_send_loop, daemon=True).start()
+    log_event("📡 쫄화면 송출 시작")
+
+def stop_stream_server():
+    global _stream_active, _stream_client
+    _stream_active = False
+    with _stream_client_lock:
+        try:
+            if _stream_client:
+                _stream_client.close()
+        except Exception:
+            pass
+        _stream_client = None
+    log_event("📡 쫄화면 송출 정지")
+
 UDP_CMD_MAP = {
     b'I': 'on_main_toggle',    # Insert → 시작/종료
     b'H': 'on_home_click_toggle',  # Home   → 클릭 ON/OFF
@@ -5309,7 +5566,11 @@ def udp_listener():
             data, addr = sock.recvfrom(1024)
             udp_last_from = addr[0] if addr else ""
             if len(data) == 1:
-                if data in UDP_CMD_MAP:
+                if data == b'V':
+                    Thread(target=start_stream_server, daemon=True).start()
+                elif data == b'v':
+                    Thread(target=stop_stream_server, daemon=True).start()
+                elif data in UDP_CMD_MAP:
                     # UI after 대기 없이 수신 스레드에서 즉시 처리.
                     # (힐 중 ser 사용 중에도 after 큐에 안 쌓이게 — 따라/고정/시작 반응 개선)
                     # 체크박스 갱신은 각 핸들러가 이미 root.after 로 넘김.
@@ -5325,6 +5586,12 @@ def udp_listener():
                     Thread(target=lambda s=n: udp_macro_slot(s), daemon=True).start()
                 elif data == b'C':
                     Thread(target=do_manual_bert, daemon=True).start()
+            elif len(data) >= 2 and data[0:1] == b'{':
+                try:
+                    msg = json.loads(data.decode("utf-8"))
+                    _handle_remote_udp_json(msg)
+                except Exception:
+                    pass
             elif len(data) == 4:
                 attacker_hp_udp = struct.unpack('f', data)[0]; last_udp_time = time.time()
             elif len(data) == 5:
