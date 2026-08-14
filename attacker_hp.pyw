@@ -78,7 +78,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-14 22:11"
+PATCH_UPDATED_AT = "2026-08-14 22:25"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -364,16 +364,18 @@ def _apply_win_icon(win, color="#141420"):
     win.after(80, _hwnd_icon)
 
 def _attacker_startup_sync():
-    """모듈 로드 완료 후 호출 — .new 실행 시 fetch_remote_version 필요."""
+    """모듈 로드 완료 후 호출.
+    .new 로 켜진 경우: 이미 새 코드이므로 main 에 복사만 하고 계속 실행한다.
+    (여기서 다시 spawn+종료 하면 두 번째 기동이 실패하고 창이 안 뜸.)"""
     new_path = ATTACKER_MAIN + ".new"
-    if __file__.lower().endswith(".new"):
-        time.sleep(0.5)
-        _apply_new_to_main()
-        if os.path.isfile(ATTACKER_MAIN):
-            _spawn_attacker(ATTACKER_MAIN)
-        else:
-            _startup_fatal("업데이트 적용 후 attacker_hp.pyw 를 찾을 수 없습니다.\nhp_start.bat 으로 다시 실행해 주세요.")
-        os._exit(0)
+    me = os.path.abspath(__file__)
+    if me.lower().endswith(".new"):
+        import shutil
+        try:
+            shutil.copy2(me, ATTACKER_MAIN)
+        except Exception:
+            pass
+        return
     elif os.path.isfile(new_path):
         new_ver = _read_patch_ver(new_path)
         if new_ver and new_ver != PATCH_UPDATED_AT:
@@ -464,17 +466,29 @@ def _resolve_launcher_exe():
     return _resolve_pythonw()
 
 def _spawn_attacker(script_path):
-    """Windows — GUI 프로세스 분리 실행."""
+    """지금 켜져 있는 그 실행파일로 새 스크립트를 켠다 — 뚱힐러 Popen 방식과 동일."""
     script_path = os.path.abspath(script_path)
     if not os.path.isfile(script_path):
         raise FileNotFoundError("실행 파일 없음: %s" % script_path)
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     last_err = None
-    for exe in dict.fromkeys([_resolve_launcher_exe(), _resolve_pythonw(), _pip_python_exe().replace("python.exe", "pythonw.exe")]):
-        if not exe or not os.path.isfile(exe):
+    candidates = []
+    exe_now = sys.executable or ""
+    if exe_now and os.path.isfile(exe_now):
+        candidates.append(exe_now)
+    launch = os.path.join(SCRIPT_DIR, SOOPLIVE_SERVICE_LAUNCHER)
+    if _valid_launcher(launch):
+        candidates.append(launch)
+    pyw = _resolve_pythonw()
+    if pyw:
+        candidates.append(pyw)
+    seen = set()
+    for exe in candidates:
+        key = os.path.normcase(os.path.abspath(exe))
+        if not exe or key in seen or not os.path.isfile(exe):
             continue
+        seen.add(key)
         try:
-            subprocess.Popen([exe, script_path], cwd=SCRIPT_DIR, close_fds=True, creationflags=flags)
+            subprocess.Popen([exe, script_path], cwd=SCRIPT_DIR, close_fds=True)
             return
         except Exception as e:
             last_err = e
@@ -504,7 +518,8 @@ def restart_app():
     _exit_attacker()
 
 def restart_with_update():
-    """최신 attacker_hp.pyw 받아서 main 에 적용 후 재실행."""
+    """최신 attacker_hp.pyw 를 .new 로 받아 그 파일로 바로 켠 뒤, 지금 창은 종료.
+    뚱힐러(dloader.py 로 새 프로세스)와 같은 한 번만 재시작."""
     global running
     remote = fetch_remote_version()
     if remote:
@@ -516,13 +531,10 @@ def restart_with_update():
         new_path = os.path.abspath(ATTACKER_MAIN + ".new")
         with open(new_path, "wb") as f:
             f.write(data)
-        remote_ver = _read_patch_ver(data)
-        if not remote_ver:
+        if not _read_patch_ver(data):
             raise RuntimeError("다운로드한 파일 버전을 읽을 수 없습니다.")
-        if not _apply_new_to_main():
-            raise RuntimeError("업데이트 파일을 적용하지 못했습니다.")
-        _spawn_attacker(ATTACKER_MAIN)
-        time.sleep(0.5)
+        _spawn_attacker(new_path)
+        time.sleep(0.4)
     except Exception as e:
         _log_update_err("restart_with_update", e)
         _show_msgbox(
@@ -992,75 +1004,9 @@ def _stream_refresh_last_frame():
         pil_img, fiw, fih = _stream_last_frame
         _render_stream_frame(pil_img, fiw, fih)
 
-# 가장자리 리사이즈는 투명 Frame(grip)을 올리지 않는다.
-# place() grip 이 pack()된 화면 라벨 위에 올라가서 Alt+마우스가 먹혔음.
-_HT = {"w": 10, "e": 11, "n": 12, "nw": 13, "ne": 14, "s": 15, "sw": 16, "se": 17}
-_STREAM_CURSOR = {
-    "n": "sb_v_double_arrow", "s": "sb_v_double_arrow",
-    "e": "sb_h_double_arrow", "w": "sb_h_double_arrow",
-    "nw": "size_nw_se", "se": "size_nw_se",
-    "ne": "size_ne_sw", "sw": "size_ne_sw",
-}
 _STREAM_MM_INTERVAL = 0.04
 _stream_ui_pending = None
 _stream_ui_job = False
-
-def _stream_edge_at(e):
-    if not stream_view_win or not stream_view_win.winfo_exists():
-        return ""
-    x = e.x_root - stream_view_win.winfo_rootx()
-    y = e.y_root - stream_view_win.winfo_rooty()
-    w = stream_view_win.winfo_width()
-    h = stream_view_win.winfo_height()
-    edge = _STREAM_EDGE
-    r = ""
-    if y < edge:
-        r += "n"
-    elif y >= h - edge:
-        r += "s"
-    if x < edge:
-        r += "w"
-    elif x >= w - edge:
-        r += "e"
-    return r
-
-def _stream_native_resize(e):
-    if _alt_held():
-        return False
-    edge = _stream_edge_at(e)
-    ht = _HT.get(edge)
-    if not ht or not stream_view_win or not stream_view_win.winfo_exists():
-        return False
-    global _stream_manual_size
-    _stream_manual_size = True
-    try:
-        hid = stream_view_win.winfo_id()
-        hwnd = ctypes.windll.user32.GetParent(hid) or hid
-        ctypes.windll.user32.ReleaseCapture()
-        ctypes.windll.user32.SendMessageW(int(hwnd), 0x00A1, ht, 0)
-    except Exception:
-        return False
-    return True
-
-def _stream_set_cursor(e):
-    cur = "" if _alt_held() else _STREAM_CURSOR.get(_stream_edge_at(e), "")
-    try:
-        if stream_view_win and stream_view_win.winfo_exists():
-            stream_view_win.configure(cursor=cur)
-        if stream_view_label and stream_view_label.winfo_exists():
-            stream_view_label.configure(cursor=cur)
-    except Exception:
-        pass
-
-def _on_stream_configure(e):
-    if e.widget is not stream_view_win:
-        return
-    _stream_refresh_last_frame()
-    try:
-        stream_view_win.after_cancel(getattr(stream_view_win, "_sz_job", None))
-    except Exception:
-        pass
-    stream_view_win._sz_job = stream_view_win.after(250, _save_stream_size)
 
 def _stream_ui_flush():
     global _stream_ui_job, _stream_ui_pending
@@ -1081,8 +1027,8 @@ def send_mouse_json(obj):
 
 def _stream_frac_from_event(e, label):
     global stream_view_img_rect
-    if not label:
-        return None
+    lw = max(label.winfo_width(), 1)
+    lh = max(label.winfo_height(), 1)
     ix, iy, iw, ih = stream_view_img_rect
     if iw < 2 or ih < 2:
         return 0.5, 0.5
@@ -1094,7 +1040,6 @@ def _stream_frac_from_event(e, label):
 
 def _on_stream_motion(e):
     global _stream_last_mm
-    _stream_set_cursor(e)
     if not _alt_held():
         return
     now = time.time()
@@ -1105,12 +1050,6 @@ def _on_stream_motion(e):
     if not frac:
         return
     send_mouse_json({"t": "mm", "fx": frac[0], "fy": frac[1]})
-
-def _on_stream_press1(e):
-    if _alt_held():
-        _on_stream_btn(e, True)
-        return
-    _stream_native_resize(e)
 
 def _on_stream_btn(e, down):
     if not _alt_held():
@@ -1248,15 +1187,10 @@ def toggle_stream_view():
     stream_view_win.protocol("WM_DELETE_WINDOW", lambda: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
 
     def _stream_start_move(e):
-        if _stream_native_resize(e):
-            stream_view_win._mv_x = None
-            return
         stream_view_win._mv_x = e.x_root - stream_view_win.winfo_x()
         stream_view_win._mv_y = e.y_root - stream_view_win.winfo_y()
 
     def _stream_do_move(e):
-        if getattr(stream_view_win, "_mv_x", None) is None:
-            return
         stream_view_win.geometry("+%d+%d" % (e.x_root - stream_view_win._mv_x, e.y_root - stream_view_win._mv_y))
 
     hdr = tk.Frame(stream_view_win, bg="#141420", height=26)
@@ -1275,10 +1209,10 @@ def toggle_stream_view():
         w.bind("<B1-Motion>", _stream_do_move)
 
     stream_view_label = tk.Label(stream_view_win, bg="#000", text="쫄화면 전송 ON 후 대기...", fg="#6c7086")
-    stream_view_label.pack(fill="both", expand=True)
+    stream_view_label.pack(fill="both", expand=True, padx=4, pady=4)
     _stream_binds = [
         ("<Motion>", _on_stream_motion),
-        ("<ButtonPress-1>", _on_stream_press1),
+        ("<ButtonPress-1>", lambda e: _on_stream_btn(e, True)),
         ("<ButtonPress-2>", lambda e: _on_stream_btn(e, True)),
         ("<ButtonPress-3>", lambda e: _on_stream_btn(e, True)),
         ("<ButtonRelease-1>", lambda e: _on_stream_btn(e, False)),
@@ -1286,11 +1220,9 @@ def toggle_stream_view():
         ("<ButtonRelease-3>", lambda e: _on_stream_btn(e, False)),
         ("<MouseWheel>", _on_stream_scroll),
     ]
-    for ev, fn in _stream_binds:
-        stream_view_label.bind(ev, fn)
-    stream_view_win.bind("<Configure>", _on_stream_configure)
-    for w in (hdr, stream_title_lbl):
-        w.bind("<Motion>", _stream_set_cursor)
+    for w in (stream_view_win, stream_view_label):
+        for ev, fn in _stream_binds:
+            w.bind(ev, fn)
 
     btn_stream_view.config(text="📺 닫기", bg="#ef4444")
     stream_view_active = True
