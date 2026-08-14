@@ -21,11 +21,42 @@ ATTACKER_VER = os.path.join(ROOT, "attacker_version.txt")
 _PATCH_RE = re.compile(r'(PATCH_UPDATED_AT\s*=\s*")[^"]+(")')
 
 
+def _without_patch(text):
+    return _PATCH_RE.sub(r'\g<1>\g<2>', text, count=1)
+
+
+def _git_head_text(path):
+    import subprocess
+    rel = os.path.relpath(path, ROOT).replace("\\", "/")
+    try:
+        return subprocess.check_output(
+            ["git", "show", "HEAD:%s" % rel],
+            cwd=ROOT,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception:
+        return None
+
+
+def _has_real_changes(path):
+    """PATCH_UPDATED_AT 말고 실제 코드가 HEAD 와 다를 때만 True."""
+    if not os.path.isfile(path):
+        return False
+    with open(path, encoding="utf-8") as f:
+        cur = f.read()
+    head = _git_head_text(path)
+    if head is None:
+        return True
+    return _without_patch(cur) != _without_patch(head)
+
+
 def stamp_patch_time(paths):
-    """소스의 PATCH_UPDATED_AT 을 현재 로컬 시각(분 단위)으로 맞춤."""
+    """실제 코드가 바뀐 소스만 PATCH_UPDATED_AT 을 현재 시각으로 맞춤.
+    쫄만 고치면 격수 버전은 안 올려서 격수 업데이트 알림이 안 뜨게 한다."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     for path in paths:
-        if not os.path.isfile(path):
+        if not _has_real_changes(path):
             continue
         with open(path, encoding="utf-8") as f:
             text = f.read()

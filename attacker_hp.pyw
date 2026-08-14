@@ -88,7 +88,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-14 23:35"
+PATCH_UPDATED_AT = "2026-08-14 23:01"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
