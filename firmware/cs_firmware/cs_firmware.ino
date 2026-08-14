@@ -1,14 +1,13 @@
 #include <Keyboard.h>
 #include <Mouse.h>
 #include <avr/wdt.h>
-#include <avr/interrupt.h>
 
 // 무한 클릭 상태 저장 변수
 bool autoClick = false;
 unsigned long lastClickTime = 0;
 unsigned long nextInterval = 100;
 
-// Caterina 부트로더 매직키
+// Caterina 부트로더 매직키 (펌업 '!' 명령용)
 #define CATERINA_MAGIC_ADDR ((uint16_t*)0x0800)
 #define CATERINA_MAGIC_KEY  0x7777
 
@@ -22,29 +21,6 @@ void humanClick(uint8_t button) {
   Mouse.press(button);
   delay(random(20, 50));
   Mouse.release(button);
-}
-
-/*
- * 중요: wdt_enable()으로 '시스템 리셋 WDT'를 켜면 Leonardo 1200bps 자동리셋이 깨짐.
- * → 평소엔 인터럽트-only WDT (키 떼고 재부팅). CDC 1200 soft-reset는 그대로 동작.
- * 펌업용 '!' 도 유지 (백업).
- */
-ISR(WDT_vect) {
-  autoClick = false;
-  Keyboard.releaseAll();
-  releaseAllMouse();
-  *CATERINA_MAGIC_ADDR = 0;
-  wdt_enable(WDTO_15MS);
-  while (true) {}
-}
-
-void enableHangWdt() {
-  cli();
-  wdt_reset();
-  MCUSR &= ~(1 << WDRF);
-  WDTCSR |= (1 << WDCE) | (1 << WDE);
-  WDTCSR = (1 << WDIE) | (1 << WDP3);
-  sei();
 }
 
 void enterBootloader() {
@@ -64,14 +40,10 @@ void humanPress(uint8_t k) {
   Keyboard.press(k);
   delay(random(80, 150));
   Keyboard.release(k);
-  wdt_reset();
 }
 
 void setup() {
-  cli();
-  MCUSR &= ~(1 << WDRF);
   wdt_disable();
-  sei();
 
   Serial.begin(9600);
   Serial.setTimeout(10);
@@ -81,14 +53,9 @@ void setup() {
   releaseAllMouse();
 
   randomSeed(analogRead(A0));
-
-  delay(3000);
-  enableHangWdt();
 }
 
 void loop() {
-  wdt_reset();
-
   if (autoClick) {
     unsigned long currentTime = millis();
     if (currentTime - lastClickTime >= nextInterval) {
@@ -100,7 +67,6 @@ void loop() {
       Mouse.press(MOUSE_LEFT);
       delay(random(30, 75));
       Mouse.release(MOUSE_LEFT);
-      wdt_reset();
 
       lastClickTime = currentTime;
       nextInterval = random(85, 180);
@@ -108,7 +74,6 @@ void loop() {
   }
 
   while (Serial.available() > 0) {
-    wdt_reset();
     char cmd = Serial.read();
 
     if (cmd == '!') {
@@ -147,16 +112,9 @@ void loop() {
     if (cmd == '[') { Keyboard.press(KEY_LEFT_CTRL); continue; }
     if (cmd == ']') { Keyboard.release(KEY_LEFT_CTRL); continue; }
     if (cmd == 'T') { autoClick = !autoClick; continue; }
-    if (cmd == 'q') { autoClick = false; continue; }  // 무한클릭 강제 OFF (토글 아님)
-    if (cmd == 'w') { autoClick = true; continue; }   // 무한클릭 강제 ON
-    if (cmd == 'q') { autoClick = false; continue; }  // 무한클릭 강제 OFF (토글 아님)
-    if (cmd == 'w') { autoClick = true; continue; }   // 무한클릭 강제 ON
-    if (cmd == 'q') { autoClick = false; continue; }  // 무한클릭 강제 OFF (토글 아님)
-    if (cmd == 'w') { autoClick = true; continue; }   // 무한클릭 강제 ON
 
-    // DDONG-WDT4 = WDT3 + 확장 마우스/키 (M J O L Alt Ctrl End Del PgDn)
     if (cmd == 'V') {
-      Serial.println(F("DDONG-WDT4"));
+      Serial.println(F("DDONG-V4"));
       continue;
     }
 
@@ -184,7 +142,6 @@ void loop() {
           unsigned long hold = random(1100, 1400);
           unsigned long t0 = millis();
           while (millis() - t0 < hold) {
-            wdt_reset();
             delay(50);
           }
         }

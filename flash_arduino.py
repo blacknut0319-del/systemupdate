@@ -1,16 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Leonardo 펌업 — 처음 성공하던 방식(1200 짧게 → 바로 avrdude) + 최신 hex 강제받기.
-
-로그에서 확인된 실수:
-  - TEMP에 옛 hex(20312)가 굳어 수동 리셋해도 옛 WDT만 다시 구워짐
-  - 시스템리셋 WDT는 Leonardo 1200 자동리셋을 깨뜨림 → WDT3(인터럽트)로 교체
+"""Leonardo 펌업 — Arduino IDE와 같은 1200 자동리셋 + avrdude.
 
 흐름:
   1) GitHub에서 뚱힐러.hex 항상 재다운로드
-  2) 시리얼 '!' (WDT2/WDT3)
-  3) 1200bps 짧게 → 바로 avrdude (처음 성공 방식)
-  4) arduino-cli 폴백
-  5) 수동 더블리셋 (이번 1회: 옛 시스템WDT → WDT3)
+  2) arduino-cli (IDE와 동일한 1200 리셋)
+  3) 시리얼 '!' + 1200 + avrdude
+  4) 수동 USB 재연결 폴백
 """
 from __future__ import annotations
 
@@ -131,11 +126,26 @@ def _download(remote, dest, flog=None, callback=None, label=None):
 
 
 def ensure_firmware(flog=None, callback=None):
-    """avrdude는 캐시 OK. hex는 매번 GitHub에서 강제 갱신(옛 20312 고착 방지)."""
+    """hex: 로컬(개발폴더) 우선 → 없으면 GitHub. avrdude는 캐시 OK."""
     root = TMP_ROOT
     os.makedirs(os.path.join(root, "avrdude"), exist_ok=True)
+    hex_dest = os.path.join(root, HEX_NAME)
 
-    # 로컬 개발폴더에 avrdude 있으면 복사(네트워크 절약)
+    # 로컬 hex 우선 (개발/테스트 — GitHub 옛 hex보다 먼저)
+    for cand in (
+        os.path.join(HERE, "firmware", HEX_NAME),
+        os.path.join(DESKTOP, "뚱힐러_github", "firmware", HEX_NAME),
+    ):
+        if os.path.isfile(cand) and os.path.getsize(cand) > 1000:
+            try:
+                import shutil
+                shutil.copy2(cand, hex_dest)
+                flog and flog.log(f"hex 로컬: {cand} size={os.path.getsize(hex_dest)}")
+                break
+            except Exception as e:
+                flog and flog.log(f"hex 로컬복사 실패: {e}")
+
+    # 로컬 avrdude 복사
     for cand in (
         os.path.join(HERE, "firmware"),
         os.path.join(DESKTOP, "뚱힐러_github", "firmware"),
@@ -164,28 +174,18 @@ def ensure_firmware(flog=None, callback=None):
             flog and flog.log(f"도구 다운로드 실패: {e}")
             return None
 
-    # ★ hex는 항상 다시 받음
-    hex_dest = os.path.join(root, HEX_NAME)
-    old = os.path.getsize(hex_dest) if os.path.isfile(hex_dest) else 0
-    try:
-        new_sz = _download(
-            f"firmware/{HEX_NAME}", hex_dest, flog=flog, callback=callback, label=HEX_NAME
-        )
-        flog and flog.log(f"hex 강제갱신: {old} → {new_sz}")
-    except Exception as e:
-        flog and flog.log(f"hex 다운로드 실패: {e}")
-        # 로컬 폴백
-        for cand in (
-            os.path.join(HERE, "firmware", HEX_NAME),
-            os.path.join(DESKTOP, "뚱힐러_github", "firmware", HEX_NAME),
-        ):
-            if os.path.isfile(cand) and os.path.getsize(cand) > 1000:
-                import shutil
-                shutil.copy2(cand, hex_dest)
-                flog and flog.log(f"hex 로컬폴백: {cand} size={os.path.getsize(hex_dest)}")
-                break
-        else:
-            return None
+    # hex 없으면 GitHub
+    if not os.path.isfile(hex_dest) or os.path.getsize(hex_dest) < 1000:
+        old = os.path.getsize(hex_dest) if os.path.isfile(hex_dest) else 0
+        try:
+            new_sz = _download(
+                f"firmware/{HEX_NAME}", hex_dest, flog=flog, callback=callback, label=HEX_NAME
+            )
+            flog and flog.log(f"hex GitHub: {old} → {new_sz}")
+        except Exception as e:
+            flog and flog.log(f"hex 다운로드 실패: {e}")
+            if not os.path.isfile(hex_dest) or os.path.getsize(hex_dest) < 1000:
+                return None
 
     flog and flog.log(f"펌웨어 폴더: {root}")
     return root
@@ -277,7 +277,7 @@ def _enter_bootloader_serial_cmd(port, flog=None):
 
 
 def _probe_firmware(port, flog=None):
-    """펌업 전 'V' 조회 — DDONG-WDT3/4면 1200 자동리셋 가능."""
+    """펌업 전 'V' 조회 — DDONG-V4 / DDONG-WDT4 등."""
     s = None
     try:
         s = serial.Serial(port, 9600, timeout=0.2, write_timeout=1.0)
@@ -314,8 +314,9 @@ def _probe_firmware(port, flog=None):
                 pass
 
 
-def _has_watchdog_fw(ver):
-    return "DDONG-WDT" in (ver or "").upper().replace(" ", "")
+def _has_ddong_fw(ver):
+    v = (ver or "").upper().replace(" ", "")
+    return "DDONG" in v
 
 
 def _touch_dtr_reset(port, flog=None):
@@ -520,10 +521,46 @@ def flash_via_arduino_cli(hex_path, port, flog=None, callback=None):
     return proc.returncode == 0, (lines[-1] if lines else f"code {proc.returncode}")
 
 
+def _flash_once_1200_avrdude(root, hex_path, port, callback=None, flog=None):
+    """IDE와 같이 1200 한 번 → 부트로더 대기 → avrdude 1회."""
+    if callback:
+        callback(40, "1200 리셋 (IDE 방식)")
+    try:
+        _touch_1200_simple(port, flog=flog)
+    except Exception as e:
+        flog and flog.log(f"1200 실패: {e!r}")
+        return False, "1200 리셋 실패"
+    time.sleep(0.35)
+    boot = wait_bootloader(timeout=6.0, callback=callback, flog=flog, hint="1200")
+    if not boot:
+        boot = port
+        flog and flog.log(f"부트로더 COM 미검출 → sketch 포트 {port} 로 시도")
+    ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
+    return ok, detail
+
+
+def _flash_once_bang_avrdude(root, hex_path, port, callback=None, flog=None):
+    """옛 시스템 WDT(1/2) 등 — 1200 대신 펌웨어 '!' 로 부트로더 진입."""
+    if callback:
+        callback(45, "! 부트로더 (옛 WDT용)")
+    try:
+        _enter_bootloader_serial_cmd(port, flog=flog)
+    except Exception as e:
+        flog and flog.log(f"'!' 실패: {e!r}")
+        return False, "! 명령 실패"
+    time.sleep(0.4)
+    boot = wait_bootloader(timeout=5.0, callback=callback, flog=flog, hint="!")
+    if not boot:
+        boot = find_bootloader_port() or port
+        flog and flog.log(f"! 후 boot={boot}")
+    ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
+    return ok, detail
+
+
 def flash(callback=None, port=None, ask_manual_reset=None):
-    """return (ok, msg, log_path)."""
+    """return (ok, msg, log_path). Arduino IDE와 동일: cli 먼저, COM 최소 사용."""
     flog = FlashLogger()
-    flog.section("펌업 시작 (최신hex강제 + 1200빠른업로드)")
+    flog.section("펌업 시작 (IDE 방식: cli → 1200 → !)")
     flog.log(f"python={sys.version}")
     flog.log(f"preferred={port!r}")
     flog.dump_ports("시작")
@@ -534,6 +571,8 @@ def flash(callback=None, port=None, ask_manual_reset=None):
             return False, msg, flog.save(False, msg)
 
         _kill_stray_avrdude(flog)
+        time.sleep(0.3)
+
         root = ensure_firmware(flog=flog, callback=callback)
         if not root:
             msg = "펌웨어 확보 실패"
@@ -541,92 +580,90 @@ def flash(callback=None, port=None, ask_manual_reset=None):
         hex_path = os.path.join(root, HEX_NAME)
         hex_sz = os.path.getsize(hex_path)
         flog.log(f"hex={hex_path} size={hex_sz}")
-        if hex_sz < 20500:
-            flog.log(f"경고: hex가 너무 작음({hex_sz}) — 옛 펌일 수 있음")
 
         com = find_arduino(preferred=port)
         if not com:
             msg = "아두이노 COM 없음"
             return False, msg, flog.save(False, msg)
-        fw_ver = _probe_firmware(com, flog=flog)
-        has_wdt = _has_watchdog_fw(fw_ver)
-        flog.log(f"watchdog_fw={has_wdt}")
         if callback:
             callback(10, f"장치: {com}")
-        time.sleep(0.8)
 
-        def _try_avrdude(boot_port, tag):
-            if not boot_port:
-                return False, "부트로더 없음"
-            return _run_avrdude(root, hex_path, boot_port, callback=callback, flog=flog)
-
-        # 이미 부트로더면 바로
-        boot = find_bootloader_port()
-        if boot:
-            ok, detail = _try_avrdude(boot, "boot")
-            if ok:
-                if callback:
-                    callback(100, "업로드 완료!")
-                return True, f"완료(이미부트로더/{boot})", flog.save(True, f"완료/{boot}")
-
-        detail2 = ""
-        for attempt in range(3):
-            flog.section(f"자동 부트로더 진입 시도 {attempt + 1}/3")
-            com = find_arduino(preferred=port) or com
-            boot = _enter_bootloader(com, flog=flog, rounds=3)
-            if boot:
-                ok, detail = _try_avrdude(boot, f"auto{attempt}")
-                if ok:
-                    if callback:
-                        callback(100, "업로드 완료!")
-                    return True, f"완료(자동/{boot})", flog.save(True, f"완료(자동/{boot})")
-                flog.log(f"avrdude 실패: {detail}")
-            time.sleep(0.6)
-
-        # arduino-cli — 내부에서 1200 리셋 처리
-        flog.section("시도: arduino-cli")
-        com2 = find_arduino(preferred=port) or com
-        ok2, detail2 = flash_via_arduino_cli(hex_path, com2, flog=flog, callback=callback)
-        if ok2:
+        # ── 1) arduino-cli (Arduino IDE와 동일) ──
+        flog.section("1) arduino-cli (IDE 방식)")
+        if callback:
+            callback(20, "arduino-cli 업로드…")
+        ok_cli, detail_cli = flash_via_arduino_cli(hex_path, com, flog=flog, callback=callback)
+        if ok_cli:
             if callback:
-                callback(100, "업로드 완료!(cli)")
+                callback(100, "업로드 완료!")
             return True, "완료(cli)", flog.save(True, "완료(cli)")
-        flog.log(f"cli 실패: {detail2}")
+        flog.log(f"cli 실패: {detail_cli}")
 
-        # 워치독 펌(WDT3/4)이면 리셋버튼 안내 없음 — USB 재연결만
-        if has_wdt:
-            msg = (
-                "자동 펌업 실패.\n"
-                "· USB 케이블을 잠깐 뽑았다 다시 꽂은 뒤 【펌업】을 한 번 더 눌러주세요.\n"
-                "(리셋 버튼 없어도 됩니다)\n"
-                f"· 펌: {fw_ver or 'WDT'}"
-            )
-            return False, msg, flog.save(False, msg.replace("\n", " / "))
-
-        # 옛 펌(워치독 없음)만 수동 1회 — 최초 WDT 올릴 때
-        if callable(ask_manual_reset):
-            flog.section("최후: 옛펌 → WDT 수동 1회")
+        # ── 2) 1200 + avrdude 1회 ──
+        flog.section("2) 1200 + avrdude")
+        com = find_arduino(preferred=port) or com
+        ok_avr, detail_avr = _flash_once_1200_avrdude(
+            root, hex_path, com, callback=callback, flog=flog
+        )
+        if ok_avr:
             if callback:
-                callback(25, "옛펌 수동 안내")
+                callback(100, "업로드 완료!")
+            return True, f"완료(avrdude/{com})", flog.save(True, f"완료(avrdude/{com})")
+        flog.log(f"avrdude 실패: {detail_avr}")
+
+        # ── 3) '!' 부트로더 (옛 WDT1/2 — 1200 자동리셋 안 먹는 보드) ──
+        flog.section("3) ! 부트로더 (옛 WDT)")
+        com = find_arduino(preferred=port) or com
+        ok_bang, detail_bang = _flash_once_bang_avrdude(
+            root, hex_path, com, callback=callback, flog=flog
+        )
+        if ok_bang:
+            if callback:
+                callback(100, "업로드 완료!")
+            return True, f"완료(!/{com})", flog.save(True, f"완료(!/{com})")
+        flog.log(f"! avrdude 실패: {detail_bang}")
+
+        # ── 4) 수동 USB 재연결 후 1회 더 ──
+        if callable(ask_manual_reset):
+            flog.section("4) USB 재연결 후 재시도")
+            if callback:
+                callback(25, "USB 재연결 안내")
             try:
                 go = bool(ask_manual_reset())
             except Exception:
                 go = False
             if go:
-                boot = wait_bootloader(timeout=20.0, callback=callback, flog=flog, hint="수동")
-                if boot:
-                    ok3, detail3 = _try_avrdude(boot, "manual")
-                    if ok3:
+                time.sleep(0.5)
+                com = find_arduino(preferred=port) or find_arduino()
+                if com:
+                    ok_cli2, _ = flash_via_arduino_cli(hex_path, com, flog=flog, callback=callback)
+                    if ok_cli2:
                         if callback:
                             callback(100, "업로드 완료!")
-                        return True, f"완료(수동/{boot})", flog.save(True, f"완료(수동/{boot})")
-                    flog.log(f"수동 avrdude 실패: {detail3}")
+                        return True, "완료(cli/수동)", flog.save(True, "완료(cli/수동)")
+                    ok_avr2, detail_avr2 = _flash_once_1200_avrdude(
+                        root, hex_path, com, callback=callback, flog=flog
+                    )
+                    if ok_avr2:
+                        if callback:
+                            callback(100, "업로드 완료!")
+                        return True, "완료(avrdude/수동)", flog.save(True, "완료(avrdude/수동)")
+                    ok_bang2, detail_bang2 = _flash_once_bang_avrdude(
+                        root, hex_path, com, callback=callback, flog=flog
+                    )
+                    if ok_bang2:
+                        if callback:
+                            callback(100, "업로드 완료!")
+                        return True, "완료(!/수동)", flog.save(True, "완료(!/수동)")
+                    flog.log(f"수동 avrdude 실패: {detail_avr2} / ! {detail_bang2}")
 
         msg = (
             "자동 펌업 실패.\n"
-            "· USB를 뽑았다 다시 꽂고 【펌업】을 다시 눌러주세요.\n"
-            "· 리셋 버튼이 있으면 더블리셋도 가능합니다.\n"
-            f"· cli: {detail2}"
+            "· 옛 워치독(WDT1/2) 펌이면 USB 뽑았다 꽂고 【펌업】 한 번 더.\n"
+            "· 그래도 안 되면 Arduino IDE로 이번 1회만 수동 업로드.\n"
+            f"· cli: {detail_cli}\n"
+            f"· 1200: {detail_avr}\n"
+            f"· !: {detail_bang}"
         )
         return False, msg, flog.save(False, msg.replace("\n", " / "))
     except Exception as e:

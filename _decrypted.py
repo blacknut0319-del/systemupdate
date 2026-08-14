@@ -456,16 +456,30 @@ def buff_time_key(hb, slot):
 
 
 def cast_buff(hb_label, slot_label):
-    """버프 시전. F2/F3이면 시전 후 반드시 F1로 복귀.
-    따라가기(Home) 꺼져 있으면 버프키 후 K로 대상 지정 — 예전엔 무한클릭이 대신했음."""
+    """버프 시전. F2/F3이면 시전 후 F1 복귀.
+    고정(클릭 OFF)이면 스킬 → K(대상 클릭) → F1 — 예전엔 무한클릭이 대신했음."""
     hb = hb_label.replace("F", "")
     sk = BUFF_SLOT_KEYS[slot_label]
-    if hb == "1":
-        execute_keys([sk], 0.5)
+    need_click = not attack_click_active()
+    if need_click:
+        was_fixed, was_follow = _pause_attack_click()
+        try:
+            focus_lineage_window()
+            time.sleep(0.02)
+            if hb == "1":
+                execute_keys([sk], 0.45, skip_follow_toggle=True, key_gap=(0.08, 0.18))
+                _buff_target_click()
+            else:
+                execute_keys([hb, sk], 0.45, skip_follow_toggle=True, key_gap=(0.08, 0.18))
+                _buff_target_click()
+                execute_keys(["1"], 0.35, skip_follow_toggle=True, key_gap=(0.08, 0.15))
+        finally:
+            _resume_attack_click(was_fixed, was_follow)
     else:
-        execute_keys([hb, sk, "1"], 0.55, key_gap=(0.08, 0.18))
-    if not attack_click_active():
-        _buff_target_click()
+        if hb == "1":
+            execute_keys([sk], 0.5)
+        else:
+            execute_keys([hb, sk, "1"], 0.55, key_gap=(0.08, 0.18))
 
 
 def cast_self_buff(hb_label, slot_label):
@@ -2927,15 +2941,25 @@ def human_mouse_move(tx, ty, fast=False, roi=None, remote=False):
             time.sleep(human_delay(*step_sleep))
 
 def _fix_shift_down():
+    """고정 — 아두이노/박스 Shift 누름 유지 (H). PC keyboard 쓰면 힐·단축키 안 먹음."""
     global _fix_shift_hold_off_until
     if time.time() < _fix_shift_hold_off_until:
         return
-    try: keyboard.press('shift')
-    except Exception: pass
+    if ser and getattr(ser, "is_open", False):
+        try:
+            ser.write(b'H')
+            time.sleep(0.04)
+        except Exception:
+            pass
 
 def _fix_shift_up():
-    try: keyboard.release('shift')
-    except Exception: pass
+    """고정 해제 — 아두이노/박스 Shift 뗌 (R)."""
+    if ser and getattr(ser, "is_open", False):
+        try:
+            ser.write(b'R')
+            time.sleep(0.03)
+        except Exception:
+            pass
 
 def attack_click_active():
     """무한클릭(따라가기) 중일 때만 True. 고정은 Shift만(클릭 없음)."""
@@ -2952,14 +2976,14 @@ def _buff_target_click():
     time.sleep(human_delay(0.03, 0.08))
 
 def _pause_attack_click():
-    """고정(Shift만) / 따라가기 잠시 해제. 복구용 상태 반환."""
+    """고정(Shift) / 따라가기(클릭) 잠시 해제. 복구용 상태 반환."""
     was_fixed = bool(chk_fix and chk_fix.get())
     was_follow = bool(chk_follow and chk_follow.get()) and not was_fixed
     if not ser or not getattr(ser, "is_open", False):
         return False, False
     try:
         if was_fixed:
-            _fix_shift_up()
+            ser.write(b'R'); time.sleep(0.05)
             ser.write(b'U'); time.sleep(0.05)
         elif was_follow:
             ser.write(b'T'); time.sleep(0.06)
@@ -2972,7 +2996,7 @@ def _resume_attack_click(was_fixed, was_follow):
         return
     try:
         if was_fixed and chk_fix and chk_fix.get():
-            _fix_shift_down()
+            ser.write(b'H'); time.sleep(0.04)
         elif was_follow and chk_follow and chk_follow.get() and not (chk_fix and chk_fix.get()):
             ser.write(b'T'); time.sleep(0.04)
     except Exception:
@@ -3010,8 +3034,19 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False, key_gap=None):
             pass
 
 def fix_mode_keys(keys, delay=0.5):
-    # execute_keys가 고정/클릭 일시해제를 처리하므로 그대로 위임
-    execute_keys(keys, delay)
+    """고정 중 해독 등 — 옛 fix_mode_keys 와 동일 (U→키→H)."""
+    if chk_fix and chk_fix.get() and ser and getattr(ser, "is_open", False):
+        try:
+            ser.write(b'R'); time.sleep(0.05)
+            ser.write(b'U'); time.sleep(0.05)
+        except Exception:
+            pass
+    execute_keys(keys, delay, skip_follow_toggle=True)
+    if chk_fix and chk_fix.get() and ser and getattr(ser, "is_open", False):
+        try:
+            ser.write(b'H'); time.sleep(0.04)
+        except Exception:
+            pass
 
 # 자힐: 확률% 제거 — 평소 힐만, 위험(<=50%)일 때만 물약+힐
 SELF_POTION_COMBO_PCT = 50.0
@@ -3039,7 +3074,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 07:48"
+PATCH_UPDATED_AT = "2026-08-14 13:51"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3473,16 +3508,13 @@ def stop_everything(reason="💤 대기 중"):
                 except: pass
             root.after(0, lambda: chk_follow.set(False))
         if chk_fix and chk_fix.get():
-            _fix_shift_up()
             if ser and ser.is_open:
-                try: time.sleep(0.05); ser.write(b'U'); time.sleep(0.1)
+                try: time.sleep(0.05); ser.write(b'R'); ser.write(b'U'); time.sleep(0.1)
                 except: pass
             root.after(0, lambda: chk_fix.set(False))
         if lbl_status: root.after(0, lambda: lbl_status.configure(text=reason, text_color="#f38ba8"))
-    try: _fix_shift_up(); time.sleep(0.01)
-    except: pass
     if ser and ser.is_open:
-        try: time.sleep(0.05); ser.write(b'U'); time.sleep(0.1) 
+        try: time.sleep(0.05); ser.write(b'R'); ser.write(b'U'); time.sleep(0.1)
         except: pass
 
 def force_auth_exit(reason="인증 만료"):
@@ -3601,14 +3633,12 @@ def _apply_attack_mode(mode):
             chk_follow.set(False)
             chk_fix.set(True)
     try:
-        _fix_shift_up()
-        time.sleep(0.01)
         if mode == 'follow':
-            ser.write(b'R'); time.sleep(0.05)
+            ser.write(b'U'); time.sleep(0.05)
             ser.write(b'T'); time.sleep(0.06)
         else:
-            ser.write(b'U'); time.sleep(0.05)   # 무한클릭 OFF (H 안 씀 — 구펌이 클릭 다시 켤 수 있음)
-            _fix_shift_down()                   # Shift는 PC 쪽만
+            ser.write(b'U'); time.sleep(0.05)
+            ser.write(b'H'); time.sleep(0.04)
     except Exception:
         return
 
@@ -3663,7 +3693,6 @@ def _start_worker():
                 force_auth_exit("인증 만료")
                 return
         running = True; now = time.time()
-        _fix_shift_up()
         _fix_shift_hold_off_until = 0.0
         last_loot = now; loot_interval = random.uniform(4.0, 7.0)
         last_buff_seq = now
@@ -4149,13 +4178,9 @@ def _set_hw_label(text, color, gen):
         except Exception: pass
 
 def _load_flash_module():
-    """flash_arduino.py 로드.
-    끝 사용자 PC에 옛 TEMP/Desktop 파일이 남아 ask_manual_reset 없는
-    구버전을 쓰던 문제가 있어서, GitHub에서 캐시무효화로 받은 뒤 로드.
-    개발용 Desktop 폴더는 'ask_manual_reset' 있는 최신일 때만 우선."""
+    """flash_arduino.py 로드 — 로컬(뚱힐러_github) 우선, GitHub TEMP는 폴백."""
     import importlib.util
     import tempfile
-    import inspect
 
     def _load_path(path):
         try:
@@ -4168,17 +4193,22 @@ def _load_flash_module():
             return None
         return None
 
-    def _is_new_enough(mod):
-        try:
-            return "ask_manual_reset" in inspect.signature(mod.flash).parameters
-        except Exception:
-            return False
+    cands = []
+    try:
+        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py"))
+    except Exception:
+        pass
+    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py"))
+    dd = os.environ.get("DDONG_APP_DIR", "").strip()
+    if dd:
+        cands.insert(0, os.path.join(dd, "flash_arduino.py"))
+    for path in cands:
+        if path and os.path.isfile(path):
+            mod = _load_path(path)
+            if mod:
+                return mod
 
-    tmp_dir = os.path.join(tempfile.gettempdir(), "ddong_firmware")
-    tmp = os.path.join(tmp_dir, "flash_arduino.py")
-    desk = os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py")
-
-    # GitHub 강제 갱신 (CDN/로컬 캐시 무효)
+    tmp = os.path.join(tempfile.gettempdir(), "ddong_firmware", "flash_arduino.py")
     try:
         import ssl
         ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
@@ -4189,32 +4219,15 @@ def _load_flash_module():
         req = urllib.request.Request(url, headers={"User-Agent": "ddong", "Cache-Control": "no-cache"})
         data = urllib.request.urlopen(req, timeout=30, context=ctx).read()
         if len(data) > 500 and b"def flash" in data:
-            os.makedirs(tmp_dir, exist_ok=True)
+            os.makedirs(os.path.dirname(tmp), exist_ok=True)
             with open(tmp, "wb") as f:
                 f.write(data)
     except Exception:
         pass
-
-    # Desktop이 최신(수동리셋 지원)이면 개발용으로 우선
-    if os.path.isfile(desk):
-        mod = _load_path(desk)
-        if mod and _is_new_enough(mod):
-            return mod
-
     if os.path.isfile(tmp):
         mod = _load_path(tmp)
         if mod:
             return mod
-
-    # 최후: __file__ 옆
-    try:
-        local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py")
-        if os.path.isfile(local):
-            mod = _load_path(local)
-            if mod:
-                return mod
-    except Exception:
-        pass
     return None
 
 def _call_flash(mod, callback, port, ask_manual_reset=None):
@@ -4267,9 +4280,10 @@ def probe_arduino_fw(ser_obj=None, timeout=2.5):
         return ""
 
 def check_fw_wdt(ser_obj=None):
-    """(ok, detail) — ok=True 이면 워치독 펌 확인됨."""
-    ver = probe_arduino_fw(ser_obj)
-    if ver and "DDONG-WDT" in ver.upper().replace(" ", ""):
+    """(ok, detail) — ok=True 이면 최신 펌(DDONG-V / DDONG-WDT) 확인."""
+    ver = refresh_fw_version(ser_obj, log=False, retries=7)
+    u = (ver or "").upper().replace(" ", "")
+    if ver and ("DDONG-V" in u or "DDONG-WDT" in u):
         return True, ver
     if ver:
         return False, ver
@@ -4277,19 +4291,21 @@ def check_fw_wdt(ser_obj=None):
 
 def _fw_is_wdt4(ver=None):
     v = (ver if ver is not None else _fw_version_str) or ""
-    return "DDONG-WDT4" in v.upper().replace(" ", "")
+    u = v.upper().replace(" ", "")
+    return "DDONG-V4" in u or "DDONG-WDT4" in u
 
-def refresh_fw_version(ser_obj=None, log=False, retries=4):
-    """연결·펌확인·펌업 후 펌 버전 캐시 갱신."""
+def refresh_fw_version(ser_obj=None, log=False, retries=6):
+    """연결·펌확인·펌업 후 펌 버전 캐시 갱신.
+    옛 펌은 setup()에 delay(3초) 있어서 첫 V 조회가 빈칸일 수 있음 → 재시도."""
     global _fw_version_str, _fw_wdt4
     s = ser_obj if ser_obj is not None else ser
     ver = ""
     for i in range(max(1, retries)):
         if i > 0:
-            time.sleep(0.4)
+            time.sleep(0.55)
         if not s or not getattr(s, "is_open", False):
             break
-        ver = probe_arduino_fw(s, timeout=2.5 if i == 0 else 1.8)
+        ver = probe_arduino_fw(s, timeout=2.0 if i == 0 else 2.5)
         if ver and "DDONG" in ver.upper():
             break
     _fw_version_str = ver
@@ -4304,7 +4320,7 @@ def refresh_fw_version(ser_obj=None, log=False, retries=4):
         log_event(f"🔌 펌 {ver}{extra}")
         if _fw_wdt4:
             try:
-                root.after(0, lambda: lbl_ard.configure(text="● WDT4 OK", text_color="#3fb950"))
+                root.after(0, lambda: lbl_ard.configure(text="● 펌 OK", text_color="#3fb950"))
             except Exception:
                 pass
     return ver
@@ -4351,7 +4367,7 @@ def run_target_heal(heal_cmd, end_delay=0.08, use_wheel=None):
     return True
 
 def on_fw_check_click():
-    """제어판 [확인] — 연결된 뚱USB가 워치독 펌인지 조회."""
+    """제어판 [확인] — 연결된 뚱USB 펌 버전 조회 (V 명령)."""
     if hw_var.get() in ("뚱박스", "KMBox"):
         log_event("⚠️ 펌 확인은 뚱USB 전용")
         try:
@@ -4373,27 +4389,27 @@ def on_fw_check_click():
             pass
         return
     ok, detail = check_fw_wdt()
-    refresh_fw_version(ser, log=False)
     if ok:
-        log_event(f"✅ 펌 확인 OK — {detail} (워치독 포함)" + (" · 휠힐 가능" if _fw_wdt4 else ""))
+        log_event(f"✅ 펌 확인 OK — {detail}" + (" · 휠힐 가능" if _fw_wdt4 else ""))
         try:
-            lbl_ard.configure(text=f"● WDT OK", text_color="#3fb950")
+            lbl_ard.configure(text="● 펌 OK", text_color="#3fb950")
         except Exception:
             pass
         try:
-            messagebox.showinfo("펌 확인", f"워치독 펌웨어 확인됨.\n응답: {detail}")
+            messagebox.showinfo("펌 확인", f"펌웨어 확인됨.\n응답: {detail}")
         except Exception:
             pass
     else:
-        msg = detail if detail else "(응답 없음 — 옛 펌이거나 아직 확인기능 없는 펌)"
-        log_event(f"⚠️ 펌 확인 — 워치독 미확인: {msg}")
+        msg = detail if detail else "(응답 없음)"
+        log_event(f"⚠️ 펌 확인 실패 — {msg}")
         try:
             messagebox.showwarning(
                 "펌 확인",
-                "워치독 응답이 없습니다.\n\n"
-                "· 방금 펌업만 했고 [확인]이 안 되면 → 최신 hex로 한 번 더 [펌업] 하세요.\n"
-                "  (확인용 응답은 이번 펌부터 들어갑니다)\n"
-                "· 그래도 없으면 옛 펌일 수 있습니다.",
+                "펌 버전 응답이 없습니다.\n\n"
+                "· Insert로 연결한 뒤 3~4초 기다렸다가 다시 [확인]\n"
+                "· IDE로 올린 코드에 V(버전조회) 명령이 있는지 확인\n"
+                "  (뚱힐러_github firmware/cs_firmware.ino 또는 최신 아두이노코드.txt)\n"
+                "· [펌업]으로 최신 hex 올리면 해결되는 경우가 많습니다.",
             )
         except Exception:
             pass
@@ -4421,7 +4437,7 @@ def on_fw_flash_click():
             stop_everything("펌업 전 정지")
     else:
         try:
-            if not messagebox.askyesno("펌업", "뚱USB(아두이노)에 최신 펌웨어(워치독 포함)를 구워 넣을까요?\n업로드 중엔 USB를 뽑지 마세요."):
+            if not messagebox.askyesno("펌업", "뚱USB(아두이노)에 최신 펌웨어를 구워 넣을까요?\n업로드 중엔 USB를 뽑지 마세요."):
                 return
         except Exception:
             pass
@@ -4484,12 +4500,12 @@ def on_fw_flash_click():
                     def _ask():
                         try:
                             box["ok"] = bool(messagebox.askokcancel(
-                                "옛 펌웨어 — 이번 1회만",
-                                "지금 보드는 워치독 펌이 아닙니다.\n"
-                                "이번만 최신(WDT4)을 올리면 이후엔 버튼 없이 자동 펌업됩니다.\n\n"
-                                "리셋 버튼이 있으면: 빠르게 두 번 → 【확인】\n"
-                                "없으면: USB 케이블 뽑았다 꽂기 → 【확인】\n"
-                                "(20초 안에 업로드)",
+                                "펌업 재시도",
+                                "자동 펌업이 실패했습니다.\n\n"
+                                "【옛 워치독 WDT1/2 펌】이면 1200 자동리셋이 안 됩니다.\n"
+                                "USB 케이블을 뽑았다 다시 꽂은 뒤 【확인】을 눌러주세요.\n"
+                                "(리셋 버튼 없어도 됩니다 · 20초 안에 재시도)\n\n"
+                                "WDT3/4 또는 새 펌이면 위만으로 됩니다.",
                             ))
                         except Exception:
                             box["ok"] = True
@@ -4515,7 +4531,7 @@ def on_fw_flash_click():
                     ok, msg = bool(ret), str(ret)
             if ok:
                 # 업로드 성공이면 워치독 hex가 들어간 것. 확인응답(V)은 보너스.
-                time.sleep(2.5)
+                time.sleep(3.5)
                 found = auto_find_arduino()
                 if found:
                     SERIAL_PORT = found
@@ -4534,13 +4550,13 @@ def on_fw_flash_click():
                 if wdt_ok:
                     log_event(f"✅ 펌업+확인 OK — {wdt_detail}")
                     try:
-                        lbl_ard.configure(text="● WDT OK", text_color="#3fb950")
+                        lbl_ard.configure(text="● 펌 OK", text_color="#3fb950")
                     except Exception:
                         pass
                     try:
                         messagebox.showinfo(
                             "펌업 완료",
-                            f"업로드 성공 + 워치독 확인됨.\n응답: {wdt_detail}",
+                            f"업로드 성공 + 펌 확인됨.\n응답: {wdt_detail}",
                         )
                     except Exception:
                         pass
@@ -4551,8 +4567,7 @@ def on_fw_flash_click():
                         messagebox.showinfo(
                             "펌업 완료",
                             "업로드 성공했습니다.\n"
-                            "워치독 펌이 구워진 상태입니다.\n"
-                            "원하면 몇 초 뒤 [확인]을 눌러 DDONG-WDT3 응답을 보세요.",
+                            "원하면 몇 초 뒤 [확인]을 눌러 펌 버전을 보세요.",
                         )
                     except Exception:
                         pass
@@ -4940,15 +4955,15 @@ def expert_logic():
                         focus_lineage_window()
                         use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
                         heal_key = '7' if use_strong else 'A'
-                        if wheel_heal_enabled() and not use_strong:
-                            run_target_heal(heal_key, end_delay=0.45)
-                            log_event(f"💚 격수힐 HP{atk_hp:.0f}% (휠)")
-                        elif wheel_heal_enabled() and use_strong:
-                            run_target_heal(heal_key, end_delay=0.45, use_wheel=False)
-                            log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%")
-                        else:
-                            was_fixed, was_follow = _pause_attack_click()
-                            try:
+                        was_fixed, was_follow = _pause_attack_click()
+                        try:
+                            if wheel_heal_enabled() and not use_strong:
+                                run_target_heal(heal_key, end_delay=0.45, use_wheel=True)
+                                log_event(f"💚 격수힐 HP{atk_hp:.0f}% (휠)")
+                            elif wheel_heal_enabled() and use_strong:
+                                run_target_heal(heal_key, end_delay=0.45, use_wheel=False)
+                                log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%")
+                            else:
                                 ser.write(b'1'); time.sleep(human_delay(0.08, 0.16))
                                 if use_strong:
                                     ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
@@ -4956,8 +4971,8 @@ def expert_logic():
                                     ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
                                 else:
                                     time.sleep(human_delay(0.2, 0.3))
-                            finally:
-                                _resume_attack_click(was_fixed, was_follow)
+                        finally:
+                            _resume_attack_click(was_fixed, was_follow)
                         last_noparty_heal = now
 
                 
@@ -5863,7 +5878,7 @@ UDP_CMD_MAP = {
 # Alt+숫자 → F3→F키→F1 매크로 (슬롯 1~8 → F5~F12)
 UDP_SLOT_KEYS = {1: '5', 2: '6', 3: '7', 4: '8', 5: '9', 6: 'X', 7: 'Y', 8: 'Z'}  # F5~F12
 def udp_macro_slot(n):
-    """Alt+숫자 매크로: 고정해제→F3→F키→F1→고정복구 (클릭유지)"""
+    """Alt+숫자 매크로: F3→F키→(고정이면 F1→K)→F1 / 고정복구."""
     global ser, running
     if not running or not ser or not ser.is_open: return
     try:
@@ -5871,14 +5886,18 @@ def udp_macro_slot(n):
         time.sleep(0.02)
         is_fixed = chk_fix.get() if chk_fix else False
         if is_fixed:
-            _fix_shift_up()
             ser.write(b'R'); time.sleep(0.10)
         ser.write(b'3'); time.sleep(random.uniform(0.30, 0.45))
         ser.write(key.encode()); time.sleep(0.15)
-        ser.write(b'K'); time.sleep(0.10)
-        ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
         if is_fixed:
-            _fix_shift_down()
+            ser.write(b'1'); time.sleep(random.uniform(0.22, 0.38))
+            focus_lineage_window()
+            time.sleep(0.02)
+            ser.write(b'K'); time.sleep(random.uniform(0.08, 0.16))
+            ser.write(b'H'); time.sleep(0.05)
+        else:
+            ser.write(b'K'); time.sleep(0.10)
+            ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
     except: pass
 def udp_listener():
     """격수모니터 → 뚱힐러 UDP 수신 (포트 9999).
