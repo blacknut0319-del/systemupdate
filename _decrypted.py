@@ -1005,7 +1005,7 @@ root = None
 chk_fix = None
 chk_follow = None
 _attack_follow = False  # 펌웨어 무한클릭 ON. Home/힐 resume 은 chk_follow 대신 이거 봄
-_attack_fix = False     # 고정(Shift). 키보드 후킹 스레드에서 chk_*.get() 이 엇갈리면 클릭이 다시 켜짐
+_attack_fix = False     # 고정(클릭·시프트 OFF). Home/스위치. 힐 resume 이 T 로 클릭을 다시 켜지 않게
 _attack_ser_lock = Lock()  # Home(U+H) 과 힐 resume(U+T) 이 섞이면 시프트+클릭이 됨
 _fix_hw_shift_on = False  # 아두이노에 시프트 켠 뒤. 옛 H는 클릭도 켜서 반복 H 금지
 chk_space_save = None
@@ -1958,14 +1958,14 @@ def open_guide_panel():
 
     add_t("⌨️ 단축키")
     add_d("Insert", "시작 / 정지")
-    add_d("Home", "따라가기 ↔ 고정 (사냥 중에만)")
+    add_d("Home", "따라가기 ON ↔ 전부 끄기 (사냥 중에만)")
     add_d("Delete", "창 숨기기 / 다시 보이기")
     add_d("F4", "주변 줍기 켜기 / 끄기")
     add_sep()
 
     add_t("🖱️ Home — 따라가기 / 고정", "#cba6f7")
     add_d("1번 누름", "따라가기 ON — 몹 따라가며 자동 공격")
-    add_d("2번 누름", "고정 — 제자리에서 Shift만 (자동공격 끔, 힐하기 좋음)")
+    add_d("2번 누름", "전부 끄기 — 클릭·시프트 없음 (F1~F3 단축창 이동 가능)")
     add_d("다시 Home", "따라가기로 복귀")
     add_w("옵션 칸의 [따라가기]·[고정] 스위치로도 같은 동작")
     add_w("격수 모니터 [따라가기]·[고정] 버튼도 동일")
@@ -2978,22 +2978,15 @@ def _ser_follow_click():
     time.sleep(0.06)
 
 def _ser_fix_shift():
-    """따라가기 끄고 시프트만.
-    아두이노에 실제로 들어있는 옛 펌웨어는 H = 시프트+클릭 ON 이라,
-    H 다음 T 로 클릭만 꺼야 시프트만 남는다. (펌업 없이)"""
+    """고정 = 따라가기·시프트 전부 끔. H(시프트)는 안 보냄 — 누르면 F1~F3 단축창이 안 바뀜."""
     global _fix_hw_shift_on
     if hasattr(ser, "_auto"):
         ser._auto = False
-        ser.write(b'U')
-        time.sleep(0.05)
-        ser.write(b'H')
-        time.sleep(0.04)
-    else:
-        ser.write(b'H')
-        time.sleep(0.05)
-        ser.write(b'T')
-        time.sleep(0.06)
-    _fix_hw_shift_on = True
+    ser.write(b'R')
+    time.sleep(0.03)
+    ser.write(b'U')
+    time.sleep(0.05)
+    _fix_hw_shift_on = False
 
 def _suspend_fix_shift_restore(sec=1.8):
     """고정 매크로/힐 동안 백그라운드 워커가 H(Shift)를 다시 누르지 않게."""
@@ -3003,33 +2996,8 @@ def _suspend_fix_shift_restore(sec=1.8):
     _fix_shift_macro_until = max(_fix_shift_macro_until, t)
 
 def _fix_shift_down():
-    """고정 시프트 유지. 옛 아두이노 H는 클릭을 켜므로 이미 켠 뒤엔 H를 다시 안 보냄."""
-    global _fix_shift_hold_off_until, _fix_hw_shift_on
-    if not _attack_fix or _attack_follow:
-        return
-    if time.time() < _fix_shift_hold_off_until:
-        return
-    if not ser or not getattr(ser, "is_open", False):
-        return
-    try:
-        with _attack_ser_lock:
-            if not _attack_fix or _attack_follow:
-                return
-            if hasattr(ser, "_auto"):
-                ser._auto = False
-                ser.write(b'H')
-                time.sleep(0.04)
-                _fix_hw_shift_on = True
-                return
-            if _fix_hw_shift_on:
-                return
-            ser.write(b'H')
-            time.sleep(0.05)
-            ser.write(b'T')
-            time.sleep(0.06)
-            _fix_hw_shift_on = True
-    except Exception:
-        pass
+    """고정은 시프트를 안 씀. 워커가 H를 다시 보내지 않게 빈 함수."""
+    return
 
 def _fix_shift_up():
     """고정 해제 — 아두이노/박스 Shift 뗌 (R)."""
@@ -3165,7 +3133,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 00:27"
+PATCH_UPDATED_AT = "2026-08-15 00:43"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3486,8 +3454,8 @@ LATEST_PATCH = [
     "🖱️ 쫄화면 조종 — 격수 PC Alt+마우스로 쫄 PC 원격 클릭·휠",
     "🔌 WDT4 — Insert 연결 시 펌 자동 확인, 휠힐 별도 펌업 없이 사용",
     "🏃 강제베르 — End/격수 명령 시 위기베르처럼 자동 정지",
-    "🖱️ Home 고정 — 자동공격 끄고 제자리 고정(Shift만), 힐하기 편하게 개선",
-    "🖱️ Home 따라가기 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 고정",
+    "🖱️ Home 고정 — 다시 누르면 클릭·시프트 전부 끔 (단축창 F1~F3 이동)",
+    "🖱️ Home 따라가기 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 전부 끄기",
     "💚 휠힐 — 최신 펌웨어에서 일반 힐은 가운데 휠클릭 (항상 켜짐)",
     "⚡ 상위힐 — 일반힐과 달리 좌클릭으로 대상 지정 (더 정확)",
     "🖱️ 클릭 위치 — 힐·공격할 때마다 좌표가 살짝씩 달라져서 덜 눈에 띔",
@@ -3751,7 +3719,7 @@ def _sync_attack_mode_ui(mode):
         pass
 
 def _apply_attack_mode(mode):
-    """mode='follow' 따라가기 ON / mode='fix' 고정(Shift만, 클릭 OFF)."""
+    """mode='follow' 따라가기 ON / mode='fix' 클릭·시프트 전부 OFF."""
     global ser, running, root, chk_follow, chk_fix, _attack_follow, _attack_fix, _fix_hw_shift_on
     if not running or not ser or not getattr(ser, "is_open", False):
         return
@@ -3777,7 +3745,7 @@ def _apply_attack_mode(mode):
         return
 
 def on_home_click_toggle(e=None):
-    """Home — 따라가기 ↔ 고정(제자리, 클릭 없음) 토글. Insert는 시작/종료만."""
+    """Home — 따라가기 ON ↔ 전부 끔. Insert는 시작/종료만."""
     global debounce, running
     if time.time() - debounce['caps'] < 0.15:
         return
@@ -3786,7 +3754,7 @@ def on_home_click_toggle(e=None):
         return
     if _attack_follow:
         _apply_attack_mode('fix')
-        log_event("📌 고정 (시프트만, 따라가기 끄기)")
+        log_event("📌 고정 (따라가기·시프트 끄기)")
     else:
         _apply_attack_mode('follow')
         log_event("🖱️ 따라가기 ON")
@@ -6030,23 +5998,16 @@ UDP_CMD_MAP = {
 # Alt+숫자 → F3→F키→F1 매크로 (슬롯 1~8 → F5~F12)
 UDP_SLOT_KEYS = {1: '5', 2: '6', 3: '7', 4: '8', 5: '9', 6: 'X', 7: 'Y', 8: 'Z'}  # F5~F12
 def udp_macro_slot(n):
-    """Alt+숫자: F3→F키→K→F1 (고정이면 시작에 R·끝에 H)."""
+    """Alt+숫자: F3→F키→K→F1."""
     global ser, running
     if not running or not ser or not ser.is_open: return
     try:
         key = UDP_SLOT_KEYS.get(n, '5')
         time.sleep(0.02)
-        is_fixed = bool(_attack_fix)
-        if is_fixed:
-            _suspend_fix_shift_restore(1.8)
-            ser.write(b'R'); time.sleep(0.10)
         ser.write(b'3'); time.sleep(random.uniform(0.30, 0.45))
         ser.write(key.encode()); time.sleep(0.15)
         ser.write(b'K'); time.sleep(0.10)
         ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
-        if is_fixed and _attack_fix and not _attack_follow:
-            with _attack_ser_lock:
-                _ser_fix_shift()
     except: pass
 def udp_listener():
     """격수모니터 → 뚱힐러 UDP 수신 (포트 9999).
