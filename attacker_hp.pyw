@@ -2,13 +2,57 @@
 """
 격수 HP 전송기 v7 — HP 전송 + 쫄법PC 원격 키보드 제어 통합
 """
-import numpy as np
-import sys, subprocess
-for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard"),("win32gui","pywin32"),("cv2","opencv-python-headless")]:
-    try: __import__(mod)
-    except: subprocess.check_call([sys.executable,"-m","pip","install",pkg,"--quiet"])
+import sys, os, subprocess
 
-import socket, struct, json, os, threading, time, re
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
+UPDATE_LOG_FILE = os.path.join(SCRIPT_DIR, "attacker_update.log")
+
+def _startup_fatal(msg):
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, str(msg), "격수 실행 오류", 0x10)
+    except Exception:
+        pass
+    try:
+        with open(UPDATE_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (__import__("time").strftime("%Y-%m-%d %H:%M:%S"), msg))
+    except Exception:
+        pass
+    sys.exit(1)
+
+def _pip_python_exe():
+    exe = sys.executable or ""
+    if exe.lower().endswith("pythonw.exe"):
+        py = os.path.join(os.path.dirname(exe), "python.exe")
+        if os.path.isfile(py):
+            return py
+    if exe.lower().endswith(".exe"):
+        return exe
+    for p in (
+        r"C:\Program Files\Python311\python.exe",
+        os.path.expandvars(r"%LocalAppData%\Programs\Python\Python311\python.exe"),
+    ):
+        if os.path.isfile(p):
+            return p
+    return exe
+
+for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard"),("win32gui","pywin32"),("cv2","opencv-python-headless")]:
+    try:
+        __import__(mod)
+    except Exception:
+        try:
+            subprocess.run(
+                [_pip_python_exe(), "-m", "pip", "install", pkg, "--quiet"],
+                timeout=180,
+                check=False,
+            )
+            __import__(mod)
+        except Exception as e:
+            _startup_fatal("필수 패키지(%s) 설치/로드 실패.\nhp_start.bat 으로 다시 실행해 주세요.\n\n%s" % (pkg, e))
+
+import numpy as np
+import socket, struct, json, threading, time, re
 import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
@@ -18,9 +62,7 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 14:10"
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
+PATCH_UPDATED_AT = "2026-08-14 21:14"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -52,6 +94,24 @@ def _cleanup_stale_new(expected_patch=None):
         except Exception:
             pass
 
+def _apply_new_to_main():
+    """업데이트 .new → main (네트워크 없이)."""
+    new_path = ATTACKER_MAIN + ".new"
+    if not os.path.isfile(new_path):
+        return False
+    import shutil
+    for _ in range(8):
+        try:
+            shutil.copy2(new_path, ATTACKER_MAIN)
+            try:
+                os.remove(new_path)
+            except Exception:
+                pass
+            return True
+        except Exception:
+            time.sleep(0.4)
+    return False
+
 def _sync_attacker_from_new():
     """업데이트 .new → main (서버 버전과 일치할 때만)."""
     new_path = ATTACKER_MAIN + ".new"
@@ -61,17 +121,7 @@ def _sync_attacker_from_new():
     if remote and _read_patch_ver(new_path) != remote:
         _cleanup_stale_new(remote)
         return
-    import shutil
-    for _ in range(6):
-        try:
-            shutil.copy2(new_path, ATTACKER_MAIN)
-            break
-        except Exception:
-            time.sleep(0.4)
-    try:
-        os.remove(new_path)
-    except Exception:
-        pass
+    _apply_new_to_main()
 
 TARGET_IP = "192.168.0.100"
 TARGET_PORT = 9999
@@ -107,7 +157,6 @@ _GH_RAW = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/
 _GH_API = "https://api.github.com/repos/blacknut0319-del/systemupdate/contents/"
 UPDATE_SKIP_FILE = os.path.join(SCRIPT_DIR, "attacker_update_skip.txt")
 UPDATE_ATTEMPT_FILE = os.path.join(SCRIPT_DIR, "attacker_update_attempt.flag")
-UPDATE_LOG_FILE = os.path.join(SCRIPT_DIR, "attacker_update.log")
 _last_update_check = 0.0
 _update_available = False
 _update_notified = False
@@ -271,14 +320,21 @@ def _apply_win_icon(win, color="#141420"):
 
 def _attacker_startup_sync():
     """모듈 로드 완료 후 호출 — .new 실행 시 fetch_remote_version 필요."""
+    new_path = ATTACKER_MAIN + ".new"
     if __file__.lower().endswith(".new"):
-        time.sleep(1.0)
-        _sync_attacker_from_new()
+        time.sleep(0.5)
+        _apply_new_to_main()
         if os.path.isfile(ATTACKER_MAIN):
             _spawn_attacker(ATTACKER_MAIN)
-            os._exit(0)
-    elif os.path.isfile(ATTACKER_MAIN + ".new"):
-        _cleanup_stale_new(PATCH_UPDATED_AT)
+        else:
+            _startup_fatal("업데이트 적용 후 attacker_hp.pyw 를 찾을 수 없습니다.\nhp_start.bat 으로 다시 실행해 주세요.")
+        os._exit(0)
+    elif os.path.isfile(new_path):
+        new_ver = _read_patch_ver(new_path)
+        if new_ver and new_ver != PATCH_UPDATED_AT:
+            _apply_new_to_main()
+        else:
+            _cleanup_stale_new(PATCH_UPDATED_AT)
 
 def _mark_update_attempt(remote_ver):
     try:
@@ -287,12 +343,55 @@ def _mark_update_attempt(remote_ver):
     except Exception:
         pass
 
+def _check_update_stuck_on_boot():
+    """예 눌렀는데도 버전이 안 바뀌면 반복 알림 대신 한 번 안내 후 스킵."""
+    remote = fetch_remote_version()
+    if not remote or remote == PATCH_UPDATED_AT:
+        try:
+            if os.path.isfile(UPDATE_ATTEMPT_FILE):
+                os.remove(UPDATE_ATTEMPT_FILE)
+        except Exception:
+            pass
+        return
+    try:
+        if not os.path.isfile(UPDATE_ATTEMPT_FILE):
+            return
+        with open(UPDATE_ATTEMPT_FILE, encoding="utf-8") as f:
+            parts = f.read().strip().split("|", 1)
+        ts = float(parts[0])
+        ver = parts[1] if len(parts) > 1 else ""
+        if ver == remote and (time.time() - ts) < 600:
+            _save_update_skip(remote)
+            try:
+                os.remove(UPDATE_ATTEMPT_FILE)
+            except Exception:
+                pass
+            _show_msgbox(
+                "warning",
+                "업데이트",
+                "자동 업데이트가 적용되지 않았습니다.\n\n"
+                "1) 격수 완전히 끄기\n"
+                "2) hp_start.bat 실행\n\n"
+                "서버: %s\n현재: %s\n\n"
+                "같은 알림은 잠시 숨깁니다." % (remote, PATCH_UPDATED_AT),
+            )
+    except Exception:
+        pass
+
 def _resolve_pythonw():
-    exe = sys.executable
+    exe = sys.executable or ""
     if exe.lower().endswith("python.exe"):
         pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
         if os.path.isfile(pyw):
             return pyw
+    if exe.lower().endswith("pythonw.exe") or (exe.lower().endswith(".exe") and os.path.isfile(exe)):
+        return exe
+    for p in (
+        r"C:\Program Files\Python311\pythonw.exe",
+        os.path.expandvars(r"%LocalAppData%\Programs\Python\Python311\pythonw.exe"),
+    ):
+        if os.path.isfile(p):
+            return p
     return exe
 
 def _ensure_service_launcher():
@@ -321,10 +420,20 @@ def _resolve_launcher_exe():
 
 def _spawn_attacker(script_path):
     """Windows — GUI 프로세스 분리 실행."""
-    exe = _resolve_launcher_exe()
     script_path = os.path.abspath(script_path)
+    if not os.path.isfile(script_path):
+        raise FileNotFoundError("실행 파일 없음: %s" % script_path)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-    subprocess.Popen([exe, script_path], cwd=SCRIPT_DIR, close_fds=True, creationflags=flags)
+    last_err = None
+    for exe in dict.fromkeys([_resolve_launcher_exe(), _resolve_pythonw(), _pip_python_exe().replace("python.exe", "pythonw.exe")]):
+        if not exe or not os.path.isfile(exe):
+            continue
+        try:
+            subprocess.Popen([exe, script_path], cwd=SCRIPT_DIR, close_fds=True, creationflags=flags)
+            return
+        except Exception as e:
+            last_err = e
+    raise RuntimeError(last_err or "격수 실행 실패")
 
 def _exit_attacker():
     global running
@@ -350,7 +459,7 @@ def restart_app():
     _exit_attacker()
 
 def restart_with_update():
-    """최신 attacker_hp.pyw → .new 저장 후 .new 로 재실행 (배치 없이)."""
+    """최신 attacker_hp.pyw 받아서 main 에 적용 후 재실행."""
     global running
     remote = fetch_remote_version()
     if remote:
@@ -365,7 +474,9 @@ def restart_with_update():
         remote_ver = _read_patch_ver(data)
         if not remote_ver:
             raise RuntimeError("다운로드한 파일 버전을 읽을 수 없습니다.")
-        _spawn_attacker(new_path)
+        if not _apply_new_to_main():
+            raise RuntimeError("업데이트 파일을 적용하지 못했습니다.")
+        _spawn_attacker(ATTACKER_MAIN)
         time.sleep(0.5)
     except Exception as e:
         _log_update_err("restart_with_update", e)
@@ -748,6 +859,32 @@ stream_view_label = None
 lbl_stream_status = None
 stream_view_img_rect = (0, 0, 1, 1)
 _stream_last_mm = 0.0
+_stream_src_size = (0, 0)
+_STREAM_HDR_H = 26
+_STREAM_PAD = 8
+
+def _stream_display_size(iw, ih):
+    """쫄화면 창을 송출 비율에 맞게 자동 리사이즈."""
+    global stream_view_win, _stream_src_size
+    if not stream_view_win or not stream_view_win.winfo_exists() or iw < 1 or ih < 1:
+        return max(1, iw), max(1, ih)
+    if _stream_src_size == (iw, ih):
+        lw = max(stream_view_label.winfo_width(), 1)
+        lh = max(stream_view_label.winfo_height(), 1)
+        if lw > 1 and lh > 1:
+            return lw, lh
+    _stream_src_size = (iw, ih)
+    chrome_y = _STREAM_HDR_H + _STREAM_PAD
+    max_w = int(stream_view_win.winfo_screenwidth() * 0.88) - _STREAM_PAD
+    max_h = int(stream_view_win.winfo_screenheight() * 0.88) - chrome_y
+    scale = min(1.0, max_w / iw, max_h / ih)
+    cw = max(200, int(iw * scale))
+    ch = max(150, int(ih * scale))
+    ww, wh = cw + _STREAM_PAD, ch + chrome_y
+    x, y = stream_view_win.winfo_x(), stream_view_win.winfo_y()
+    stream_view_win.geometry("%dx%d+%d+%d" % (ww, wh, x, y))
+    stream_view_win.update_idletasks()
+    return cw, ch
 _STREAM_MM_INTERVAL = 0.04
 
 def _alt_held():
@@ -845,23 +982,20 @@ def _stream_tcp_loop():
                         continue
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     pil = Image.fromarray(rgb)
-                    iw, ih = pil.size
-                    lw = max(stream_view_label.winfo_width(), 400)
-                    lh = max(stream_view_label.winfo_height(), 300)
-                    scale = min(lw / iw, lh / ih)
-                    nw = max(1, int(iw * scale))
-                    nh = max(1, int(ih * scale))
-                    disp = pil.resize((nw, nh), Image.Resampling.BILINEAR)
-                    photo = ImageTk.PhotoImage(disp)
-                    ox = (lw - nw) // 2
-                    oy = (lh - nh) // 2
-                    stream_view_img_rect = (ox, oy, nw, nh)
+                    fiw, fih = pil.size
 
-                    def _upd(p=photo):
-                        global stream_view_photo
-                        stream_view_photo = p
-                        if stream_view_label.winfo_exists():
-                            stream_view_label.configure(image=p, text="")
+                    def _upd(pil_img=pil, fiw=fiw, fih=fih):
+                        global stream_view_photo, stream_view_img_rect
+                        if not stream_view_label or not stream_view_label.winfo_exists():
+                            return
+                        cw, ch = _stream_display_size(fiw, fih)
+                        if cw != fiw or ch != fih:
+                            disp = pil_img.resize((cw, ch), Image.Resampling.BILINEAR)
+                        else:
+                            disp = pil_img
+                        stream_view_photo = ImageTk.PhotoImage(disp)
+                        stream_view_img_rect = (0, 0, cw, ch)
+                        stream_view_label.configure(image=stream_view_photo, text="")
 
                     root.after(0, _upd)
                 except Exception:
@@ -893,8 +1027,9 @@ def toggle_stream_send():
         lbl_status.config(text="전송 실패", fg="#ef4444")
 
 def close_stream_view():
-    global stream_view_active, stream_view_win, stream_view_sock
+    global stream_view_active, stream_view_win, stream_view_sock, _stream_src_size
     stream_view_active = False
+    _stream_src_size = (0, 0)
     try:
         if stream_view_sock:
             stream_view_sock.close()
@@ -906,14 +1041,15 @@ def close_stream_view():
     stream_view_win = None
 
 def toggle_stream_view():
-    global stream_view_active, stream_view_win, stream_view_label, lbl_stream_status
+    global stream_view_active, stream_view_win, stream_view_label, lbl_stream_status, _stream_src_size
     if stream_view_win and stream_view_win.winfo_exists():
         close_stream_view()
         btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")
         return
+    _stream_src_size = (0, 0)
     stream_view_win = tk.Toplevel(root)
     stream_view_win.title(SOOPLIVE_STREAM_TITLE)
-    stream_view_win.geometry("800x600")
+    stream_view_win.geometry("640x480")
     stream_view_win.attributes("-topmost", True)
     stream_view_win.configure(bg="#0f172a")
     stream_view_win.overrideredirect(True)
@@ -1190,6 +1326,7 @@ def _upd_periodic():
 
 root.after(15000, lambda: threading.Thread(target=lambda: check_for_update(force=True), daemon=True).start())
 root.after(615000, _upd_periodic)
+root.after(2000, lambda: threading.Thread(target=_check_update_stuck_on_boot, daemon=True).start())
 
 try:
     root.mainloop()
