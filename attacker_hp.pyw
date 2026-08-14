@@ -62,7 +62,23 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 21:38"
+def _sys_excepthook(typ, val, tb):
+    try:
+        import traceback as _tb
+        msg = "".join(_tb.format_exception(typ, val, tb))
+        try:
+            with open(UPDATE_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write("%s\n%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+        except Exception:
+            pass
+        if "root" not in globals() or globals().get("root") is None:
+            _startup_fatal(msg[-1500:])
+    except Exception:
+        sys.__excepthook__(typ, val, tb)
+
+sys.excepthook = _sys_excepthook
+
+PATCH_UPDATED_AT = "2026-08-14 22:11"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -645,9 +661,6 @@ def on_remote_key(name):
         send_remote_cmd(CMD_MAP[name])
     return handler
 
-for key_name in ['insert', 'home', 'f4']:
-    keyboard.on_release_key(key_name, on_remote_key(key_name))
-
 SLOT_NAMES = {1:'F5',2:'F6',3:'F7',4:'F8',5:'F9',6:'F10',7:'F11',8:'F12'}
 DEBOUNCE['slot'] = 0
 
@@ -663,9 +676,6 @@ def on_slot_hotkey(n):
             lbl_status.config(text="전송 실패", fg="#ef4444")
     return handler
 
-for i in range(1, 9):
-    keyboard.add_hotkey('alt+%d' % i, on_slot_hotkey(i))
-
 def on_end_bert_key(e=None):
     now = time.time()
     if now - DEBOUNCE.get('end', 0) < 0.5:
@@ -679,7 +689,14 @@ def on_end_bert_key(e=None):
     except Exception:
         lbl_status.config(text="베르 실패", fg="#ef4444")
 
-keyboard.on_release_key('end', on_end_bert_key)
+try:
+    for key_name in ['insert', 'home', 'f4']:
+        keyboard.on_release_key(key_name, on_remote_key(key_name))
+    for i in range(1, 9):
+        keyboard.add_hotkey('alt+%d' % i, on_slot_hotkey(i))
+    keyboard.on_release_key('end', on_end_bert_key)
+except Exception as e:
+    _log_update_err("keyboard", e)
 
 # ============================================================
 # 메인 GUI
@@ -975,92 +992,83 @@ def _stream_refresh_last_frame():
         pil_img, fiw, fih = _stream_last_frame
         _render_stream_frame(pil_img, fiw, fih)
 
-def _attach_stream_resize(win):
-    """모서리·가장자리 드래그로 창 크기 조절 (브라우저처럼)."""
-    specs = [
-        ("n",  0.0, 0.0, 1.0, 0, "sb_v_double_arrow"),
-        ("s",  0.0, 1.0, 1.0, 0, "sb_v_double_arrow"),
-        ("e",  1.0, 0.0, 0, 1.0, "sb_h_double_arrow"),
-        ("w",  0.0, 0.0, 0, 1.0, "sb_h_double_arrow"),
-        ("nw", 0.0, 0.0, 0, 0, "top_left_corner"),
-        ("ne", 1.0, 0.0, 0, 0, "top_right_corner"),
-        ("sw", 0.0, 1.0, 0, 0, "bottom_left_corner"),
-        ("se", 1.0, 1.0, 0, 0, "bottom_right_corner"),
-    ]
-    edge = _STREAM_EDGE
-
-    def _start(edge_id, e):
-        if _alt_held():
-            return
-        global _stream_manual_size
-        _stream_manual_size = True
-        win._rs = {
-            "edge": edge_id,
-            "x": e.x_root,
-            "y": e.y_root,
-            "wx": win.winfo_x(),
-            "wy": win.winfo_y(),
-            "ww": win.winfo_width(),
-            "wh": win.winfo_height(),
-        }
-
-    def _move(e):
-        if _alt_held():
-            _on_stream_motion(e)
-            return
-        rs = getattr(win, "_rs", None)
-        if not rs:
-            return
-        dx = e.x_root - rs["x"]
-        dy = e.y_root - rs["y"]
-        x, y, w, h = rs["wx"], rs["wy"], rs["ww"], rs["wh"]
-        edge_id = rs["edge"]
-        if "w" in edge_id:
-            nw = max(_STREAM_MIN_W, min(_STREAM_MAX_W, w - dx))
-            x = x + (w - nw)
-            w = nw
-        elif "e" in edge_id:
-            w = max(_STREAM_MIN_W, min(_STREAM_MAX_W, w + dx))
-        if "n" in edge_id:
-            nh = max(_STREAM_MIN_H, min(_STREAM_MAX_H, h - dy))
-            y = y + (h - nh)
-            h = nh
-        elif "s" in edge_id:
-            h = max(_STREAM_MIN_H, min(_STREAM_MAX_H, h + dy))
-        win.geometry("%dx%d+%d+%d" % (int(w), int(h), int(x), int(y)))
-        _stream_refresh_last_frame()
-
-    def _end(e):
-        global _stream_auto_done
-        _stream_auto_done = True
-        if hasattr(win, "_rs"):
-            del win._rs
-        _save_stream_size()
-        _stream_refresh_last_frame()
-
-    for edge_id, rx, ry, rw, rh, cursor in specs:
-        if rw:
-            wcfg = {"relx": rx, "rely": ry, "relwidth": rw, "height": edge}
-        elif rh:
-            wcfg = {"relx": rx, "rely": ry, "width": edge, "relheight": rh}
-        else:
-            wcfg = {"relx": rx, "rely": ry, "width": edge, "height": edge, "anchor": edge_id}
-        grip = tk.Frame(win, bg="#0f172a", cursor=cursor)
-        grip.place(**wcfg)
-        grip.bind("<ButtonPress-1>", lambda e, eid=edge_id: _start(eid, e))
-        grip.bind("<B1-Motion>", _move)
-        grip.bind("<ButtonRelease-1>", _end)
-        for ev, fn in (
-            ("<Motion>", _on_stream_motion),
-            ("<ButtonPress-2>", lambda e: _on_stream_btn(e, True)),
-            ("<ButtonPress-3>", lambda e: _on_stream_btn(e, True)),
-            ("<ButtonRelease-2>", lambda e: _on_stream_btn(e, False)),
-            ("<ButtonRelease-3>", lambda e: _on_stream_btn(e, False)),
-            ("<MouseWheel>", _on_stream_scroll),
-        ):
-            grip.bind(ev, fn)
-        grip.lift()
+# 가장자리 리사이즈는 투명 Frame(grip)을 올리지 않는다.
+# place() grip 이 pack()된 화면 라벨 위에 올라가서 Alt+마우스가 먹혔음.
+_HT = {"w": 10, "e": 11, "n": 12, "nw": 13, "ne": 14, "s": 15, "sw": 16, "se": 17}
+_STREAM_CURSOR = {
+    "n": "sb_v_double_arrow", "s": "sb_v_double_arrow",
+    "e": "sb_h_double_arrow", "w": "sb_h_double_arrow",
+    "nw": "size_nw_se", "se": "size_nw_se",
+    "ne": "size_ne_sw", "sw": "size_ne_sw",
+}
 _STREAM_MM_INTERVAL = 0.04
+_stream_ui_pending = None
+_stream_ui_job = False
+
+def _stream_edge_at(e):
+    if not stream_view_win or not stream_view_win.winfo_exists():
+        return ""
+    x = e.x_root - stream_view_win.winfo_rootx()
+    y = e.y_root - stream_view_win.winfo_rooty()
+    w = stream_view_win.winfo_width()
+    h = stream_view_win.winfo_height()
+    edge = _STREAM_EDGE
+    r = ""
+    if y < edge:
+        r += "n"
+    elif y >= h - edge:
+        r += "s"
+    if x < edge:
+        r += "w"
+    elif x >= w - edge:
+        r += "e"
+    return r
+
+def _stream_native_resize(e):
+    if _alt_held():
+        return False
+    edge = _stream_edge_at(e)
+    ht = _HT.get(edge)
+    if not ht or not stream_view_win or not stream_view_win.winfo_exists():
+        return False
+    global _stream_manual_size
+    _stream_manual_size = True
+    try:
+        hid = stream_view_win.winfo_id()
+        hwnd = ctypes.windll.user32.GetParent(hid) or hid
+        ctypes.windll.user32.ReleaseCapture()
+        ctypes.windll.user32.SendMessageW(int(hwnd), 0x00A1, ht, 0)
+    except Exception:
+        return False
+    return True
+
+def _stream_set_cursor(e):
+    cur = "" if _alt_held() else _STREAM_CURSOR.get(_stream_edge_at(e), "")
+    try:
+        if stream_view_win and stream_view_win.winfo_exists():
+            stream_view_win.configure(cursor=cur)
+        if stream_view_label and stream_view_label.winfo_exists():
+            stream_view_label.configure(cursor=cur)
+    except Exception:
+        pass
+
+def _on_stream_configure(e):
+    if e.widget is not stream_view_win:
+        return
+    _stream_refresh_last_frame()
+    try:
+        stream_view_win.after_cancel(getattr(stream_view_win, "_sz_job", None))
+    except Exception:
+        pass
+    stream_view_win._sz_job = stream_view_win.after(250, _save_stream_size)
+
+def _stream_ui_flush():
+    global _stream_ui_job, _stream_ui_pending
+    _stream_ui_job = False
+    pending = _stream_ui_pending
+    _stream_ui_pending = None
+    if pending:
+        _render_stream_frame(*pending)
 
 def _alt_held():
     return bool(ctypes.windll.user32.GetAsyncKeyState(VK_MENU) & 0x8000)
@@ -1071,22 +1079,22 @@ def send_mouse_json(obj):
     except Exception:
         pass
 
-def _stream_frac_from_event(e, label=None):
+def _stream_frac_from_event(e, label):
     global stream_view_img_rect
-    label = label or stream_view_label
-    if not label or not label.winfo_exists():
+    if not label:
         return None
     ix, iy, iw, ih = stream_view_img_rect
     if iw < 2 or ih < 2:
         return 0.5, 0.5
-    lx = e.x_root - label.winfo_rootx() - ix
-    ly = e.y_root - label.winfo_rooty() - iy
+    lx = e.x - ix
+    ly = e.y - iy
     if lx < 0 or ly < 0 or lx > iw or ly > ih:
         return None
     return round(lx / iw, 4), round(ly / ih, 4)
 
 def _on_stream_motion(e):
     global _stream_last_mm
+    _stream_set_cursor(e)
     if not _alt_held():
         return
     now = time.time()
@@ -1097,6 +1105,12 @@ def _on_stream_motion(e):
     if not frac:
         return
     send_mouse_json({"t": "mm", "fx": frac[0], "fy": frac[1]})
+
+def _on_stream_press1(e):
+    if _alt_held():
+        _on_stream_btn(e, True)
+        return
+    _stream_native_resize(e)
 
 def _on_stream_btn(e, down):
     if not _alt_held():
@@ -1127,6 +1141,7 @@ def _tcp_recv_exact(conn, n):
 
 def _stream_tcp_loop():
     global stream_view_active, stream_view_sock, stream_view_photo, stream_view_img_rect
+    global _stream_ui_pending, _stream_ui_job
     while stream_view_active:
         ip = (ip_var.get() or "").strip()
         if not ip:
@@ -1160,10 +1175,10 @@ def _stream_tcp_loop():
                     pil = Image.fromarray(rgb)
                     fiw, fih = pil.size
 
-                    def _upd(pil_img=pil, fiw=fiw, fih=fih):
-                        _render_stream_frame(pil_img, fiw, fih)
-
-                    root.after(0, _upd)
+                    _stream_ui_pending = (pil, fiw, fih)
+                    if not _stream_ui_job:
+                        _stream_ui_job = True
+                        root.after(0, _stream_ui_flush)
                 except Exception:
                     pass
         except Exception:
@@ -1233,10 +1248,15 @@ def toggle_stream_view():
     stream_view_win.protocol("WM_DELETE_WINDOW", lambda: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
 
     def _stream_start_move(e):
+        if _stream_native_resize(e):
+            stream_view_win._mv_x = None
+            return
         stream_view_win._mv_x = e.x_root - stream_view_win.winfo_x()
         stream_view_win._mv_y = e.y_root - stream_view_win.winfo_y()
 
     def _stream_do_move(e):
+        if getattr(stream_view_win, "_mv_x", None) is None:
+            return
         stream_view_win.geometry("+%d+%d" % (e.x_root - stream_view_win._mv_x, e.y_root - stream_view_win._mv_y))
 
     hdr = tk.Frame(stream_view_win, bg="#141420", height=26)
@@ -1255,10 +1275,10 @@ def toggle_stream_view():
         w.bind("<B1-Motion>", _stream_do_move)
 
     stream_view_label = tk.Label(stream_view_win, bg="#000", text="쫄화면 전송 ON 후 대기...", fg="#6c7086")
-    stream_view_label.pack(fill="both", expand=True, padx=4, pady=4)
+    stream_view_label.pack(fill="both", expand=True)
     _stream_binds = [
         ("<Motion>", _on_stream_motion),
-        ("<ButtonPress-1>", lambda e: _on_stream_btn(e, True)),
+        ("<ButtonPress-1>", _on_stream_press1),
         ("<ButtonPress-2>", lambda e: _on_stream_btn(e, True)),
         ("<ButtonPress-3>", lambda e: _on_stream_btn(e, True)),
         ("<ButtonRelease-1>", lambda e: _on_stream_btn(e, False)),
@@ -1268,9 +1288,9 @@ def toggle_stream_view():
     ]
     for ev, fn in _stream_binds:
         stream_view_label.bind(ev, fn)
-
-    _attach_stream_resize(stream_view_win)
-    stream_view_label.lift()
+    stream_view_win.bind("<Configure>", _on_stream_configure)
+    for w in (hdr, stream_title_lbl):
+        w.bind("<Motion>", _stream_set_cursor)
 
     btn_stream_view.config(text="📺 닫기", bg="#ef4444")
     stream_view_active = True

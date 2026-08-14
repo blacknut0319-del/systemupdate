@@ -606,6 +606,9 @@ STREAM_TCP_PORT = 9100
 _stream_active = False
 _stream_client = None
 _stream_client_lock = Lock()
+_stream_frame_lock = Lock()
+_stream_frame_bgr = None
+_stream_offer_ts = 0.0
 _stream_roi = (0, 0, 0, 0)   # 0=미설정 → 주 모니터 전체
 _remote_control_until = 0.0
 _remote_mouse_lock = Lock()
@@ -3090,7 +3093,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 21:38"
+PATCH_UPDATED_AT = "2026-08-14 22:11"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -4735,7 +4738,8 @@ def expert_logic():
             connect_hardware()
         if running and ser and getattr(ser, 'is_open', False):
             frame = camera.get_latest_frame() if camera else None
-            if frame is None: time.sleep(0.01); continue 
+            if frame is None: time.sleep(0.01); continue
+            _offer_stream_frame(frame)
 
             if remote_control_active():
                 time.sleep(0.03)
@@ -5112,6 +5116,10 @@ def exit_app():
     timer_thread_active = False
     try: save_hidden_config(loaded_pwd if loaded_pwd else "")
     except: pass
+    try:
+        stop_stream_server()
+    except Exception:
+        pass
     try:
         if camera: camera.stop(); camera.release()
     except: pass
@@ -5779,39 +5787,52 @@ def _remote_mouse_worker():
         except Exception:
             pass
 
-def _stream_capture_bgr():
-    """스트림용 BGR 프레임 — 기존 camera 우선(게임 캡처), 실패 시 스레드별 mss."""
-    global camera
-    sx, sy, sw, sh = _get_stream_rect()
+def _offer_stream_frame(rgb):
+    """힐 스레드가 이미 잡은 프레임만 복사 — 송출이 dxcam/mss를 따로 찍지 않게."""
+    global _stream_frame_bgr, _stream_offer_ts
+    if not _stream_active or rgb is None:
+        return
+    now = time.time()
+    if now - _stream_offer_ts < 0.09:
+        return
     try:
-        if camera:
-            full = camera.get_latest_frame()
-            if full is not None and getattr(full, "size", 0) > 0:
-                fh, fw = full.shape[:2]
-                x1 = max(0, min(int(sx), fw - 1))
-                y1 = max(0, min(int(sy), fh - 1))
-                x2 = max(x1 + 1, min(int(sx + sw), fw))
-                y2 = max(y1 + 1, min(int(sy + sh), fh))
-                crop = full[y1:y2, x1:x2]
-                if crop.size > 0:
-                    return cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
+        sx, sy, sw, sh = _get_stream_rect()
+        fh, fw = rgb.shape[:2]
+        x1 = max(0, min(int(sx), fw - 1))
+        y1 = max(0, min(int(sy), fh - 1))
+        x2 = max(x1 + 1, min(int(sx + sw), fw))
+        y2 = max(y1 + 1, min(int(sy + sh), fh))
+        crop = rgb[y1:y2, x1:x2]
+        if crop.size == 0:
+            return
+        bgr = cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
+        _stream_offer_ts = now
+        with _stream_frame_lock:
+            _stream_frame_bgr = bgr
     except Exception:
         pass
-    try:
-        import mss as _mss
-        if not hasattr(_stream_capture_bgr, "_local"):
-            _stream_capture_bgr._local = _threading.local()
-        sct = getattr(_stream_capture_bgr._local, "sct", None)
-        if sct is None:
-            sct = _mss.mss()
-            _stream_capture_bgr._local.sct = sct
-        img = sct.grab({"left": int(sx), "top": int(sy), "width": int(sw), "height": int(sh)})
-        return cv2.cvtColor(np.array(img, dtype=np.uint8), cv2.COLOR_BGRA2BGR)
-    except Exception:
+
+def _stream_feed_loop():
+    """사냥 중이 아닐 때만 프레임 공급. 사냥 중엔 expert_logic 이 이미 캡처함."""
+    while _stream_active:
+        try:
+            if not running:
+                f = camera.get_latest_frame() if camera else None
+                if f is not None:
+                    _offer_stream_frame(f)
+        except Exception:
+            pass
+        time.sleep(0.1)
+
+def _stream_capture_bgr():
+    with _stream_frame_lock:
+        src = _stream_frame_bgr
+    if src is None:
         return None
+    return src.copy()
 
 def _stream_send_loop():
-    """JPEG 프레임 송출 — 격수 TCP 연결 시에만."""
+    """JPEG 프레임 송출 — 격수 TCP 연결 시에만. 캡처는 하지 않음."""
     global _stream_active, _stream_client
     while _stream_active:
         with _stream_client_lock:
@@ -5828,7 +5849,7 @@ def _stream_send_loop():
             pt = POINT()
             ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
             lcx, lcy = pt.x - sx, pt.y - sy
-            if 0 <= lcx < sw and 0 <= lcy < sh:
+            if 0 <= lcx < frame.shape[1] and 0 <= lcy < frame.shape[0]:
                 cv2.circle(frame, (int(lcx), int(lcy)), 6, (0, 255, 255), -1)
             max_w, max_h = 1280, 720
             h, w = frame.shape[:2]
@@ -5840,18 +5861,15 @@ def _stream_send_loop():
                 time.sleep(0.02)
                 continue
             raw = buf.tobytes()
-            header = len(raw).to_bytes(4, "big")
-            with _stream_client_lock:
-                if _stream_client:
-                    _stream_client.sendall(header + raw)
+            conn.sendall(len(raw).to_bytes(4, "big") + raw)
         except Exception:
             with _stream_client_lock:
                 try:
-                    if _stream_client:
+                    if _stream_client is conn:
                         _stream_client.close()
+                        _stream_client = None
                 except Exception:
-                    pass
-                _stream_client = None
+                    _stream_client = None
         time.sleep(0.04)
 
 def _stream_accept_loop():
@@ -5896,10 +5914,11 @@ def start_stream_server():
     _stream_active = True
     Thread(target=_stream_accept_loop, daemon=True).start()
     Thread(target=_stream_send_loop, daemon=True).start()
+    Thread(target=_stream_feed_loop, daemon=True).start()
     log_event("📡 쫄화면 송출 시작")
 
 def stop_stream_server():
-    global _stream_active, _stream_client
+    global _stream_active, _stream_client, _stream_frame_bgr
     _stream_active = False
     with _stream_client_lock:
         try:
@@ -5908,6 +5927,8 @@ def stop_stream_server():
         except Exception:
             pass
         _stream_client = None
+    with _stream_frame_lock:
+        _stream_frame_bgr = None
     log_event("📡 쫄화면 송출 정지")
 
 UDP_CMD_MAP = {

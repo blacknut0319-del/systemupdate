@@ -26,8 +26,7 @@ def sync_launcher(name, app_dir=None):
     if not os.path.isfile(src):
         return dst
     try:
-        if not os.path.isfile(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
-            shutil.copy2(src, dst)
+        shutil.copy2(src, dst)
     except Exception:
         pass
     return dst

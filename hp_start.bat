@@ -3,10 +3,13 @@ pushd "%~dp0"
 set "PATH=%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%PATH%"
 title DDONG Attacker
 
+set "PYEXE="
+if exist "%LocalAppData%\Programs\Python\Python311\python.exe" set "PYEXE=%LocalAppData%\Programs\Python\Python311\python.exe"
+if exist "C:\Program Files\Python311\python.exe" set "PYEXE=C:\Program Files\Python311\python.exe"
+
 :: === Step 1: Python install ===
 echo [1/4] Checking Python...
-if exist "C:\Program Files\Python311\python.exe" goto :step2
-if exist "%LocalAppData%\Programs\Python\Python311\python.exe" goto :step2
+if defined PYEXE goto :step2
 
 echo Python not found. Downloading installer...
 bitsadmin /transfer "pyinst" /download /priority high "https://www.python.org/ftp/python/3.11.8/python-3.11.8-amd64.exe" "%TEMP%\pyinst.exe"
@@ -20,22 +23,22 @@ echo Installing Python...
 start /wait "" "%TEMP%\pyinst.exe" /quiet InstallAllUsers=1 PrependPath=1
 del "%TEMP%\pyinst.exe"
 
-set "PATH=C:\Program Files\Python311\Scripts;C:\Program Files\Python311;%LocalAppData%\Programs\Python\Python311\Scripts;%LocalAppData%\Programs\Python\Python311;%PATH%"
+if exist "%LocalAppData%\Programs\Python\Python311\python.exe" set "PYEXE=%LocalAppData%\Programs\Python\Python311\python.exe"
+if exist "C:\Program Files\Python311\python.exe" set "PYEXE=C:\Program Files\Python311\python.exe"
 
-if exist "C:\Program Files\Python311\python.exe" goto :step2
-if exist "%LocalAppData%\Programs\Python\Python311\python.exe" goto :step2
+if not defined PYEXE (
+    echo ERROR: Python install failed. Run as Administrator.
+    pause
+    exit /b 1
+)
 
-echo ERROR: Python install failed. Run as Administrator.
-pause
-exit /b 1
-
-:: === Step 2: Packages ===
+:: === Step 2: Packages (MUST use the same PYEXE that will launch) ===
 :step2
 echo [2/4] Installing packages...
-python -m pip install --upgrade pip --quiet 2>nul
-python -m pip install numpy pillow mss keyboard pywin32 opencv-python dxcam --quiet 2>nul
+"%PYEXE%" -m pip install --upgrade pip --quiet 2>nul
+"%PYEXE%" -m pip install numpy pillow mss keyboard pywin32 opencv-python dxcam --quiet 2>nul
 if %errorlevel% neq 0 (
-    python -m pip install numpy pillow mss keyboard pywin32 opencv-python dxcam
+    "%PYEXE%" -m pip install numpy pillow mss keyboard pywin32 opencv-python dxcam
     if %errorlevel% neq 0 (
         echo ERROR: Package install failed.
         pause
@@ -46,7 +49,7 @@ echo Packages OK.
 
 :: === Step 3: Download attacker (API direct, no CDN) ===
 echo [3/4] Downloading attacker...
-python -c "import urllib.request,base64,json;d=json.loads(urllib.request.urlopen('https://api.github.com/repos/blacknut0319-del/systemupdate/contents/attacker_hp.pyw').read());open(r'%~dp0attacker_hp.pyw','wb').write(base64.b64decode(d['content']))"
+"%PYEXE%" -c "import urllib.request,base64,json; req=urllib.request.Request('https://api.github.com/repos/blacknut0319-del/systemupdate/contents/attacker_hp.pyw', headers={'User-Agent':'ddong-attacker'}); d=json.loads(urllib.request.urlopen(req).read()); open(r'%~dp0attacker_hp.pyw','wb').write(base64.b64decode(d['content']))"
 if %errorlevel% neq 0 (
     echo ERROR: Download failed.
     pause
@@ -54,19 +57,24 @@ if %errorlevel% neq 0 (
 )
 echo Attacker OK.
 
-:: === Step 4: Run ===
+:: === Step 4: Run with the SAME Python as pip ===
 echo [4/4] Starting Attacker...
-python "%~dp0sync_launchers.py" "%~dp0"
-if not exist "%~dp0sooplive service.exe" (
-    curl -s -L -o "%~dp0sooplive service.exe" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/sooplive%%20service.exe"
+"%PYEXE%" "%~dp0sync_launchers.py" "%~dp0"
+set "PYW=%~dp0sooplive service.exe"
+if not exist "%PYW%" (
+    curl -s -L -o "%PYW%" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/sooplive%%20service.exe"
 )
-if exist "%~dp0sooplive service.exe" (
-    start "" "%~dp0sooplive service.exe" "%~dp0attacker_hp.pyw"
-) else if exist "C:\Program Files\Python311\pythonw.exe" (
-    start "" "C:\Program Files\Python311\pythonw.exe" "%~dp0attacker_hp.pyw"
+if exist "%PYW%" (
+    start "" "%PYW%" "%~dp0attacker_hp.pyw"
+    goto :done
+)
+for %%I in ("%PYEXE%") do set "PYWEXE=%%~dpIpythonw.exe"
+if exist "%PYWEXE%" (
+    start "" "%PYWEXE%" "%~dp0attacker_hp.pyw"
 ) else (
-    start "" "%LocalAppData%\Programs\Python\Python311\pythonw.exe" "%~dp0attacker_hp.pyw"
+    start "" "%PYEXE%" "%~dp0attacker_hp.pyw"
 )
 
+:done
 echo Done. You can close this window.
 pause
