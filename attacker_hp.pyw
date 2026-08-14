@@ -78,7 +78,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-14 22:25"
+PATCH_UPDATED_AT = "2026-08-14 22:32"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -147,9 +147,6 @@ WIN_W = 340
 WIN_H = 420
 _WIN_MIN_W, _WIN_MAX_W = 240, 520
 _WIN_MIN_H, _WIN_MAX_H = 120, 900
-STREAM_WIN_W = 640
-STREAM_WIN_H = 480
-STREAM_HAS_SAVED = False
 END_BERT_ON = False
 
 if os.path.exists(CONFIG_FILE):
@@ -166,13 +163,6 @@ if os.path.exists(CONFIG_FILE):
         if "win_h" in cfg:
             try: WIN_H = max(_WIN_MIN_H, min(_WIN_MAX_H, int(cfg["win_h"])))
             except Exception: pass
-        if "stream_win_w" in cfg and "stream_win_h" in cfg:
-            try:
-                STREAM_WIN_W = max(320, min(1920, int(cfg["stream_win_w"])))
-                STREAM_WIN_H = max(240, min(1080, int(cfg["stream_win_h"])))
-                STREAM_HAS_SAVED = True
-            except Exception:
-                pass
         if "end_bert" in cfg:
             END_BERT_ON = bool(cfg.get("end_bert"))
     except: pass
@@ -840,8 +830,6 @@ def save_cfg():
     cfg["hp_roi"] = tuple(int(v) for v in HP_ROI)
     cfg["win_w"] = WIN_W
     cfg["win_h"] = WIN_H
-    cfg["stream_win_w"] = STREAM_WIN_W
-    cfg["stream_win_h"] = STREAM_WIN_H
     cfg["end_bert"] = bool(end_bert_var.get())
     if HP_100_REF is not None:
         cfg["hp_100_ref"] = HP_100_REF
@@ -919,102 +907,7 @@ stream_view_label = None
 lbl_stream_status = None
 stream_view_img_rect = (0, 0, 1, 1)
 _stream_last_mm = 0.0
-_stream_src_size = (0, 0)
-_stream_manual_size = False
-_stream_auto_done = False
-_stream_last_frame = None
-_STREAM_HDR_H = 26
-_STREAM_PAD = 8
-_STREAM_EDGE = 6
-_STREAM_MIN_W, _STREAM_MAX_W = 320, 1920
-_STREAM_MIN_H, _STREAM_MAX_H = 240, 1080
-
-def _save_stream_size():
-    global STREAM_WIN_W, STREAM_WIN_H, STREAM_HAS_SAVED
-    if not stream_view_win or not stream_view_win.winfo_exists():
-        return
-    STREAM_WIN_W = max(_STREAM_MIN_W, min(_STREAM_MAX_W, stream_view_win.winfo_width()))
-    STREAM_WIN_H = max(_STREAM_MIN_H, min(_STREAM_MAX_H, stream_view_win.winfo_height()))
-    STREAM_HAS_SAVED = True
-    cfg = {}
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-        except Exception:
-            pass
-        try:
-            ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 128)
-        except Exception:
-            pass
-    cfg["stream_win_w"] = STREAM_WIN_W
-    cfg["stream_win_h"] = STREAM_WIN_H
-    tmp = CONFIG_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
-    os.replace(tmp, CONFIG_FILE)
-    try:
-        ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 2)
-    except Exception:
-        pass
-
-def _stream_auto_fit_window(iw, ih):
-    """첫 송출 프레임에만 창 크기 자동 맞춤 (저장된 크기·수동 조절 후엔 안 함)."""
-    global stream_view_win, _stream_auto_done
-    if _stream_manual_size or _stream_auto_done or STREAM_HAS_SAVED:
-        return
-    if not stream_view_win or not stream_view_win.winfo_exists() or iw < 1 or ih < 1:
-        return
-    chrome_y = _STREAM_HDR_H + _STREAM_PAD
-    max_w = int(stream_view_win.winfo_screenwidth() * 0.88) - _STREAM_PAD
-    max_h = int(stream_view_win.winfo_screenheight() * 0.88) - chrome_y
-    scale = min(1.0, max_w / iw, max_h / ih)
-    cw = max(200, int(iw * scale))
-    ch = max(150, int(ih * scale))
-    ww, wh = cw + _STREAM_PAD, ch + chrome_y
-    x, y = stream_view_win.winfo_x(), stream_view_win.winfo_y()
-    stream_view_win.geometry("%dx%d+%d+%d" % (ww, wh, x, y))
-    stream_view_win.update_idletasks()
-    _stream_auto_done = True
-
-def _render_stream_frame(pil_img, fiw, fih):
-    """라벨 크기에 맞춰 프레임 표시 (수동 리사이즈 반영)."""
-    global stream_view_photo, stream_view_img_rect, _stream_src_size, _stream_last_frame
-    if not stream_view_label or not stream_view_label.winfo_exists():
-        return
-    _stream_last_frame = (pil_img, fiw, fih)
-    if _stream_src_size != (fiw, fih):
-        _stream_src_size = (fiw, fih)
-        _stream_auto_fit_window(fiw, fih)
-    stream_view_label.update_idletasks()
-    lw = max(stream_view_label.winfo_width(), 1)
-    lh = max(stream_view_label.winfo_height(), 1)
-    scale = min(lw / max(fiw, 1), lh / max(fih, 1))
-    nw = max(1, int(fiw * scale))
-    nh = max(1, int(fih * scale))
-    disp = pil_img.resize((nw, nh), Image.Resampling.BILINEAR) if (nw != fiw or nh != fih) else pil_img
-    stream_view_photo = ImageTk.PhotoImage(disp)
-    ox = (lw - nw) // 2
-    oy = (lh - nh) // 2
-    stream_view_img_rect = (ox, oy, nw, nh)
-    stream_view_label.configure(image=stream_view_photo, text="")
-
-def _stream_refresh_last_frame():
-    if _stream_last_frame:
-        pil_img, fiw, fih = _stream_last_frame
-        _render_stream_frame(pil_img, fiw, fih)
-
 _STREAM_MM_INTERVAL = 0.04
-_stream_ui_pending = None
-_stream_ui_job = False
-
-def _stream_ui_flush():
-    global _stream_ui_job, _stream_ui_pending
-    _stream_ui_job = False
-    pending = _stream_ui_pending
-    _stream_ui_pending = None
-    if pending:
-        _render_stream_frame(*pending)
 
 def _alt_held():
     return bool(ctypes.windll.user32.GetAsyncKeyState(VK_MENU) & 0x8000)
@@ -1080,7 +973,6 @@ def _tcp_recv_exact(conn, n):
 
 def _stream_tcp_loop():
     global stream_view_active, stream_view_sock, stream_view_photo, stream_view_img_rect
-    global _stream_ui_pending, _stream_ui_job
     while stream_view_active:
         ip = (ip_var.get() or "").strip()
         if not ip:
@@ -1112,12 +1004,25 @@ def _stream_tcp_loop():
                         continue
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     pil = Image.fromarray(rgb)
-                    fiw, fih = pil.size
+                    iw, ih = pil.size
+                    lw = max(stream_view_label.winfo_width(), 400)
+                    lh = max(stream_view_label.winfo_height(), 300)
+                    scale = min(lw / iw, lh / ih)
+                    nw = max(1, int(iw * scale))
+                    nh = max(1, int(ih * scale))
+                    disp = pil.resize((nw, nh), Image.Resampling.BILINEAR)
+                    photo = ImageTk.PhotoImage(disp)
+                    ox = (lw - nw) // 2
+                    oy = (lh - nh) // 2
+                    stream_view_img_rect = (ox, oy, nw, nh)
 
-                    _stream_ui_pending = (pil, fiw, fih)
-                    if not _stream_ui_job:
-                        _stream_ui_job = True
-                        root.after(0, _stream_ui_flush)
+                    def _upd(p=photo):
+                        global stream_view_photo
+                        stream_view_photo = p
+                        if stream_view_label.winfo_exists():
+                            stream_view_label.configure(image=p, text="")
+
+                    root.after(0, _upd)
                 except Exception:
                     pass
         except Exception:
@@ -1147,14 +1052,8 @@ def toggle_stream_send():
         lbl_status.config(text="전송 실패", fg="#ef4444")
 
 def close_stream_view():
-    global stream_view_active, stream_view_win, stream_view_sock, _stream_src_size, _stream_manual_size, _stream_auto_done, _stream_last_frame
-    if stream_view_win and stream_view_win.winfo_exists():
-        _save_stream_size()
+    global stream_view_active, stream_view_win, stream_view_sock
     stream_view_active = False
-    _stream_src_size = (0, 0)
-    _stream_manual_size = False
-    _stream_auto_done = False
-    _stream_last_frame = None
     try:
         if stream_view_sock:
             stream_view_sock.close()
@@ -1167,18 +1066,13 @@ def close_stream_view():
 
 def toggle_stream_view():
     global stream_view_active, stream_view_win, stream_view_label, lbl_stream_status
-    global _stream_src_size, _stream_manual_size, _stream_auto_done, _stream_last_frame
     if stream_view_win and stream_view_win.winfo_exists():
         close_stream_view()
         btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")
         return
-    _stream_src_size = (0, 0)
-    _stream_manual_size = False
-    _stream_auto_done = False
-    _stream_last_frame = None
     stream_view_win = tk.Toplevel(root)
     stream_view_win.title(SOOPLIVE_STREAM_TITLE)
-    stream_view_win.geometry("%dx%d+120+80" % (STREAM_WIN_W, STREAM_WIN_H))
+    stream_view_win.geometry("800x600")
     stream_view_win.attributes("-topmost", True)
     stream_view_win.configure(bg="#0f172a")
     stream_view_win.overrideredirect(True)
