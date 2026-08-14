@@ -62,7 +62,7 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 21:21"
+PATCH_UPDATED_AT = "2026-08-14 21:34"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -284,10 +284,15 @@ def _valid_launcher(path):
     except Exception:
         return False
 
+def _norm_patch_ver(ver):
+    if not ver:
+        return ""
+    return str(ver).replace("\ufeff", "").strip().splitlines()[0].strip()
+
 def fetch_remote_version():
     try:
         data = _github_download("attacker_version.txt", timeout=8)
-        return data.decode("utf-8", errors="replace").strip().splitlines()[0].strip()
+        return _norm_patch_ver(data.decode("utf-8", errors="replace"))
     except Exception:
         return None
 
@@ -356,7 +361,7 @@ def _mark_update_attempt(remote_ver):
 def _check_update_stuck_on_boot():
     """예 눌렀는데도 버전이 안 바뀌면 반복 알림 대신 한 번 안내 후 스킵."""
     remote = fetch_remote_version()
-    if not remote or remote == PATCH_UPDATED_AT:
+    if not remote or _norm_patch_ver(remote) == _norm_patch_ver(PATCH_UPDATED_AT):
         try:
             if os.path.isfile(UPDATE_ATTEMPT_FILE):
                 os.remove(UPDATE_ATTEMPT_FILE)
@@ -525,7 +530,7 @@ def check_for_update(force=False, manual=False):
             except Exception:
                 pass
         return
-    if remote == PATCH_UPDATED_AT:
+    if _norm_patch_ver(remote) == _norm_patch_ver(PATCH_UPDATED_AT):
         _update_available = False
         _save_update_skip("")
         try:
@@ -550,7 +555,7 @@ def check_for_update(force=False, manual=False):
     _update_available = True
     if manual:
         _update_notified = False
-    elif _load_update_skip() == remote:
+    elif _load_update_skip() == _norm_patch_ver(remote):
         def _skipped():
             _set_lbl("⚠️업데이트있음", "#f9e2af")
         try:
@@ -971,6 +976,8 @@ def _attach_stream_resize(win):
     edge = _STREAM_EDGE
 
     def _start(edge_id, e):
+        if _alt_held():
+            return
         global _stream_manual_size
         _stream_manual_size = True
         win._rs = {
@@ -984,6 +991,9 @@ def _attach_stream_resize(win):
         }
 
     def _move(e):
+        if _alt_held():
+            _on_stream_motion(e)
+            return
         rs = getattr(win, "_rs", None)
         if not rs:
             return
@@ -1026,6 +1036,15 @@ def _attach_stream_resize(win):
         grip.bind("<ButtonPress-1>", lambda e, eid=edge_id: _start(eid, e))
         grip.bind("<B1-Motion>", _move)
         grip.bind("<ButtonRelease-1>", _end)
+        for ev, fn in (
+            ("<Motion>", _on_stream_motion),
+            ("<ButtonPress-2>", lambda e: _on_stream_btn(e, True)),
+            ("<ButtonPress-3>", lambda e: _on_stream_btn(e, True)),
+            ("<ButtonRelease-2>", lambda e: _on_stream_btn(e, False)),
+            ("<ButtonRelease-3>", lambda e: _on_stream_btn(e, False)),
+            ("<MouseWheel>", _on_stream_scroll),
+        ):
+            grip.bind(ev, fn)
         grip.lift()
 _STREAM_MM_INTERVAL = 0.04
 
@@ -1038,15 +1057,16 @@ def send_mouse_json(obj):
     except Exception:
         pass
 
-def _stream_frac_from_event(e, label):
+def _stream_frac_from_event(e, label=None):
     global stream_view_img_rect
-    lw = max(label.winfo_width(), 1)
-    lh = max(label.winfo_height(), 1)
+    label = label or stream_view_label
+    if not label or not label.winfo_exists():
+        return None
     ix, iy, iw, ih = stream_view_img_rect
     if iw < 2 or ih < 2:
         return 0.5, 0.5
-    lx = e.x - ix
-    ly = e.y - iy
+    lx = e.x_root - label.winfo_rootx() - ix
+    ly = e.y_root - label.winfo_rooty() - iy
     if lx < 0 or ly < 0 or lx > iw or ly > ih:
         return None
     return round(lx / iw, 4), round(ly / ih, 4)
@@ -1232,11 +1252,11 @@ def toggle_stream_view():
         ("<ButtonRelease-3>", lambda e: _on_stream_btn(e, False)),
         ("<MouseWheel>", _on_stream_scroll),
     ]
-    for w in (stream_view_win, stream_view_label):
-        for ev, fn in _stream_binds:
-            w.bind(ev, fn)
+    for ev, fn in _stream_binds:
+        stream_view_label.bind(ev, fn)
 
     _attach_stream_resize(stream_view_win)
+    stream_view_label.lift()
 
     btn_stream_view.config(text="📺 닫기", bg="#ef4444")
     stream_view_active = True

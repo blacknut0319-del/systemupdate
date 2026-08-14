@@ -3000,7 +3000,7 @@ def _pause_attack_click():
             ser.write(b'R'); time.sleep(0.05)
             ser.write(b'U'); time.sleep(0.05)
         elif was_follow:
-            ser.write(b'T'); time.sleep(0.06)
+            ser.write(b'U'); time.sleep(0.05)
     except Exception:
         return False, False
     return was_fixed, was_follow
@@ -3012,7 +3012,8 @@ def _resume_attack_click(was_fixed, was_follow):
         if was_fixed and chk_fix and chk_fix.get():
             ser.write(b'H'); time.sleep(0.04)
         elif was_follow and chk_follow and chk_follow.get() and not (chk_fix and chk_fix.get()):
-            ser.write(b'T'); time.sleep(0.04)
+            ser.write(b'U'); time.sleep(0.05)
+            ser.write(b'T'); time.sleep(0.06)
     except Exception:
         pass
 
@@ -3089,7 +3090,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 21:21"
+PATCH_UPDATED_AT = "2026-08-14 21:34"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3190,11 +3191,16 @@ def _ensure_healer_launcher():
     except Exception:
         pass
 
+def _norm_patch_ver(ver):
+    if not ver:
+        return ""
+    return str(ver).replace("\ufeff", "").strip().splitlines()[0].strip()
+
 def fetch_remote_version():
     """GitHub version.txt 조회. 실패하면 None."""
     try:
         data = _github_download("version.txt", timeout=8)
-        return data.decode("utf-8", errors="replace").strip().splitlines()[0].strip()
+        return _norm_patch_ver(data.decode("utf-8", errors="replace"))
     except Exception:
         return None
 
@@ -3208,7 +3214,7 @@ def _mark_update_attempt(remote_ver):
 def _check_update_stuck_on_boot():
     """예 눌렀는데도 버전이 안 바뀌면 반복 알림 대신 한 번 안내 후 스킵."""
     remote = fetch_remote_version()
-    if not remote or remote == PATCH_UPDATED_AT:
+    if not remote or _norm_patch_ver(remote) == _norm_patch_ver(PATCH_UPDATED_AT):
         try:
             if os.path.isfile(UPDATE_ATTEMPT_FILE):
                 os.remove(UPDATE_ATTEMPT_FILE)
@@ -3311,7 +3317,7 @@ def check_for_update(force=False, manual=False):
             except Exception:
                 pass
         return
-    if remote == PATCH_UPDATED_AT:
+    if _norm_patch_ver(remote) == _norm_patch_ver(PATCH_UPDATED_AT):
         _update_available = False
         _save_update_skip("")
         if manual:
@@ -3333,7 +3339,7 @@ def check_for_update(force=False, manual=False):
     _update_available = True
     if manual:
         _update_notified = False  # 수동 확인이면 안내창 다시 띄움
-    elif _load_update_skip() == remote:
+    elif _load_update_skip() == _norm_patch_ver(remote):
         def _skipped():
             _set_lbl("⚠️업데이트있음", "#f9e2af")
         try:
