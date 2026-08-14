@@ -790,11 +790,9 @@ class KmBox:
                 try: kmNet.keyup(self.SHIFT)
                 except: pass
             return
-        if cmd == 'H':                             # 고정 — 시프트만, 클릭 OFF
-            self._auto = False
+        if cmd == 'H':                             # 강제고정 — 시프트 ON. 클릭은 끄지 않음(제자리공격)
             with self._lk:
                 try:
-                    kmNet.left(0)
                     kmNet.keydown(self.SHIFT)
                 except: pass
             return
@@ -809,7 +807,9 @@ class KmBox:
                 self._auto = False
                 return
             with self._lk:
-                try: kmNet.keyup(self.SHIFT)
+                try:
+                    if not _force_fix:
+                        kmNet.keyup(self.SHIFT)
                 except: pass
             self._auto = True
             return
@@ -923,7 +923,7 @@ last_loot = 0
 last_buff_seq = 0
 last_loot_sent_time = 0
 loot_interval = 5.0
-debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0}
+debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0, 'pageup': 0}
 
 # ── 채팅 타이핑 감지 ──
 # 주의: 고정(Home)은 아두이노가 Shift를 누른 채로 둠.
@@ -953,14 +953,14 @@ def _typing_poll_worker():
         time.sleep(0.05)
 
 def _user_keys_passthrough_worker():
-    """고정(Shift) 중 Tab·Esc·Enter 누르면 Shift 잠깐 풀어서 게임에 키가 들어가게."""
+    """강제고정(Shift) 중 Tab·Esc·Enter 누르면 Shift 잠깐 풀어서 게임에 키가 들어가게."""
     global _fix_shift_hold_off_until
     user32 = ctypes.windll.user32
     GetAsyncKeyState = user32.GetAsyncKeyState
     was_down = {vk: False for vk in _USER_PASS_VKS}
     while timer_thread_active:
         try:
-            if running and _attack_fix:
+            if running and _force_fix:
                 if time.time() < _fix_shift_macro_until:
                     time.sleep(0.02)
                     continue
@@ -1004,10 +1004,12 @@ sheet_expire_end = ""    # 구글시트 D열 (만료일)
 root = None
 chk_fix = None
 chk_follow = None
+chk_force_fix = None
 _attack_follow = False  # 펌웨어 무한클릭 ON. Home/힐 resume 은 chk_follow 대신 이거 봄
-_attack_fix = False     # 고정(클릭·시프트 OFF). Home/스위치. 힐 resume 이 T 로 클릭을 다시 켜지 않게
-_attack_ser_lock = Lock()  # Home(U+H) 과 힐 resume(U+T) 이 섞이면 시프트+클릭이 됨
-_fix_hw_shift_on = False  # 아두이노에 시프트 켠 뒤. 옛 H는 클릭도 켜서 반복 H 금지
+_attack_fix = False     # Home 고정(클릭·시프트 OFF). 힐 resume 이 T 로 클릭을 다시 켜지 않게
+_force_fix = False      # 강제고정(PageUp) 시프트 제자리공격
+_attack_ser_lock = Lock()  # Home 과 힐 resume 이 섞이지 않게
+_fix_hw_shift_on = False  # 아두이노에 시프트 켠 뒤. 강제고정 유지용
 chk_space_save = None
 mode_var = None
 chk_poison = None
@@ -1959,6 +1961,7 @@ def open_guide_panel():
     add_t("⌨️ 단축키")
     add_d("Insert", "시작 / 정지")
     add_d("Home", "따라가기 ON ↔ 전부 끄기 (사냥 중에만)")
+    add_d("PageUp", "강제고정 — 시프트 제자리공격 ON/OFF")
     add_d("Delete", "창 숨기기 / 다시 보이기")
     add_d("F4", "주변 줍기 켜기 / 끄기")
     add_sep()
@@ -1967,8 +1970,9 @@ def open_guide_panel():
     add_d("1번 누름", "따라가기 ON — 몹 따라가며 자동 공격")
     add_d("2번 누름", "전부 끄기 — 클릭·시프트 없음 (F1~F3 단축창 이동 가능)")
     add_d("다시 Home", "따라가기로 복귀")
-    add_w("옵션 칸의 [따라가기]·[고정] 스위치로도 같은 동작")
+    add_w("옵션 칸의 [따라가기(Home)]·[고정(Home)] 스위치로도 같은 동작")
     add_w("격수 모니터 [따라가기]·[고정] 버튼도 동일")
+    add_w("[강제고정(PageUp)] — 시프트로 제자리 공격. 켜 두면 F1~F3 단축창이 안 바뀜")
     add_sep()
 
     add_t("💚 힐 · 휠힐 설정", "#94e2d5")
@@ -2976,9 +2980,12 @@ def _ser_follow_click():
     time.sleep(0.05)
     ser.write(b'T')
     time.sleep(0.06)
+    if _force_fix:
+        ser.write(b'H')
+        time.sleep(0.04)
 
 def _ser_fix_shift():
-    """고정 = 따라가기·시프트 전부 끔. H(시프트)는 안 보냄 — 누르면 F1~F3 단축창이 안 바뀜."""
+    """Home 고정 = 따라가기·시프트 전부 끔. H(시프트)는 안 보냄 — F1~F3 단축창 이동용."""
     global _fix_hw_shift_on
     if hasattr(ser, "_auto"):
         ser._auto = False
@@ -2988,6 +2995,23 @@ def _ser_fix_shift():
     time.sleep(0.05)
     _fix_hw_shift_on = False
 
+def _ser_force_fix_on():
+    """강제고정 ON — 시프트 제자리. 옛 아두이노 H는 클릭도 켬."""
+    global _fix_hw_shift_on
+    ser.write(b'H')
+    time.sleep(0.04)
+    _fix_hw_shift_on = True
+
+def _ser_force_fix_off():
+    """강제고정 OFF — 시프트 뗌. 따라가기 중이면 클릭만 복구."""
+    global _fix_hw_shift_on
+    ser.write(b'R')
+    time.sleep(0.04)
+    _fix_hw_shift_on = False
+    if _attack_follow and not _attack_fix:
+        ser.write(b'T')
+        time.sleep(0.06)
+
 def _suspend_fix_shift_restore(sec=1.8):
     """고정 매크로/힐 동안 백그라운드 워커가 H(Shift)를 다시 누르지 않게."""
     global _fix_shift_hold_off_until, _fix_shift_macro_until
@@ -2996,8 +3020,25 @@ def _suspend_fix_shift_restore(sec=1.8):
     _fix_shift_macro_until = max(_fix_shift_macro_until, t)
 
 def _fix_shift_down():
-    """고정은 시프트를 안 씀. 워커가 H를 다시 보내지 않게 빈 함수."""
-    return
+    """강제고정 시프트 유지."""
+    global _fix_hw_shift_on
+    if not _force_fix:
+        return
+    if time.time() < _fix_shift_hold_off_until:
+        return
+    if not ser or not getattr(ser, "is_open", False):
+        return
+    try:
+        with _attack_ser_lock:
+            if not _force_fix:
+                return
+            if _fix_hw_shift_on:
+                return
+            ser.write(b'H')
+            time.sleep(0.04)
+            _fix_hw_shift_on = True
+    except Exception:
+        pass
 
 def _fix_shift_up():
     """고정 해제 — 아두이노/박스 Shift 뗌 (R)."""
@@ -3037,7 +3078,9 @@ def _pause_attack_click():
                 _suspend_fix_shift_restore(1.2)
                 ser.write(b'R'); time.sleep(0.05)
                 ser.write(b'U'); time.sleep(0.05)
-            elif was_follow:
+            elif was_follow or _force_fix:
+                if _force_fix:
+                    _suspend_fix_shift_restore(1.2)
                 ser.write(b'U'); time.sleep(0.05)
     except Exception:
         return False, False
@@ -3055,6 +3098,8 @@ def _resume_attack_click(was_fixed, was_follow):
                 _ser_follow_click()
             else:
                 ser.write(b'U')
+            if _force_fix and not _attack_fix:
+                _ser_force_fix_on()
     except Exception:
         pass
 
@@ -3133,7 +3178,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 00:43"
+PATCH_UPDATED_AT = "2026-08-15 00:58"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3454,6 +3499,7 @@ LATEST_PATCH = [
     "🖱️ 쫄화면 조종 — 격수 PC Alt+마우스로 쫄 PC 원격 클릭·휠",
     "🔌 WDT4 — Insert 연결 시 펌 자동 확인, 휠힐 별도 펌업 없이 사용",
     "🏃 강제베르 — End/격수 명령 시 위기베르처럼 자동 정지",
+    "📌 강제고정(PageUp) — 시프트 제자리공격. Home 고정은 클릭·시프트 전부 끔",
     "🖱️ Home 고정 — 다시 누르면 클릭·시프트 전부 끔 (단축창 F1~F3 이동)",
     "🖱️ Home 따라가기 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 전부 끄기",
     "💚 휠힐 — 최신 펌웨어에서 일반 힐은 가운데 휠클릭 (항상 켜짐)",
@@ -3583,10 +3629,11 @@ def on_end_bert(e=None):
     Thread(target=do_manual_bert, daemon=True).start()
 
 def stop_everything(reason="💤 대기 중"):
-    global running, ser, root, chk_follow, chk_fix, lbl_status, _attack_follow, _attack_fix
+    global running, ser, root, chk_follow, chk_fix, chk_force_fix, lbl_status, _attack_follow, _attack_fix, _force_fix
     running = False; time.sleep(0.05)
     _attack_follow = False
     _attack_fix = False
+    _force_fix = False
     if root:
         if chk_follow and chk_follow.get():
             if ser and ser.is_open:
@@ -3598,6 +3645,8 @@ def stop_everything(reason="💤 대기 중"):
                 try: time.sleep(0.05); ser.write(b'R'); ser.write(b'U'); time.sleep(0.1)
                 except: pass
             root.after(0, lambda: chk_fix.set(False))
+        if chk_force_fix and chk_force_fix.get():
+            root.after(0, lambda: chk_force_fix.set(False))
         if lbl_status: root.after(0, lambda: lbl_status.configure(text=reason, text_color="#f38ba8"))
     if ser and ser.is_open:
         try: time.sleep(0.05); ser.write(b'R'); ser.write(b'U'); time.sleep(0.1)
@@ -3715,12 +3764,14 @@ def _sync_attack_mode_ui(mode):
         else:
             chk_follow.set(False)
             chk_fix.set(True)
+            if chk_force_fix:
+                chk_force_fix.set(False)
     except Exception:
         pass
 
 def _apply_attack_mode(mode):
     """mode='follow' 따라가기 ON / mode='fix' 클릭·시프트 전부 OFF."""
-    global ser, running, root, chk_follow, chk_fix, _attack_follow, _attack_fix, _fix_hw_shift_on
+    global ser, running, root, chk_follow, chk_fix, _attack_follow, _attack_fix, _fix_hw_shift_on, _force_fix
     if not running or not ser or not getattr(ser, "is_open", False):
         return
     if mode == 'follow':
@@ -3730,6 +3781,8 @@ def _apply_attack_mode(mode):
     else:
         _attack_follow = False
         _attack_fix = True
+        _force_fix = False
+        _fix_hw_shift_on = False
     try:
         if root:
             root.after(0, lambda m=mode: _sync_attack_mode_ui(m))
@@ -3741,6 +3794,33 @@ def _apply_attack_mode(mode):
                 _ser_follow_click()
             else:
                 _ser_fix_shift()
+    except Exception:
+        return
+
+def _sync_force_fix_ui(on):
+    try:
+        if root and chk_force_fix:
+            chk_force_fix.set(bool(on))
+    except Exception:
+        pass
+
+def _apply_force_fix(on):
+    """PageUp 강제고정 — 시프트 제자리공격 ON/OFF."""
+    global _force_fix, _fix_hw_shift_on
+    if not running or not ser or not getattr(ser, "is_open", False):
+        return
+    _force_fix = bool(on)
+    try:
+        if root:
+            root.after(0, lambda v=on: _sync_force_fix_ui(v))
+    except Exception:
+        pass
+    try:
+        with _attack_ser_lock:
+            if _force_fix:
+                _ser_force_fix_on()
+            else:
+                _ser_force_fix_off()
     except Exception:
         return
 
@@ -3758,6 +3838,21 @@ def on_home_click_toggle(e=None):
     else:
         _apply_attack_mode('follow')
         log_event("🖱️ 따라가기 ON")
+
+def on_pageup_force_fix(e=None):
+    """PageUp — 강제고정(시프트 제자리공격) 토글."""
+    global debounce, running
+    if time.time() - debounce.get('pageup', 0) < 0.15:
+        return
+    debounce['pageup'] = time.time()
+    if not running:
+        return
+    if _force_fix:
+        _apply_force_fix(False)
+        log_event("📌 강제고정 OFF")
+    else:
+        _apply_force_fix(True)
+        log_event("📌 강제고정 ON (시프트 제자리)")
 
 def on_f4_toggle(e=None):
     global debounce, chk_loot, root, last_loot_sent_time
@@ -5206,6 +5301,7 @@ keep_on_top()
 
 chk_fix = ctk.BooleanVar(value=False)
 chk_follow = ctk.BooleanVar(value=False)
+chk_force_fix = ctk.BooleanVar(value=False)
 chk_space_save = ctk.BooleanVar(value=False) 
 mode_var = ctk.StringVar(value="노파티")
 chk_buff_on = ctk.BooleanVar(value=saved_buff_on in ("1", "true", "True"))
@@ -5356,12 +5452,23 @@ def _on_follow_sw():
         _apply_attack_mode('fix')
         log_event("📌 고정 (클릭 OFF)")
 
-RoundedToggle(frame_opt, "고정", "#a371f7", var=chk_fix, cmd=_on_fix_sw).grid(row=0, column=0, padx=3, pady=2, sticky="w")
+def _on_force_fix_sw():
+    if not running:
+        return
+    if chk_force_fix.get():
+        _apply_force_fix(True)
+        log_event("📌 강제고정 ON (시프트 제자리)")
+    else:
+        _apply_force_fix(False)
+        log_event("📌 강제고정 OFF")
+
+RoundedToggle(frame_opt, "고정(Home)", "#a371f7", var=chk_fix, cmd=_on_fix_sw).grid(row=0, column=0, padx=3, pady=2, sticky="w")
 RoundedToggle(frame_opt, "따라가기(Home)", "#a371f7", var=chk_follow, cmd=_on_follow_sw).grid(row=0, column=1, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: log_event(f"☠️ 독해독 {'ON' if chk_poison.get() else 'OFF'}")).grid(row=1, column=0, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=1, column=1, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=lambda: log_event(f"💚 파티해독 {'ON' if chk_party_poison.get() else 'OFF'}")).grid(row=2, column=0, padx=3, pady=2, sticky="w")
-RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=2, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "강제고정(PageUp)", "#a371f7", var=chk_force_fix, cmd=_on_force_fix_sw).grid(row=1, column=0, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "독 해독", "#a371f7", var=chk_poison, cmd=lambda: log_event(f"☠️ 독해독 {'ON' if chk_poison.get() else 'OFF'}")).grid(row=1, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "격수 해독", "#a371f7", var=chk_target_poison, cmd=lambda: log_event(f"⚔️ 격수해독 {'ON' if chk_target_poison.get() else 'OFF'}")).grid(row=2, column=0, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "파티 해독", "#a371f7", var=chk_party_poison, cmd=lambda: log_event(f"💚 파티해독 {'ON' if chk_party_poison.get() else 'OFF'}")).grid(row=2, column=1, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "줍기(F4)", "#a371f7", var=chk_loot, cmd=lambda: log_event(f"🎒 줍기 {'ON' if chk_loot.get() else 'OFF'}")).grid(row=3, column=0, padx=3, pady=2, sticky="w")
 chk_end_bert = ctk.BooleanVar(value=saved_chk_end_bert in ("1", "true", "True"))
 def _on_end_bert_sw():
     log_event(f"🏃 강제베르 {'ON' if chk_end_bert.get() else 'OFF'}")
@@ -5369,7 +5476,7 @@ def _on_end_bert_sw():
         save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception:
         pass
-RoundedToggle(frame_opt, "강제베르(end)", "#f9e2af", var=chk_end_bert, cmd=_on_end_bert_sw).grid(row=3, column=0, padx=3, pady=2, sticky="w")
+RoundedToggle(frame_opt, "강제베르(end)", "#f9e2af", var=chk_end_bert, cmd=_on_end_bert_sw).grid(row=3, column=1, padx=3, pady=2, sticky="w")
 chk_wheel_heal = ctk.BooleanVar(value=saved_chk_wheel_heal in ("1", "true", "True"))
 def _on_wheel_heal_sw():
     if not _fw_wdt4:
@@ -5383,7 +5490,7 @@ def _on_wheel_heal_sw():
     except Exception:
         pass
 toggle_wheel_heal = RoundedToggle(frame_opt, "휠힐(항상ON)", "#a371f7", var=chk_wheel_heal, cmd=_on_wheel_heal_sw)
-toggle_wheel_heal.grid(row=3, column=1, padx=3, pady=2, sticky="w")
+toggle_wheel_heal.grid(row=4, column=0, padx=3, pady=2, sticky="w")
 try:
     root.after(200, _apply_wheel_heal_ui)
 except Exception:
@@ -6087,6 +6194,7 @@ def toggle_gui(e=None):
 keyboard.on_release_key('delete', toggle_gui) 
 keyboard.on_release_key('space', on_space_save) 
 keyboard.on_release_key('home', on_home_click_toggle)
+keyboard.on_release_key('page up', on_pageup_force_fix)
 keyboard.on_release_key('insert', on_main_toggle)
 keyboard.on_release_key('end', on_end_bert)
 keyboard.on_release_key('f4', on_f4_toggle)
