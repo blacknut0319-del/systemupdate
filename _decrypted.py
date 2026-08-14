@@ -785,10 +785,12 @@ class KmBox:
                 try: kmNet.keyup(self.SHIFT)
                 except: pass
             return
-        if cmd == 'H':                             # Shift 누름 유지 (고정) — 자동클릭 없음
+        if cmd == 'H':                             # 고정 — 시프트만, 클릭 OFF
             self._auto = False
             with self._lk:
-                try: kmNet.keydown(self.SHIFT)
+                try:
+                    kmNet.left(0)
+                    kmNet.keydown(self.SHIFT)
                 except: pass
             return
         if cmd == 'R':                             # Shift 뗌 + 자동클릭 OFF
@@ -797,8 +799,11 @@ class KmBox:
                 except: pass
             self._auto = False
             return
-        if cmd == 'T':                             # 자동클릭 토글
-            self._auto = not self._auto
+        if cmd == 'T':                             # 따라가기 — 클릭만, 시프트 OFF
+            with self._lk:
+                try: kmNet.keyup(self.SHIFT)
+                except: pass
+            self._auto = True
             return
         if cmd == 'A':                             # F9
             self._human_press(0x42); return
@@ -947,7 +952,7 @@ def _user_keys_passthrough_worker():
     was_down = {vk: False for vk in _USER_PASS_VKS}
     while timer_thread_active:
         try:
-            if running and chk_fix and chk_fix.get():
+            if running and _attack_fix:
                 if time.time() < _fix_shift_macro_until:
                     time.sleep(0.02)
                     continue
@@ -991,6 +996,9 @@ sheet_expire_end = ""    # 구글시트 D열 (만료일)
 root = None
 chk_fix = None
 chk_follow = None
+_attack_follow = False  # 펌웨어 무한클릭 ON. Home/힐 resume 은 chk_follow 대신 이거 봄
+_attack_fix = False     # 고정(Shift). 키보드 후킹 스레드에서 chk_*.get() 이 엇갈리면 클릭이 다시 켜짐
+_attack_ser_lock = Lock()  # Home(U+H) 과 힐 resume(U+T) 이 섞이면 시프트+클릭이 됨
 chk_space_save = None
 mode_var = None
 chk_poison = None
@@ -2949,6 +2957,22 @@ def human_mouse_move(tx, ty, fast=False, roi=None, remote=False):
             except: break
             time.sleep(human_delay(*step_sleep))
 
+def _ser_follow_click():
+    """따라가기 — 옛 펌웨어 T는 토글이라 반드시 U 다음 T. 시프트는 R+U로 먼저 뗌."""
+    ser.write(b'R')
+    time.sleep(0.03)
+    ser.write(b'U')
+    time.sleep(0.05)
+    ser.write(b'T')
+    time.sleep(0.06)
+
+def _ser_fix_shift():
+    """고정 — 클릭 끄고(U) 시프트만(H). T를 뒤에 넣으면 시프트+클릭이 됨."""
+    ser.write(b'U')
+    time.sleep(0.05)
+    ser.write(b'H')
+    time.sleep(0.04)
+
 def _suspend_fix_shift_restore(sec=1.8):
     """고정 매크로/힐 동안 백그라운드 워커가 H(Shift)를 다시 누르지 않게."""
     global _fix_shift_hold_off_until, _fix_shift_macro_until
@@ -2959,27 +2983,34 @@ def _suspend_fix_shift_restore(sec=1.8):
 def _fix_shift_down():
     """고정 — 아두이노/박스 Shift 누름 유지 (H). PC keyboard 쓰면 힐·단축키 안 먹음."""
     global _fix_shift_hold_off_until
+    if not _attack_fix or _attack_follow:
+        return
     if time.time() < _fix_shift_hold_off_until:
         return
-    if ser and getattr(ser, "is_open", False):
-        try:
+    if not ser or not getattr(ser, "is_open", False):
+        return
+    try:
+        with _attack_ser_lock:
+            if not _attack_fix or _attack_follow:
+                return
             ser.write(b'H')
             time.sleep(0.04)
-        except Exception:
-            pass
+    except Exception:
+        pass
 
 def _fix_shift_up():
     """고정 해제 — 아두이노/박스 Shift 뗌 (R)."""
     if ser and getattr(ser, "is_open", False):
         try:
-            ser.write(b'R')
-            time.sleep(0.03)
+            with _attack_ser_lock:
+                ser.write(b'R')
+                time.sleep(0.03)
         except Exception:
             pass
 
 def attack_click_active():
     """무한클릭(따라가기) 중일 때만 True. 고정은 Shift만(클릭 없음)."""
-    return bool(chk_follow and chk_follow.get())
+    return bool(_attack_follow)
 
 def _buff_target_click():
     """버프 대상 지정 — 클릭 꺼져 있을 때만 K(좌클릭). 휠(M)은 힐 전용."""
@@ -2993,17 +3024,18 @@ def _buff_target_click():
 
 def _pause_attack_click():
     """고정(Shift) / 따라가기(클릭) 잠시 해제. 복구용 상태 반환."""
-    was_fixed = bool(chk_fix and chk_fix.get())
-    was_follow = bool(chk_follow and chk_follow.get()) and not was_fixed
+    was_fixed = bool(_attack_fix)
+    was_follow = bool(_attack_follow) and not was_fixed
     if not ser or not getattr(ser, "is_open", False):
         return False, False
     try:
-        if was_fixed:
-            _suspend_fix_shift_restore(1.2)
-            ser.write(b'R'); time.sleep(0.05)
-            ser.write(b'U'); time.sleep(0.05)
-        elif was_follow:
-            ser.write(b'U'); time.sleep(0.05)
+        with _attack_ser_lock:
+            if was_fixed:
+                _suspend_fix_shift_restore(1.2)
+                ser.write(b'R'); time.sleep(0.05)
+                ser.write(b'U'); time.sleep(0.05)
+            elif was_follow:
+                ser.write(b'U'); time.sleep(0.05)
     except Exception:
         return False, False
     return was_fixed, was_follow
@@ -3012,11 +3044,14 @@ def _resume_attack_click(was_fixed, was_follow):
     if not ser or not getattr(ser, "is_open", False):
         return
     try:
-        if was_fixed and chk_fix and chk_fix.get():
-            ser.write(b'H'); time.sleep(0.04)
-        elif was_follow and chk_follow and chk_follow.get() and not (chk_fix and chk_fix.get()):
-            ser.write(b'U'); time.sleep(0.05)
-            ser.write(b'T'); time.sleep(0.06)
+        with _attack_ser_lock:
+            # 힐 중에 Home 으로 고정 바뀌면 T 를 보내면 시프트+클릭이 됨. 지금 플래그만 본다.
+            if _attack_fix:
+                ser.write(b'H'); time.sleep(0.04)
+            elif _attack_follow:
+                _ser_follow_click()
+            else:
+                ser.write(b'U')
     except Exception:
         pass
 
@@ -3053,7 +3088,7 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False, key_gap=None):
 
 def fix_mode_keys(keys, delay=0.5):
     """고정 중 해독 등 — 옛 fix_mode_keys 와 동일 (U→키→H)."""
-    if chk_fix and chk_fix.get() and ser and getattr(ser, "is_open", False):
+    if _attack_fix and ser and getattr(ser, "is_open", False):
         _suspend_fix_shift_restore(1.0)
         try:
             ser.write(b'R'); time.sleep(0.05)
@@ -3061,9 +3096,11 @@ def fix_mode_keys(keys, delay=0.5):
         except Exception:
             pass
     execute_keys(keys, delay, skip_follow_toggle=True)
-    if chk_fix and chk_fix.get() and ser and getattr(ser, "is_open", False):
+    if _attack_fix and ser and getattr(ser, "is_open", False):
         try:
-            ser.write(b'H'); time.sleep(0.04)
+            with _attack_ser_lock:
+                if _attack_fix and not _attack_follow:
+                    ser.write(b'H'); time.sleep(0.04)
         except Exception:
             pass
 
@@ -3093,7 +3130,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 23:01"
+PATCH_UPDATED_AT = "2026-08-14 23:35"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3543,8 +3580,10 @@ def on_end_bert(e=None):
     Thread(target=do_manual_bert, daemon=True).start()
 
 def stop_everything(reason="💤 대기 중"):
-    global running, ser, root, chk_follow, chk_fix, lbl_status
-    running = False; time.sleep(0.05) 
+    global running, ser, root, chk_follow, chk_fix, lbl_status, _attack_follow, _attack_fix
+    running = False; time.sleep(0.05)
+    _attack_follow = False
+    _attack_fix = False
     if root:
         if chk_follow and chk_follow.get():
             if ser and ser.is_open:
@@ -3663,38 +3702,54 @@ def on_space_save(e=None):
         except: r, g, b = 0, 0, 0
         with open(COORD_FILE, 'a', encoding='utf-8') as f: f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{cx},{cy},{r},{g},{b}\n") 
 
-def _apply_attack_mode(mode):
-    """mode='follow' 따라가기 ON / mode='fix' 고정(Shift만, 클릭 OFF)."""
-    global ser, running, root, chk_follow, chk_fix
-    if not running or not ser or not getattr(ser, "is_open", False):
-        return
-    # UI 먼저 갱신 — 힐 직후 resume이 T로 클릭 다시 켜는 레이스 방지
-    if root:
+def _sync_attack_mode_ui(mode):
+    try:
+        if not root:
+            return
         if mode == 'follow':
             chk_fix.set(False)
             chk_follow.set(True)
         else:
             chk_follow.set(False)
             chk_fix.set(True)
+    except Exception:
+        pass
+
+def _apply_attack_mode(mode):
+    """mode='follow' 따라가기 ON / mode='fix' 고정(Shift만, 클릭 OFF)."""
+    global ser, running, root, chk_follow, chk_fix, _attack_follow, _attack_fix
+    if not running or not ser or not getattr(ser, "is_open", False):
+        return
+    # 플래그를 시리얼보다 먼저 — 힐 resume 이 옛 chk_follow 를 보고 T 를 다시 켜지 않게
+    if mode == 'follow':
+        _attack_fix = False
+        _attack_follow = True
+    else:
+        _attack_follow = False
+        _attack_fix = True
     try:
-        if mode == 'follow':
-            ser.write(b'U'); time.sleep(0.05)
-            ser.write(b'T'); time.sleep(0.06)
-        else:
-            ser.write(b'U'); time.sleep(0.05)
-            ser.write(b'H'); time.sleep(0.04)
+        if root:
+            root.after(0, lambda m=mode: _sync_attack_mode_ui(m))
+    except Exception:
+        pass
+    try:
+        with _attack_ser_lock:
+            if mode == 'follow':
+                _ser_follow_click()
+            else:
+                _ser_fix_shift()
     except Exception:
         return
 
 def on_home_click_toggle(e=None):
     """Home — 따라가기 ↔ 고정(제자리, 클릭 없음) 토글. Insert는 시작/종료만."""
-    global debounce, running, chk_follow
+    global debounce, running
     if time.time() - debounce['caps'] < 0.15:
         return
     debounce['caps'] = time.time()
     if not running:
         return
-    if chk_follow and chk_follow.get():
+    if _attack_follow:
         _apply_attack_mode('fix')
         log_event("📌 고정 (클릭 OFF)")
     else:
@@ -5946,7 +6001,7 @@ def udp_macro_slot(n):
     try:
         key = UDP_SLOT_KEYS.get(n, '5')
         time.sleep(0.02)
-        is_fixed = chk_fix.get() if chk_fix else False
+        is_fixed = bool(_attack_fix)
         if is_fixed:
             _suspend_fix_shift_restore(1.8)
             ser.write(b'R'); time.sleep(0.10)
@@ -5954,8 +6009,9 @@ def udp_macro_slot(n):
         ser.write(key.encode()); time.sleep(0.15)
         ser.write(b'K'); time.sleep(0.10)
         ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
-        if is_fixed:
-            ser.write(b'H'); time.sleep(0.05)
+        if is_fixed and _attack_fix and not _attack_follow:
+            with _attack_ser_lock:
+                ser.write(b'H'); time.sleep(0.05)
     except: pass
 def udp_listener():
     """격수모니터 → 뚱힐러 UDP 수신 (포트 9999).
