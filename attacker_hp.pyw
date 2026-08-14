@@ -88,7 +88,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-14 22:54"
+PATCH_UPDATED_AT = "2026-08-14 23:01"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -716,11 +716,25 @@ except Exception as e:
 _attacker_startup_sync()
 
 root = tk.Tk()
-root.overrideredirect(True)
 root.geometry("%dx%d+80+80" % (WIN_W, WIN_H))
 root.attributes("-topmost", True)
 root.configure(bg="#0d0f14")  # header UI v14 - final - CDN refresh
+root.overrideredirect(True)
 _set_taskmgr_title(root, SOOPLIVE_SERVICE_TITLE)
+
+def _force_show_root(_e=None):
+    """일부 PC에서 overrideredirect 창이 안 그려지는 것 방지. 뚱힐러와 같이 맵된 뒤에 표시."""
+    try:
+        root.geometry("%dx%d+80+80" % (WIN_W, WIN_H))
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        hid = int(root.winfo_id())
+        hwnd = ctypes.windll.user32.GetParent(hid) or hid
+        ctypes.windll.user32.ShowWindow(int(hwnd), 9)
+        ctypes.windll.user32.SetWindowPos(int(hwnd), -1, 80, 80, int(WIN_W), int(WIN_H), 0x0040)
+    except Exception as e:
+        _log_update_err("show", e)
 
 # ── 헤더바 ──
 header = tk.Frame(root, bg="#141420", height=24)
@@ -1357,6 +1371,8 @@ def _upd_periodic():
 root.after(15000, lambda: threading.Thread(target=lambda: check_for_update(force=True), daemon=True).start())
 root.after(615000, _upd_periodic)
 root.after(2000, lambda: threading.Thread(target=_check_update_stuck_on_boot, daemon=True).start())
+_force_show_root()
+root.after(200, _force_show_root)
 
 try:
     root.mainloop()
