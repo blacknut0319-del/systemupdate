@@ -7,6 +7,18 @@ import sys, os, subprocess
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 UPDATE_LOG_FILE = os.path.join(SCRIPT_DIR, "attacker_update.log")
+_BOOT_FLAG = os.path.join(SCRIPT_DIR, "attacker_boot.flag")
+try:
+    with open(UPDATE_LOG_FILE, "a", encoding="utf-8") as _bf:
+        _bf.write("boot %s exe=%s file=%s\n" % (
+            __import__("time").strftime("%Y-%m-%d %H:%M:%S"),
+            sys.executable,
+            os.path.abspath(__file__),
+        ))
+    with open(_BOOT_FLAG, "w", encoding="utf-8") as _bf:
+        _bf.write("1")
+except Exception:
+    pass
 
 def _startup_fatal(msg):
     try:
@@ -37,7 +49,7 @@ def _pip_python_exe():
             return p
     return exe
 
-for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard"),("win32gui","pywin32"),("cv2","opencv-python")]:
+for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard")]:
     try:
         __import__(mod)
     except Exception:
@@ -59,8 +71,6 @@ from PIL import Image, ImageTk
 import mss
 import keyboard
 import ctypes
-import win32gui
-import cv2
 
 def _sys_excepthook(typ, val, tb):
     try:
@@ -78,7 +88,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-14 22:41"
+PATCH_UPDATED_AT = "2026-08-14 22:54"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -1011,6 +1021,7 @@ def _stream_tcp_loop():
                 if not raw:
                     break
                 try:
+                    import cv2
                     arr = np.frombuffer(raw, dtype=np.uint8)
                     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if frame is None:
