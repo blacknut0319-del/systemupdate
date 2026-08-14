@@ -37,7 +37,7 @@ def _pip_python_exe():
             return p
     return exe
 
-for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard"),("win32gui","pywin32"),("cv2","opencv-python-headless")]:
+for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard"),("win32gui","pywin32"),("cv2","opencv-python")]:
     try:
         __import__(mod)
     except Exception:
@@ -62,7 +62,7 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 21:14"
+PATCH_UPDATED_AT = "2026-08-14 21:21"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -131,6 +131,9 @@ WIN_W = 340
 WIN_H = 420
 _WIN_MIN_W, _WIN_MAX_W = 240, 520
 _WIN_MIN_H, _WIN_MAX_H = 120, 900
+STREAM_WIN_W = 640
+STREAM_WIN_H = 480
+STREAM_HAS_SAVED = False
 END_BERT_ON = False
 
 if os.path.exists(CONFIG_FILE):
@@ -147,6 +150,13 @@ if os.path.exists(CONFIG_FILE):
         if "win_h" in cfg:
             try: WIN_H = max(_WIN_MIN_H, min(_WIN_MAX_H, int(cfg["win_h"])))
             except Exception: pass
+        if "stream_win_w" in cfg and "stream_win_h" in cfg:
+            try:
+                STREAM_WIN_W = max(320, min(1920, int(cfg["stream_win_w"])))
+                STREAM_WIN_H = max(240, min(1080, int(cfg["stream_win_h"])))
+                STREAM_HAS_SAVED = True
+            except Exception:
+                pass
         if "end_bert" in cfg:
             END_BERT_ON = bool(cfg.get("end_bert"))
     except: pass
@@ -782,6 +792,8 @@ def save_cfg():
     cfg["hp_roi"] = tuple(int(v) for v in HP_ROI)
     cfg["win_w"] = WIN_W
     cfg["win_h"] = WIN_H
+    cfg["stream_win_w"] = STREAM_WIN_W
+    cfg["stream_win_h"] = STREAM_WIN_H
     cfg["end_bert"] = bool(end_bert_var.get())
     if HP_100_REF is not None:
         cfg["hp_100_ref"] = HP_100_REF
@@ -860,20 +872,51 @@ lbl_stream_status = None
 stream_view_img_rect = (0, 0, 1, 1)
 _stream_last_mm = 0.0
 _stream_src_size = (0, 0)
+_stream_manual_size = False
+_stream_auto_done = False
+_stream_last_frame = None
 _STREAM_HDR_H = 26
 _STREAM_PAD = 8
+_STREAM_EDGE = 6
+_STREAM_MIN_W, _STREAM_MAX_W = 320, 1920
+_STREAM_MIN_H, _STREAM_MAX_H = 240, 1080
 
-def _stream_display_size(iw, ih):
-    """쫄화면 창을 송출 비율에 맞게 자동 리사이즈."""
-    global stream_view_win, _stream_src_size
+def _save_stream_size():
+    global STREAM_WIN_W, STREAM_WIN_H, STREAM_HAS_SAVED
+    if not stream_view_win or not stream_view_win.winfo_exists():
+        return
+    STREAM_WIN_W = max(_STREAM_MIN_W, min(_STREAM_MAX_W, stream_view_win.winfo_width()))
+    STREAM_WIN_H = max(_STREAM_MIN_H, min(_STREAM_MAX_H, stream_view_win.winfo_height()))
+    STREAM_HAS_SAVED = True
+    cfg = {}
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            pass
+        try:
+            ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 128)
+        except Exception:
+            pass
+    cfg["stream_win_w"] = STREAM_WIN_W
+    cfg["stream_win_h"] = STREAM_WIN_H
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+    os.replace(tmp, CONFIG_FILE)
+    try:
+        ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 2)
+    except Exception:
+        pass
+
+def _stream_auto_fit_window(iw, ih):
+    """첫 송출 프레임에만 창 크기 자동 맞춤 (저장된 크기·수동 조절 후엔 안 함)."""
+    global stream_view_win, _stream_auto_done
+    if _stream_manual_size or _stream_auto_done or STREAM_HAS_SAVED:
+        return
     if not stream_view_win or not stream_view_win.winfo_exists() or iw < 1 or ih < 1:
-        return max(1, iw), max(1, ih)
-    if _stream_src_size == (iw, ih):
-        lw = max(stream_view_label.winfo_width(), 1)
-        lh = max(stream_view_label.winfo_height(), 1)
-        if lw > 1 and lh > 1:
-            return lw, lh
-    _stream_src_size = (iw, ih)
+        return
     chrome_y = _STREAM_HDR_H + _STREAM_PAD
     max_w = int(stream_view_win.winfo_screenwidth() * 0.88) - _STREAM_PAD
     max_h = int(stream_view_win.winfo_screenheight() * 0.88) - chrome_y
@@ -884,7 +927,106 @@ def _stream_display_size(iw, ih):
     x, y = stream_view_win.winfo_x(), stream_view_win.winfo_y()
     stream_view_win.geometry("%dx%d+%d+%d" % (ww, wh, x, y))
     stream_view_win.update_idletasks()
-    return cw, ch
+    _stream_auto_done = True
+
+def _render_stream_frame(pil_img, fiw, fih):
+    """라벨 크기에 맞춰 프레임 표시 (수동 리사이즈 반영)."""
+    global stream_view_photo, stream_view_img_rect, _stream_src_size, _stream_last_frame
+    if not stream_view_label or not stream_view_label.winfo_exists():
+        return
+    _stream_last_frame = (pil_img, fiw, fih)
+    if _stream_src_size != (fiw, fih):
+        _stream_src_size = (fiw, fih)
+        _stream_auto_fit_window(fiw, fih)
+    stream_view_label.update_idletasks()
+    lw = max(stream_view_label.winfo_width(), 1)
+    lh = max(stream_view_label.winfo_height(), 1)
+    scale = min(lw / max(fiw, 1), lh / max(fih, 1))
+    nw = max(1, int(fiw * scale))
+    nh = max(1, int(fih * scale))
+    disp = pil_img.resize((nw, nh), Image.Resampling.BILINEAR) if (nw != fiw or nh != fih) else pil_img
+    stream_view_photo = ImageTk.PhotoImage(disp)
+    ox = (lw - nw) // 2
+    oy = (lh - nh) // 2
+    stream_view_img_rect = (ox, oy, nw, nh)
+    stream_view_label.configure(image=stream_view_photo, text="")
+
+def _stream_refresh_last_frame():
+    if _stream_last_frame:
+        pil_img, fiw, fih = _stream_last_frame
+        _render_stream_frame(pil_img, fiw, fih)
+
+def _attach_stream_resize(win):
+    """모서리·가장자리 드래그로 창 크기 조절 (브라우저처럼)."""
+    specs = [
+        ("n",  0.0, 0.0, 1.0, 0, "sb_v_double_arrow"),
+        ("s",  0.0, 1.0, 1.0, 0, "sb_v_double_arrow"),
+        ("e",  1.0, 0.0, 0, 1.0, "sb_h_double_arrow"),
+        ("w",  0.0, 0.0, 0, 1.0, "sb_h_double_arrow"),
+        ("nw", 0.0, 0.0, 0, 0, "top_left_corner"),
+        ("ne", 1.0, 0.0, 0, 0, "top_right_corner"),
+        ("sw", 0.0, 1.0, 0, 0, "bottom_left_corner"),
+        ("se", 1.0, 1.0, 0, 0, "bottom_right_corner"),
+    ]
+    edge = _STREAM_EDGE
+
+    def _start(edge_id, e):
+        global _stream_manual_size
+        _stream_manual_size = True
+        win._rs = {
+            "edge": edge_id,
+            "x": e.x_root,
+            "y": e.y_root,
+            "wx": win.winfo_x(),
+            "wy": win.winfo_y(),
+            "ww": win.winfo_width(),
+            "wh": win.winfo_height(),
+        }
+
+    def _move(e):
+        rs = getattr(win, "_rs", None)
+        if not rs:
+            return
+        dx = e.x_root - rs["x"]
+        dy = e.y_root - rs["y"]
+        x, y, w, h = rs["wx"], rs["wy"], rs["ww"], rs["wh"]
+        edge_id = rs["edge"]
+        if "w" in edge_id:
+            nw = max(_STREAM_MIN_W, min(_STREAM_MAX_W, w - dx))
+            x = x + (w - nw)
+            w = nw
+        elif "e" in edge_id:
+            w = max(_STREAM_MIN_W, min(_STREAM_MAX_W, w + dx))
+        if "n" in edge_id:
+            nh = max(_STREAM_MIN_H, min(_STREAM_MAX_H, h - dy))
+            y = y + (h - nh)
+            h = nh
+        elif "s" in edge_id:
+            h = max(_STREAM_MIN_H, min(_STREAM_MAX_H, h + dy))
+        win.geometry("%dx%d+%d+%d" % (int(w), int(h), int(x), int(y)))
+        _stream_refresh_last_frame()
+
+    def _end(e):
+        global _stream_auto_done
+        _stream_auto_done = True
+        if hasattr(win, "_rs"):
+            del win._rs
+        _save_stream_size()
+        _stream_refresh_last_frame()
+
+    for edge_id, rx, ry, rw, rh, cursor in specs:
+        if rw:
+            wcfg = {"relx": rx, "rely": ry, "relwidth": rw, "height": edge}
+        elif rh:
+            wcfg = {"relx": rx, "rely": ry, "width": edge, "relheight": rh}
+        else:
+            wcfg = {"relx": rx, "rely": ry, "width": edge, "height": edge, "anchor": edge_id}
+        grip = tk.Frame(win, bg="#0f172a", cursor=cursor)
+        grip.place(**wcfg)
+        grip.bind("<ButtonPress-1>", lambda e, eid=edge_id: _start(eid, e))
+        grip.bind("<B1-Motion>", _move)
+        grip.bind("<ButtonRelease-1>", _end)
+        grip.lift()
 _STREAM_MM_INTERVAL = 0.04
 
 def _alt_held():
@@ -985,17 +1127,7 @@ def _stream_tcp_loop():
                     fiw, fih = pil.size
 
                     def _upd(pil_img=pil, fiw=fiw, fih=fih):
-                        global stream_view_photo, stream_view_img_rect
-                        if not stream_view_label or not stream_view_label.winfo_exists():
-                            return
-                        cw, ch = _stream_display_size(fiw, fih)
-                        if cw != fiw or ch != fih:
-                            disp = pil_img.resize((cw, ch), Image.Resampling.BILINEAR)
-                        else:
-                            disp = pil_img
-                        stream_view_photo = ImageTk.PhotoImage(disp)
-                        stream_view_img_rect = (0, 0, cw, ch)
-                        stream_view_label.configure(image=stream_view_photo, text="")
+                        _render_stream_frame(pil_img, fiw, fih)
 
                     root.after(0, _upd)
                 except Exception:
@@ -1027,9 +1159,14 @@ def toggle_stream_send():
         lbl_status.config(text="전송 실패", fg="#ef4444")
 
 def close_stream_view():
-    global stream_view_active, stream_view_win, stream_view_sock, _stream_src_size
+    global stream_view_active, stream_view_win, stream_view_sock, _stream_src_size, _stream_manual_size, _stream_auto_done, _stream_last_frame
+    if stream_view_win and stream_view_win.winfo_exists():
+        _save_stream_size()
     stream_view_active = False
     _stream_src_size = (0, 0)
+    _stream_manual_size = False
+    _stream_auto_done = False
+    _stream_last_frame = None
     try:
         if stream_view_sock:
             stream_view_sock.close()
@@ -1041,15 +1178,19 @@ def close_stream_view():
     stream_view_win = None
 
 def toggle_stream_view():
-    global stream_view_active, stream_view_win, stream_view_label, lbl_stream_status, _stream_src_size
+    global stream_view_active, stream_view_win, stream_view_label, lbl_stream_status
+    global _stream_src_size, _stream_manual_size, _stream_auto_done, _stream_last_frame
     if stream_view_win and stream_view_win.winfo_exists():
         close_stream_view()
         btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")
         return
     _stream_src_size = (0, 0)
+    _stream_manual_size = False
+    _stream_auto_done = False
+    _stream_last_frame = None
     stream_view_win = tk.Toplevel(root)
     stream_view_win.title(SOOPLIVE_STREAM_TITLE)
-    stream_view_win.geometry("640x480")
+    stream_view_win.geometry("%dx%d+120+80" % (STREAM_WIN_W, STREAM_WIN_H))
     stream_view_win.attributes("-topmost", True)
     stream_view_win.configure(bg="#0f172a")
     stream_view_win.overrideredirect(True)
@@ -1094,6 +1235,8 @@ def toggle_stream_view():
     for w in (stream_view_win, stream_view_label):
         for ev, fn in _stream_binds:
             w.bind(ev, fn)
+
+    _attach_stream_resize(stream_view_win)
 
     btn_stream_view.config(text="📺 닫기", bg="#ef4444")
     stream_view_active = True
