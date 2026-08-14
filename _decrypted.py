@@ -2958,7 +2958,9 @@ def human_mouse_move(tx, ty, fast=False, roi=None, remote=False):
             time.sleep(human_delay(*step_sleep))
 
 def _ser_follow_click():
-    """따라가기 — 옛 펌웨어 T는 토글이라 반드시 U 다음 T. 시프트는 R+U로 먼저 뗌."""
+    """따라가기 클릭 ON. 고정이면 T 금지 — 옛 펌웨어는 H 다음 T 가 시프트+클릭."""
+    if (not _attack_follow) or _attack_fix:
+        return
     ser.write(b'R')
     time.sleep(0.03)
     ser.write(b'U')
@@ -2967,7 +2969,9 @@ def _ser_follow_click():
     time.sleep(0.06)
 
 def _ser_fix_shift():
-    """고정 — 클릭 끄고(U) 시프트만(H). T를 뒤에 넣으면 시프트+클릭이 됨."""
+    """따라가기 끄고 시프트만. U=클릭OFF, H=시프트."""
+    ser.write(b'U')
+    time.sleep(0.08)
     ser.write(b'U')
     time.sleep(0.05)
     ser.write(b'H')
@@ -3047,7 +3051,7 @@ def _resume_attack_click(was_fixed, was_follow):
         with _attack_ser_lock:
             # 힐 중에 Home 으로 고정 바뀌면 T 를 보내면 시프트+클릭이 됨. 지금 플래그만 본다.
             if _attack_fix:
-                ser.write(b'H'); time.sleep(0.04)
+                _ser_fix_shift()
             elif _attack_follow:
                 _ser_follow_click()
             else:
@@ -3130,7 +3134,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 23:35"
+PATCH_UPDATED_AT = "2026-08-15 00:15"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3751,7 +3755,7 @@ def on_home_click_toggle(e=None):
         return
     if _attack_follow:
         _apply_attack_mode('fix')
-        log_event("📌 고정 (클릭 OFF)")
+        log_event("📌 고정 (시프트만, 따라가기 끄기)")
     else:
         _apply_attack_mode('follow')
         log_event("🖱️ 따라가기 ON")
