@@ -18,7 +18,7 @@ import ctypes
 import win32gui
 import cv2
 
-PATCH_UPDATED_AT = "2026-08-14 13:51"
+PATCH_UPDATED_AT = "2026-08-14 14:10"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"

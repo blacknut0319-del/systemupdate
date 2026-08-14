@@ -463,6 +463,8 @@ def cast_buff(hb_label, slot_label):
     need_click = not attack_click_active()
     if need_click:
         was_fixed, was_follow = _pause_attack_click()
+        if was_fixed:
+            _suspend_fix_shift_restore(1.2)
         try:
             focus_lineage_window()
             time.sleep(0.02)
@@ -914,6 +916,7 @@ debounce = {'caps': 0, 'tab': 0, 'main': 0, 'space': 0, 'f4': 0}
 last_typing_time = 0.0
 TYPING_PAUSE_SEC = 1.5
 _fix_shift_hold_off_until = 0.0   # 고정 중 Tab 등 사용자 키 누를 때 Shift 잠깐 해제
+_fix_shift_macro_until = 0.0      # 연동단축키/힐 중 워커가 H 재적용하지 않게
 _USER_PASS_VKS = (0x09, 0x1B, 0x0D)  # Tab, Esc, Enter
 _TYPING_POLL_VKS = list(range(0x30, 0x3A)) + list(range(0x41, 0x5B)) + [0x20, 0x0D, 0x08]
 
@@ -942,6 +945,9 @@ def _user_keys_passthrough_worker():
     while timer_thread_active:
         try:
             if running and chk_fix and chk_fix.get():
+                if time.time() < _fix_shift_macro_until:
+                    time.sleep(0.02)
+                    continue
                 for vk in _USER_PASS_VKS:
                     down = bool(GetAsyncKeyState(vk) & 0x8000)
                     if down and not was_down[vk]:
@@ -2940,6 +2946,13 @@ def human_mouse_move(tx, ty, fast=False, roi=None, remote=False):
             except: break
             time.sleep(human_delay(*step_sleep))
 
+def _suspend_fix_shift_restore(sec=1.8):
+    """고정 매크로/힐 동안 백그라운드 워커가 H(Shift)를 다시 누르지 않게."""
+    global _fix_shift_hold_off_until, _fix_shift_macro_until
+    t = time.time() + sec
+    _fix_shift_hold_off_until = max(_fix_shift_hold_off_until, t)
+    _fix_shift_macro_until = max(_fix_shift_macro_until, t)
+
 def _fix_shift_down():
     """고정 — 아두이노/박스 Shift 누름 유지 (H). PC keyboard 쓰면 힐·단축키 안 먹음."""
     global _fix_shift_hold_off_until
@@ -2983,6 +2996,7 @@ def _pause_attack_click():
         return False, False
     try:
         if was_fixed:
+            _suspend_fix_shift_restore(1.2)
             ser.write(b'R'); time.sleep(0.05)
             ser.write(b'U'); time.sleep(0.05)
         elif was_follow:
@@ -3036,6 +3050,7 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False, key_gap=None):
 def fix_mode_keys(keys, delay=0.5):
     """고정 중 해독 등 — 옛 fix_mode_keys 와 동일 (U→키→H)."""
     if chk_fix and chk_fix.get() and ser and getattr(ser, "is_open", False):
+        _suspend_fix_shift_restore(1.0)
         try:
             ser.write(b'R'); time.sleep(0.05)
             ser.write(b'U'); time.sleep(0.05)
@@ -3074,7 +3089,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 13:51"
+PATCH_UPDATED_AT = "2026-08-14 14:10"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -5878,7 +5893,7 @@ UDP_CMD_MAP = {
 # Alt+숫자 → F3→F키→F1 매크로 (슬롯 1~8 → F5~F12)
 UDP_SLOT_KEYS = {1: '5', 2: '6', 3: '7', 4: '8', 5: '9', 6: 'X', 7: 'Y', 8: 'Z'}  # F5~F12
 def udp_macro_slot(n):
-    """Alt+숫자 매크로: F3→F키→(고정이면 F1→K)→F1 / 고정복구."""
+    """Alt+숫자: F3→F키→K→F1 (고정이면 시작에 R·끝에 H)."""
     global ser, running
     if not running or not ser or not ser.is_open: return
     try:
@@ -5886,18 +5901,14 @@ def udp_macro_slot(n):
         time.sleep(0.02)
         is_fixed = chk_fix.get() if chk_fix else False
         if is_fixed:
+            _suspend_fix_shift_restore(1.8)
             ser.write(b'R'); time.sleep(0.10)
         ser.write(b'3'); time.sleep(random.uniform(0.30, 0.45))
         ser.write(key.encode()); time.sleep(0.15)
+        ser.write(b'K'); time.sleep(0.10)
+        ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
         if is_fixed:
-            ser.write(b'1'); time.sleep(random.uniform(0.22, 0.38))
-            focus_lineage_window()
-            time.sleep(0.02)
-            ser.write(b'K'); time.sleep(random.uniform(0.08, 0.16))
             ser.write(b'H'); time.sleep(0.05)
-        else:
-            ser.write(b'K'); time.sleep(0.10)
-            ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
     except: pass
 def udp_listener():
     """격수모니터 → 뚱힐러 UDP 수신 (포트 9999).
