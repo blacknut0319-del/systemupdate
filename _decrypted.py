@@ -713,8 +713,11 @@ class KmBox:
     # 자동클릭 루프 (펌웨어 loop()의 autoClick 재현: 30~75ms 누름, 85~180ms 간격)
     def _auto_loop(self):
         while self._alive:
-            if self._auto and self.is_open:
+            if self._auto and self.is_open and _attack_follow and not _attack_fix:
                 with self._lk:
+                    if not self._auto or _attack_fix or not _attack_follow:
+                        self._auto = False
+                        continue
                     try:
                         jx = random.randint(-3, 3)
                         jy = random.randint(-3, 3)
@@ -724,6 +727,8 @@ class KmBox:
                     except: pass
                 time.sleep(random.uniform(0.085, 0.180))
             else:
+                if _attack_fix:
+                    self._auto = False
                 time.sleep(0.005)
 
     # 펌웨어 humanPress: 누르고 80~150ms 유지 후 뗌
@@ -799,7 +804,10 @@ class KmBox:
                 except: pass
             self._auto = False
             return
-        if cmd == 'T':                             # 따라가기 — 클릭만, 시프트 OFF
+        if cmd == 'T':                             # 따라가기 — 클릭만. 고정이면 무시
+            if _attack_fix or not _attack_follow:
+                self._auto = False
+                return
             with self._lk:
                 try: kmNet.keyup(self.SHIFT)
                 except: pass
@@ -999,6 +1007,7 @@ chk_follow = None
 _attack_follow = False  # 펌웨어 무한클릭 ON. Home/힐 resume 은 chk_follow 대신 이거 봄
 _attack_fix = False     # 고정(Shift). 키보드 후킹 스레드에서 chk_*.get() 이 엇갈리면 클릭이 다시 켜짐
 _attack_ser_lock = Lock()  # Home(U+H) 과 힐 resume(U+T) 이 섞이면 시프트+클릭이 됨
+_fix_hw_shift_on = False  # 아두이노에 시프트 켠 뒤. 옛 H는 클릭도 켜서 반복 H 금지
 chk_space_save = None
 mode_var = None
 chk_poison = None
@@ -2958,7 +2967,7 @@ def human_mouse_move(tx, ty, fast=False, roi=None, remote=False):
             time.sleep(human_delay(*step_sleep))
 
 def _ser_follow_click():
-    """따라가기 클릭 ON. 고정이면 T 금지 — 옛 펌웨어는 H 다음 T 가 시프트+클릭."""
+    """따라가기 클릭 ON. 고정이면 T 금지."""
     if (not _attack_follow) or _attack_fix:
         return
     ser.write(b'R')
@@ -2969,13 +2978,22 @@ def _ser_follow_click():
     time.sleep(0.06)
 
 def _ser_fix_shift():
-    """따라가기 끄고 시프트만. U=클릭OFF, H=시프트."""
-    ser.write(b'U')
-    time.sleep(0.08)
-    ser.write(b'U')
-    time.sleep(0.05)
-    ser.write(b'H')
-    time.sleep(0.04)
+    """따라가기 끄고 시프트만.
+    아두이노에 실제로 들어있는 옛 펌웨어는 H = 시프트+클릭 ON 이라,
+    H 다음 T 로 클릭만 꺼야 시프트만 남는다. (펌업 없이)"""
+    global _fix_hw_shift_on
+    if hasattr(ser, "_auto"):
+        ser._auto = False
+        ser.write(b'U')
+        time.sleep(0.05)
+        ser.write(b'H')
+        time.sleep(0.04)
+    else:
+        ser.write(b'H')
+        time.sleep(0.05)
+        ser.write(b'T')
+        time.sleep(0.06)
+    _fix_hw_shift_on = True
 
 def _suspend_fix_shift_restore(sec=1.8):
     """고정 매크로/힐 동안 백그라운드 워커가 H(Shift)를 다시 누르지 않게."""
@@ -2985,8 +3003,8 @@ def _suspend_fix_shift_restore(sec=1.8):
     _fix_shift_macro_until = max(_fix_shift_macro_until, t)
 
 def _fix_shift_down():
-    """고정 — 아두이노/박스 Shift 누름 유지 (H). PC keyboard 쓰면 힐·단축키 안 먹음."""
-    global _fix_shift_hold_off_until
+    """고정 시프트 유지. 옛 아두이노 H는 클릭을 켜므로 이미 켠 뒤엔 H를 다시 안 보냄."""
+    global _fix_shift_hold_off_until, _fix_hw_shift_on
     if not _attack_fix or _attack_follow:
         return
     if time.time() < _fix_shift_hold_off_until:
@@ -2997,18 +3015,31 @@ def _fix_shift_down():
         with _attack_ser_lock:
             if not _attack_fix or _attack_follow:
                 return
+            if hasattr(ser, "_auto"):
+                ser._auto = False
+                ser.write(b'H')
+                time.sleep(0.04)
+                _fix_hw_shift_on = True
+                return
+            if _fix_hw_shift_on:
+                return
             ser.write(b'H')
-            time.sleep(0.04)
+            time.sleep(0.05)
+            ser.write(b'T')
+            time.sleep(0.06)
+            _fix_hw_shift_on = True
     except Exception:
         pass
 
 def _fix_shift_up():
     """고정 해제 — 아두이노/박스 Shift 뗌 (R)."""
+    global _fix_hw_shift_on
     if ser and getattr(ser, "is_open", False):
         try:
             with _attack_ser_lock:
                 ser.write(b'R')
                 time.sleep(0.03)
+            _fix_hw_shift_on = False
         except Exception:
             pass
 
@@ -3104,7 +3135,7 @@ def fix_mode_keys(keys, delay=0.5):
         try:
             with _attack_ser_lock:
                 if _attack_fix and not _attack_follow:
-                    ser.write(b'H'); time.sleep(0.04)
+                    _ser_fix_shift()
         except Exception:
             pass
 
@@ -3134,7 +3165,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 00:15"
+PATCH_UPDATED_AT = "2026-08-15 00:27"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3721,13 +3752,13 @@ def _sync_attack_mode_ui(mode):
 
 def _apply_attack_mode(mode):
     """mode='follow' 따라가기 ON / mode='fix' 고정(Shift만, 클릭 OFF)."""
-    global ser, running, root, chk_follow, chk_fix, _attack_follow, _attack_fix
+    global ser, running, root, chk_follow, chk_fix, _attack_follow, _attack_fix, _fix_hw_shift_on
     if not running or not ser or not getattr(ser, "is_open", False):
         return
-    # 플래그를 시리얼보다 먼저 — 힐 resume 이 옛 chk_follow 를 보고 T 를 다시 켜지 않게
     if mode == 'follow':
         _attack_fix = False
         _attack_follow = True
+        _fix_hw_shift_on = False
     else:
         _attack_follow = False
         _attack_fix = True
@@ -6015,7 +6046,7 @@ def udp_macro_slot(n):
         ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
         if is_fixed and _attack_fix and not _attack_follow:
             with _attack_ser_lock:
-                ser.write(b'H'); time.sleep(0.05)
+                _ser_fix_shift()
     except: pass
 def udp_listener():
     """격수모니터 → 뚱힐러 UDP 수신 (포트 9999).
