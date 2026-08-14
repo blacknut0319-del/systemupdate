@@ -3090,7 +3090,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-14 21:34"
+PATCH_UPDATED_AT = "2026-08-14 21:38"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3196,6 +3196,21 @@ def _norm_patch_ver(ver):
         return ""
     return str(ver).replace("\ufeff", "").strip().splitlines()[0].strip()
 
+def _patch_ver_dt(ver):
+    try:
+        from datetime import datetime
+        return datetime.strptime(_norm_patch_ver(ver), "%Y-%m-%d %H:%M")
+    except Exception:
+        return None
+
+def _local_patch_covers_remote(remote):
+    """현재 실행 버전이 서버와 같거나 더 새면 True (업데이트 불필요)."""
+    loc = _patch_ver_dt(PATCH_UPDATED_AT)
+    rem = _patch_ver_dt(remote)
+    if loc and rem:
+        return loc >= rem
+    return _norm_patch_ver(PATCH_UPDATED_AT) == _norm_patch_ver(remote)
+
 def fetch_remote_version():
     """GitHub version.txt 조회. 실패하면 None."""
     try:
@@ -3214,7 +3229,7 @@ def _mark_update_attempt(remote_ver):
 def _check_update_stuck_on_boot():
     """예 눌렀는데도 버전이 안 바뀌면 반복 알림 대신 한 번 안내 후 스킵."""
     remote = fetch_remote_version()
-    if not remote or _norm_patch_ver(remote) == _norm_patch_ver(PATCH_UPDATED_AT):
+    if not remote or _local_patch_covers_remote(remote):
         try:
             if os.path.isfile(UPDATE_ATTEMPT_FILE):
                 os.remove(UPDATE_ATTEMPT_FILE)
@@ -3227,8 +3242,8 @@ def _check_update_stuck_on_boot():
         with open(UPDATE_ATTEMPT_FILE, encoding="utf-8") as f:
             parts = f.read().strip().split("|", 1)
         ts = float(parts[0])
-        ver = parts[1] if len(parts) > 1 else ""
-        if ver == remote and (time.time() - ts) < 600:
+        ver = _norm_patch_ver(parts[1] if len(parts) > 1 else "")
+        if ver == _norm_patch_ver(remote) and (time.time() - ts) < 600:
             _save_update_skip(remote)
             try:
                 os.remove(UPDATE_ATTEMPT_FILE)
@@ -3317,9 +3332,14 @@ def check_for_update(force=False, manual=False):
             except Exception:
                 pass
         return
-    if _norm_patch_ver(remote) == _norm_patch_ver(PATCH_UPDATED_AT):
+    if _local_patch_covers_remote(remote):
         _update_available = False
         _save_update_skip("")
+        try:
+            if os.path.isfile(UPDATE_ATTEMPT_FILE):
+                os.remove(UPDATE_ATTEMPT_FILE)
+        except Exception:
+            pass
         if manual:
             def _ok():
                 _set_lbl(f"업데이트 {_short}", "#a6e3a1")
