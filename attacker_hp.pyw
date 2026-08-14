@@ -78,7 +78,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-14 22:32"
+PATCH_UPDATED_AT = "2026-08-14 22:41"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -908,8 +908,21 @@ lbl_stream_status = None
 stream_view_img_rect = (0, 0, 1, 1)
 _stream_last_mm = 0.0
 _STREAM_MM_INTERVAL = 0.04
+_stream_alt_held = False
+
+def _on_stream_alt_press(_e=None):
+    global _stream_alt_held
+    _stream_alt_held = True
+    return "break"
+
+def _on_stream_alt_release(_e=None):
+    global _stream_alt_held
+    _stream_alt_held = False
+    return "break"
 
 def _alt_held():
+    if _stream_alt_held:
+        return True
     return bool(ctypes.windll.user32.GetAsyncKeyState(VK_MENU) & 0x8000)
 
 def send_mouse_json(obj):
@@ -985,8 +998,8 @@ def _stream_tcp_loop():
             conn.connect((ip, STREAM_TCP_PORT))
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             stream_view_sock = conn
-            if stream_view_label and stream_view_label.winfo_exists():
-                root.after(0, lambda: lbl_stream_status.config(text="연결됨", fg="#10b981"))
+            if stream_view_label and stream_view_label.winfo_exists() and not stream_view_photo:
+                root.after(0, lambda: stream_view_label.config(text="연결됨", fg="#10b981"))
             while stream_view_active:
                 hdr = _tcp_recv_exact(conn, 4)
                 if not hdr:
@@ -1026,8 +1039,8 @@ def _stream_tcp_loop():
                 except Exception:
                     pass
         except Exception:
-            if stream_view_label and stream_view_label.winfo_exists():
-                root.after(0, lambda: lbl_stream_status.config(text="연결 대기", fg="#fbbf24"))
+            if stream_view_label and stream_view_label.winfo_exists() and not stream_view_photo:
+                root.after(0, lambda: stream_view_label.config(text="연결 대기", fg="#fbbf24"))
         finally:
             try:
                 if conn:
@@ -1052,7 +1065,8 @@ def toggle_stream_send():
         lbl_status.config(text="전송 실패", fg="#ef4444")
 
 def close_stream_view():
-    global stream_view_active, stream_view_win, stream_view_sock
+    global stream_view_active, stream_view_win, stream_view_sock, _stream_alt_held
+    _stream_alt_held = False
     stream_view_active = False
     try:
         if stream_view_sock:
@@ -1073,50 +1087,32 @@ def toggle_stream_view():
     stream_view_win = tk.Toplevel(root)
     stream_view_win.title(SOOPLIVE_STREAM_TITLE)
     stream_view_win.geometry("800x600")
+    stream_view_win.resizable(True, True)
     stream_view_win.attributes("-topmost", True)
     stream_view_win.configure(bg="#0f172a")
-    stream_view_win.overrideredirect(True)
     _set_taskmgr_title(stream_view_win, SOOPLIVE_STREAM_TITLE)
     _apply_win_icon(stream_view_win)
     stream_view_win.protocol("WM_DELETE_WINDOW", lambda: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
 
-    def _stream_start_move(e):
-        stream_view_win._mv_x = e.x_root - stream_view_win.winfo_x()
-        stream_view_win._mv_y = e.y_root - stream_view_win.winfo_y()
-
-    def _stream_do_move(e):
-        stream_view_win.geometry("+%d+%d" % (e.x_root - stream_view_win._mv_x, e.y_root - stream_view_win._mv_y))
-
-    hdr = tk.Frame(stream_view_win, bg="#141420", height=26)
-    hdr.pack(fill="x")
-    hdr.pack_propagate(False)
-    lbl_stream_status = tk.Label(hdr, text="연결 중...", bg="#141420", fg="#fbbf24", font=("Malgun Gothic", 8))
-    lbl_stream_status.pack(side="left", padx=6, pady=3)
-    stream_title_lbl = tk.Label(hdr, text=SOOPLIVE_STREAM_TITLE, bg="#141420", fg="#e2e8f0", font=("Malgun Gothic", 9, "bold"))
-    stream_title_lbl.pack(side="left", padx=8)
-    tk.Label(hdr, text="Alt+마우스", bg="#141420", fg="#94a3b8", font=("Malgun Gothic", 8)).pack(side="right", padx=4)
-    stream_close = tk.Label(hdr, text="✕", bg="#141420", fg="#f38ba8", font=("Malgun Gothic", 11), cursor="hand2")
-    stream_close.pack(side="right", padx=6, pady=2)
-    stream_close.bind("<Button-1>", lambda e: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
-    for w in (hdr, stream_title_lbl):
-        w.bind("<ButtonPress-1>", _stream_start_move)
-        w.bind("<B1-Motion>", _stream_do_move)
-
-    stream_view_label = tk.Label(stream_view_win, bg="#000", text="쫄화면 전송 ON 후 대기...", fg="#6c7086")
-    stream_view_label.pack(fill="both", expand=True, padx=4, pady=4)
+    stream_view_label = tk.Label(
+        stream_view_win, bg="#0f172a", fg="#475569",
+        text="RES 화면 연결 중...", anchor="center",
+    )
+    stream_view_label.pack(fill="both", expand=True)
+    lbl_stream_status = stream_view_label
     _stream_binds = [
         ("<Motion>", _on_stream_motion),
-        ("<ButtonPress-1>", lambda e: _on_stream_btn(e, True)),
-        ("<ButtonPress-2>", lambda e: _on_stream_btn(e, True)),
-        ("<ButtonPress-3>", lambda e: _on_stream_btn(e, True)),
-        ("<ButtonRelease-1>", lambda e: _on_stream_btn(e, False)),
-        ("<ButtonRelease-2>", lambda e: _on_stream_btn(e, False)),
-        ("<ButtonRelease-3>", lambda e: _on_stream_btn(e, False)),
+        ("<ButtonPress>", lambda e: _on_stream_btn(e, True)),
+        ("<ButtonRelease>", lambda e: _on_stream_btn(e, False)),
         ("<MouseWheel>", _on_stream_scroll),
+        ("<KeyPress-Alt_L>", _on_stream_alt_press),
+        ("<KeyPress-Alt_R>", _on_stream_alt_press),
+        ("<KeyRelease-Alt_L>", _on_stream_alt_release),
+        ("<KeyRelease-Alt_R>", _on_stream_alt_release),
     ]
-    for w in (stream_view_win, stream_view_label):
-        for ev, fn in _stream_binds:
-            w.bind(ev, fn)
+    for ev, fn in _stream_binds:
+        stream_view_win.bind(ev, fn)
+    stream_view_win.focus_force()
 
     btn_stream_view.config(text="📺 닫기", bg="#ef4444")
     stream_view_active = True
