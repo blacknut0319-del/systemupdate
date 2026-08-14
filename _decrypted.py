@@ -3178,7 +3178,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 00:58"
+PATCH_UPDATED_AT = "2026-08-15 08:14"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3499,6 +3499,7 @@ LATEST_PATCH = [
     "🖱️ 쫄화면 조종 — 격수 PC Alt+마우스로 쫄 PC 원격 클릭·휠",
     "🔌 WDT4 — Insert 연결 시 펌 자동 확인, 휠힐 별도 펌업 없이 사용",
     "🏃 강제베르 — End/격수 명령 시 위기베르처럼 자동 정지",
+    "🩹 게임 켠 채로 뚱힐러가 안 뜨던 문제 — 핫키 훅을 창 표시 후로 옮김",
     "📌 강제고정(PageUp) — 시프트 제자리공격. Home 고정은 클릭·시프트 전부 끔",
     "🖱️ Home 고정 — 다시 누르면 클릭·시프트 전부 끔 (단축창 F1~F3 이동)",
     "🖱️ Home 따라가기 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 전부 끄기",
@@ -6191,13 +6192,25 @@ def toggle_gui(e=None):
     if is_gui_hidden: root.deiconify(); is_gui_hidden = False
     else: root.withdraw(); is_gui_hidden = True
 
-keyboard.on_release_key('delete', toggle_gui) 
-keyboard.on_release_key('space', on_space_save) 
-keyboard.on_release_key('home', on_home_click_toggle)
-keyboard.on_release_key('page up', on_pageup_force_fix)
-keyboard.on_release_key('insert', on_main_toggle)
-keyboard.on_release_key('end', on_end_bert)
-keyboard.on_release_key('f4', on_f4_toggle)
+def _install_hotkeys():
+    """창이 뜬 뒤에 훅 등록. 게임 켜진 채로 훅이 막히면 mainloop 전에 멈추던 문제 방지."""
+    def _hook(name, fn):
+        try:
+            keyboard.on_release_key(name, fn)
+        except Exception:
+            pass
+    _hook('delete', toggle_gui)
+    _hook('space', on_space_save)
+    _hook('home', on_home_click_toggle)
+    for pg in ('page up', 'page_up', 'pageup'):
+        try:
+            keyboard.on_release_key(pg, on_pageup_force_fix)
+            break
+        except Exception:
+            continue
+    _hook('insert', on_main_toggle)
+    _hook('end', on_end_bert)
+    _hook('f4', on_f4_toggle)
 
 timer_thread_active = True
 Thread(target=reserve_shutdown_worker, daemon=True).start()
@@ -6222,5 +6235,6 @@ resize_grip.place(relx=1.0, rely=1.0, anchor="se")
 resize_grip.bind("<ButtonPress-1>", _start_resize)
 resize_grip.bind("<B1-Motion>", _do_resize)
 resize_grip.bind("<ButtonRelease-1>", _end_resize)
+root.after(50, _install_hotkeys)
 root.after(300, sync_window_height)
 root.mainloop()
