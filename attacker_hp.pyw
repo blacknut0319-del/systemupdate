@@ -88,7 +88,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-14 23:01"
+PATCH_UPDATED_AT = "2026-08-15 12:49"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -654,9 +654,9 @@ running = True; hp_pct = 0.0
 # ============================================================
 # 원격 제어 (UDP 1byte)
 # ============================================================
-DEBOUNCE = {'insert': 0, 'home': 0, 'f4': 0, 'end': 0}
+DEBOUNCE = {'insert': 0, 'home': 0, 'f4': 0, 'end': 0, 'pageup': 0}
 CMD_MAP = {'insert': b'I', 'home': b'H', 'f4': b'L'}
-CMD_NAMES = {b'I':'시작', b'H':'따라가기', b'P':'고정', b'L':'줍기'}
+CMD_NAMES = {b'I':'시작', b'H':'따라가기', b'P':'고정', b'L':'줍기', b'G':'강제고정'}
 
 def send_remote_cmd(cmd_byte):
     try:
@@ -700,6 +700,13 @@ def on_end_bert_key(e=None):
         lbl_status.config(text="베르 전송", fg="#f9e2af")
     except Exception:
         lbl_status.config(text="베르 실패", fg="#ef4444")
+
+def on_pageup_force_fix_key(e=None):
+    now = time.time()
+    if now - DEBOUNCE.get('pageup', 0) < 0.3:
+        return
+    DEBOUNCE['pageup'] = now
+    send_remote_cmd(b'G')
 
 try:
     for key_name in ['insert', 'home', 'f4']:
@@ -1371,8 +1378,17 @@ def _upd_periodic():
 root.after(15000, lambda: threading.Thread(target=lambda: check_for_update(force=True), daemon=True).start())
 root.after(615000, _upd_periodic)
 root.after(2000, lambda: threading.Thread(target=_check_update_stuck_on_boot, daemon=True).start())
+def _install_pageup_hotkey():
+    for pg in ('page up', 'page_up', 'pageup'):
+        try:
+            keyboard.on_release_key(pg, on_pageup_force_fix_key)
+            break
+        except Exception:
+            continue
+
 _force_show_root()
 root.after(200, _force_show_root)
+root.after(50, _install_pageup_hotkey)
 
 try:
     root.mainloop()

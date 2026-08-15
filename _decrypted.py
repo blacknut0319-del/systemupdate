@@ -1962,7 +1962,7 @@ def open_guide_panel():
     add_t("⌨️ 단축키")
     add_d("Insert", "시작 / 정지")
     add_d("Home", "따라가기 ON ↔ 전부 끄기 (사냥 중에만)")
-    add_d("PageUp", "강제고정 — 시프트 제자리공격 ON/OFF")
+    add_d("PageUp", "강제고정 — 시프트 제자리공격 ON/OFF (격수도 동일)")
     add_d("Delete", "창 숨기기 / 다시 보이기")
     add_d("F4", "주변 줍기 켜기 / 끄기")
     add_sep()
@@ -3179,7 +3179,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 11:41"
+PATCH_UPDATED_AT = "2026-08-15 12:49"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3501,6 +3501,7 @@ LATEST_PATCH = [
     "🔌 WDT4 — Insert 연결 시 펌 자동 확인, 휠힐 별도 펌업 없이 사용",
     "🏃 강제베르 — End/격수 명령 시 위기베르처럼 자동 정지",
     "🩹 게임 켠 채로 뚱힐러가 안 뜨던 문제 — 핫키 훅을 창 표시 후로 옮김",
+    "📌 강제고정 — 쫄·격수 PageUp 모두 시프트 제자리공격 ON/OFF",
     "📌 강제고정(PageUp) — 시프트 제자리공격. Home 고정은 클릭·시프트 전부 끔",
     "🖱️ Home 고정 — 다시 누르면 클릭·시프트 전부 끔 (단축창 F1~F3 이동)",
     "🖱️ Home 따라가기 — 한 번 누르면 몹 따라 자동공격, 다시 누르면 전부 끄기",
@@ -6115,6 +6116,7 @@ UDP_CMD_MAP = {
     b'H': 'on_home_click_toggle',  # Home   → 클릭 ON/OFF
     b'P': 'on_home_click_toggle',  # 격수모니터 [고정] 버튼 (Home과 동일 토글)
     b'L': 'on_f4_toggle',      # F4     → 줍기 토글
+    b'G': 'on_pageup_force_fix',  # 격수 PageUp → 강제고정
 }
 # Alt+숫자 → F3→F키→F1 매크로 (슬롯 1~8 → F5~F12)
 UDP_SLOT_KEYS = {1: '5', 2: '6', 3: '7', 4: '8', 5: '9', 6: 'X', 7: 'Y', 8: 'Z'}  # F5~F12
