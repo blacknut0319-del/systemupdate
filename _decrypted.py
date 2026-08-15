@@ -720,10 +720,6 @@ class KmBox:
                         self._auto = False
                         continue
                     try:
-                        jx = random.randint(-3, 3)
-                        jy = random.randint(-3, 3)
-                        if jx or jy:
-                            kmNet.move(jx, jy)
                         kmNet.left(1); time.sleep(random.uniform(0.030, 0.075)); kmNet.left(0)
                     except: pass
                 time.sleep(random.uniform(0.085, 0.180))
@@ -3179,7 +3175,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 12:49"
+PATCH_UPDATED_AT = "2026-08-15 14:13"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3501,6 +3497,7 @@ LATEST_PATCH = [
     "🔌 WDT4 — Insert 연결 시 펌 자동 확인, 휠힐 별도 펌업 없이 사용",
     "🏃 강제베르 — End/격수 명령 시 위기베르처럼 자동 정지",
     "🩹 게임 켠 채로 뚱힐러가 안 뜨던 문제 — 핫키 훅을 창 표시 후로 옮김",
+    "🖱️ 따라가기 자동클릭 — 클릭 직전 커서 ±3 흔들림 제거",
     "📌 강제고정 — 쫄·격수 PageUp 모두 시프트 제자리공격 ON/OFF",
     "📌 강제고정(PageUp) — 시프트 제자리공격. Home 고정은 클릭·시프트 전부 끔",
     "🖱️ Home 고정 — 다시 누르면 클릭·시프트 전부 끔 (단축창 F1~F3 이동)",
