@@ -88,7 +88,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-15 12:49"
+PATCH_UPDATED_AT = "2026-08-15 16:06"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -413,15 +413,6 @@ def _check_update_stuck_on_boot():
                 os.remove(UPDATE_ATTEMPT_FILE)
             except Exception:
                 pass
-            _show_msgbox(
-                "warning",
-                "업데이트",
-                "자동 업데이트가 적용되지 않았습니다.\n\n"
-                "1) 격수 완전히 끄기\n"
-                "2) hp_start.bat 실행\n\n"
-                "서버: %s\n현재: %s\n\n"
-                "같은 알림은 잠시 숨깁니다." % (remote, PATCH_UPDATED_AT),
-            )
     except Exception:
         pass
 
@@ -610,8 +601,7 @@ def check_for_update(force=False, manual=False):
     def _ui():
         global _update_notified
         _set_lbl("⚠️업데이트있음", "#f9e2af")
-        if manual or not _update_notified:
-            _update_notified = True
+        if manual:
             try:
                 if _show_msgbox(
                     "yesno",
@@ -625,6 +615,8 @@ def check_for_update(force=False, manual=False):
                     _save_update_skip(remote)
             except Exception:
                 pass
+        elif not _update_notified:
+            _update_notified = True
     try:
         if root:
             root.after(0, _ui)

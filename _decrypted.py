@@ -3175,7 +3175,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 14:26"
+PATCH_UPDATED_AT = "2026-08-15 16:06"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3335,13 +3335,8 @@ def _check_update_stuck_on_boot():
             except Exception:
                 pass
             try:
-                messagebox.showwarning(
-                    "업데이트",
-                    "자동 업데이트가 적용되지 않았습니다.\n\n"
-                    "1) 뚱힐러 완전히 끄기\n"
-                    "2) 뚱시작.bat 우클릭 → 관리자 실행\n\n"
-                    "서버: %s\n현재: %s\n\n"
-                    "같은 알림은 잠시 숨깁니다." % (remote, PATCH_UPDATED_AT),
+                log_event(
+                    "⚠️ 업데이트 미적용 — 상단 [업데이트] 눌러서 다시 시도 (뚱시작.bat 관리자 실행)"
                 )
             except Exception:
                 pass
@@ -3456,12 +3451,7 @@ def check_for_update(force=False, manual=False):
     def _ui():
         global _update_notified
         _set_lbl("⚠️업데이트있음", "#f9e2af")
-        if not _update_notified:
-            _update_notified = True
-            try:
-                log_event("📢 새 업데이트 있음 — 확인 시 자동으로 다시 켜짐")
-            except Exception:
-                pass
+        if manual:
             try:
                 if messagebox.askyesno(
                     "업데이트",
@@ -3472,6 +3462,12 @@ def check_for_update(force=False, manual=False):
                     restart_with_update()
                 else:
                     _save_update_skip(remote)
+            except Exception:
+                pass
+        elif not _update_notified:
+            _update_notified = True
+            try:
+                log_event("📢 새 업데이트 있음 — 상단 [업데이트] 눌러서 확인")
             except Exception:
                 pass
     try:
@@ -3512,7 +3508,7 @@ LATEST_PATCH = [
     "🏃 강제베르 — 옵션 켜고 End키로 즉시 귀환 (격수 모니터도 가능)",
     "⚡ 자기 버프 — 칸 4개, 항상 두 번 연타. 한 번은 위 버프칸",
     "⚡ 자기 버프 — 헤이스트 등 본인 버프 슬롯·초 설정 추가",
-    "🔄 업데이트 알림 — 예 눌러도 버전 같으면 반복 안 뜸",
+    "🔄 업데이트 — 팝업 없음, 상단 날짜·시간 눌러서 확인",
     "📐 접이식 — 옵션·버프·힐 접으면 창 높이 자동 축소",
     "🔌 펌웨어 — 휠클릭·우클릭 등 확장 기능, 워치독으로 멈춤 자동 복구",
     "🔌 펌업 — 리셋 버튼 없이도 자동 업로드 개선",
@@ -3526,8 +3522,7 @@ LATEST_PATCH = [
     "🩹 파티힐 — 파티창 깜빡여도 힐 끊기지 않게",
     "⌨️ 격수 원격 — 힐 중에도 Insert·Home 명령 바로 반응",
     "🖱️ 파티힐 — 마우스 이동 속도·반응 개선",
-    "🔄 업데이트 — 있으면 예 누르면 자동으로 껐다 켜짐",
-    "📢 업데이트 알림 — 오래 켜둬도 새 버전 있으면 알려줌",
+    "🔄 업데이트 — 상단 날짜·시간 눌러서 확인·적용 (사냥 중 팝업 없음)",
     "🪨 석화 — 석화 걸려도 피통 % 제대로 표시",
     "🛡️ 위기 귀환 — 한 번 오탐으로 바로 나가지 않게 여러 번 확인",
     "🖼️ 유령힐 — 파티 없을 때 배경 오탐 줄임 (아이콘 설정 선택)",
