@@ -368,7 +368,7 @@ def open_scroll_pick(anchor, values, on_pick, width=None, max_h=220, current=Non
     pop.bind("<Escape>", lambda e: close())
 
 def make_pick_btn(parent, values, textvariable, command=None, width=80, height=22, font=("Malgun Gothic", 9),
-                  fg_color=None, hover_color=None, border_color=None, text_color=None, premium=False):
+                  fg_color=None, hover_color=None, border_color=None, text_color=None, premium=False, arrow=True):
     """콤보 대체: 현재값 버튼 + 스크롤 픽 팝업."""
     if premium:
         # 고급: 딥차콜 + 뮤트골드
@@ -388,7 +388,8 @@ def make_pick_btn(parent, values, textvariable, command=None, width=80, height=2
         text_color = text_color or "#cdd6f4"
 
     def _label():
-        return f"{textvariable.get()} ▾"
+        v = textvariable.get()
+        return f"{v} ▾" if arrow else v
 
     btn = ctk.CTkButton(
         parent, text=_label(), width=width, height=height, font=font,
@@ -484,16 +485,15 @@ def cast_buff(hb_label, slot_label):
             execute_keys([hb, sk, "1"], 0.55, key_gap=(0.08, 0.18))
 
 
-def cast_self_buff(hb_label, slot_label, double=True):
-    """자기 대상 버프. double이면 슬롯 키 두 번 연타(원래), 아니면 한 번. 자힐처럼 F1 복귀."""
+def cast_self_buff(hb_label, slot_label):
+    """자기 대상 버프(헤이스트 등) — 슬롯 키 두 번 연타. 자힐처럼 F1 복귀."""
     hb = hb_label.replace("F", "")
     sk = BUFF_SLOT_KEYS[slot_label]
     tap_gap = (0.09, 0.18)
-    taps = [sk, sk] if double else [sk]
     if hb == "1":
-        execute_keys(["1"] + taps, 0.55, key_gap=tap_gap)
+        execute_keys(["1", sk, sk], 0.55, key_gap=tap_gap)
     else:
-        execute_keys([hb] + taps + ["1"], 0.55, key_gap=tap_gap)
+        execute_keys([hb, sk, sk, "1"], 0.55, key_gap=tap_gap)
 
 
 def self_buff_time_key(idx):
@@ -504,19 +504,15 @@ def _parse_self_buff_saved(idx):
     raw = saved_self_buff_grid.get(str(idx))
     if not raw and idx == 1:
         on = saved_self_buff_on in ("1", "true", "True")
-        return on, saved_self_buff_hotbar, saved_self_buff_slot, str(saved_self_buff_sec or "1200"), True
+        return on, saved_self_buff_hotbar, saved_self_buff_slot, str(saved_self_buff_sec or "1200")
     if not raw:
-        return False, "F1", "F5", "1200", True
+        return False, "F1", "F5", "1200"
     parts = raw.split(":")
     on = parts[0] in ("1", "true", "True") if parts else False
     hb = parts[1] if len(parts) > 1 and parts[1] in BUFF_HOTBARS else "F1"
     slot = parts[2] if len(parts) > 2 and parts[2] in BUFF_SLOT_LABELS else "F5"
     sec = parts[3] if len(parts) > 3 else "1200"
-    # 예전 저장(4칸)은 연타 ON. 5번째가 있으면 그대로.
-    double = True
-    if len(parts) > 4:
-        double = parts[4] in ("1", "true", "True")
-    return on, hb, slot, sec, double
+    return on, hb, slot, sec
 
 
 def migrate_legacy_self_buff():
@@ -1406,16 +1402,15 @@ def save_hidden_config(pwd_to_save):
             globals()['saved_chk_end_bert'] = cur_end_bert
             globals()['saved_chk_wheel_heal'] = cur_wheel_heal
             f.write(f"CHK_SELF_HEAL={cur_self}\nCHK_DANGER={cur_danger}\nCHK_STRONG_HEAL={cur_strong}\nCHK_ATTACKER={cur_atk}\nCHK_MNA={cur_mna}\nCHK_END_BERT={cur_end_bert}\nCHK_WHEEL_HEAL={cur_wheel_heal}\n")
-            for idx, (cb_sb, hb_var, slot_var, sec_var, dbl_var) in enumerate(_self_buff_cfg, 1):
+            for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
                 on_sb = "1" if cb_sb.get() else "0"
                 hb_sb = hb_var.get() if hb_var.get() in BUFF_HOTBARS else "F1"
                 slot_sb = slot_var.get() if slot_var.get() in BUFF_SLOT_LABELS else "F5"
                 sec_sb = _self_buff_sec_str(sec_var, idx)
-                dbl_sb = "1" if dbl_var.get() else "0"
-                saved_self_buff_grid[str(idx)] = f"{on_sb}:{hb_sb}:{slot_sb}:{sec_sb}:{dbl_sb}"
-                f.write(f"SELF_BUFF_{idx}={on_sb}:{hb_sb}:{slot_sb}:{sec_sb}:{dbl_sb}\n")
+                saved_self_buff_grid[str(idx)] = f"{on_sb}:{hb_sb}:{slot_sb}:{sec_sb}"
+                f.write(f"SELF_BUFF_{idx}={on_sb}:{hb_sb}:{slot_sb}:{sec_sb}\n")
             if _self_buff_cfg:
-                cb1, hb1, slot1, sec1, _dbl1 = _self_buff_cfg[0]
+                cb1, hb1, slot1, sec1 = _self_buff_cfg[0]
                 cur_self_buff = "1" if cb1.get() else "0"
                 cur_sb_hb = hb1.get()
                 cur_sb_slot = slot1.get()
@@ -3184,7 +3179,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 09:00"
+PATCH_UPDATED_AT = "2026-08-15 11:41"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3515,7 +3510,7 @@ LATEST_PATCH = [
     "✨ 버프 — 클릭 꺼져 있어도 버프 대상 자동 지정",
     "✨ 버프·자버프 초 — 슬롯 체크·초 바꿔도 껐다 켜도 저장 유지",
     "🏃 강제베르 — 옵션 켜고 End키로 즉시 귀환 (격수 모니터도 가능)",
-    "⚡ 자기 버프 — 칸 4개, 연타 체크 시 두 번 / 해제 시 한 번",
+    "⚡ 자기 버프 — 칸 4개, 항상 두 번 연타. 한 번은 위 버프칸",
     "⚡ 자기 버프 — 헤이스트 등 본인 버프 슬롯·초 설정 추가",
     "🔄 업데이트 알림 — 예 눌러도 버전 같으면 반복 안 뜸",
     "📐 접이식 — 옵션·버프·힐 접으면 창 높이 자동 축소",
@@ -3906,7 +3901,7 @@ def _start_worker():
             for slot, cb, iv in _buff_cfg.get(hb, []):
                 if cb.get():
                     schedule_buff(buff_time_key(hb, slot), get_safe_int(iv, BASE_BUFF_INTERVAL), soon=True)
-        for idx, (cb_sb, hb_var, slot_var, sec_var, _dbl) in enumerate(_self_buff_cfg, 1):
+        for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
             if cb_sb.get():
                 schedule_buff(self_buff_time_key(idx), get_safe_int(sec_var, int(saved_self_buff_sec or 1200)), soon=True)
         last_self_heal = now
@@ -5012,7 +5007,7 @@ def expert_logic():
             # 버프 (F1/F2/F3 × F5~F12 그리드) — 타이핑 중엔 대기(생명과 무관)
             if not _typing_now and chk_buff_on and chk_buff_on.get() and (now - last_buff_global >= 1.0) and (now - last_buff_seq >= BUFF_SEQ_GAP):
                 buff_cast = False
-                for idx, (cb_sb, hb_var, slot_var, sec_var, dbl_var) in enumerate(_self_buff_cfg, 1):
+                for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
                     if not cb_sb.get():
                         continue
                     tk_sb = self_buff_time_key(idx)
@@ -5020,7 +5015,7 @@ def expert_logic():
                     if now >= buff_next_due.get(tk_sb, 0):
                         hb_sb = hb_var.get()
                         slot_sb = slot_var.get()
-                        cast_self_buff(hb_sb, slot_sb, double=dbl_var.get())
+                        cast_self_buff(hb_sb, slot_sb)
                         schedule_buff(tk_sb, iv_sb, soon=False)
                         last_buff_seq = now
                         last_buff_global = now
@@ -5515,17 +5510,16 @@ def _on_buff_on():
         save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception:
         pass
-RoundedToggle(buff_body, "버프 자동", "#a371f7", var=chk_buff_on, cmd=_on_buff_on).pack(anchor="w", padx=4, pady=(4, 2))
-
+buff_top = ctk.CTkFrame(buff_body, fg_color="transparent")
+buff_top.pack(fill="x", padx=4, pady=(4, 2))
+RoundedToggle(buff_top, "버프 자동", "#a371f7", var=chk_buff_on, cmd=_on_buff_on).pack(side="left")
 buff_hotbar_var = tk.StringVar(value="F1")
-buff_bar_row = ctk.CTkFrame(buff_body, fg_color="transparent")
-buff_bar_row.pack(fill="x", padx=4, pady=2)
-ctk.CTkLabel(buff_bar_row, text="단축창", text_color="#a6adc8", font=("Malgun Gothic", 8, "bold")).pack(side="left", padx=(0, 4))
-buff_hotbar_combo = make_pick_btn(buff_bar_row, BUFF_HOTBARS, buff_hotbar_var, width=52, height=22, font=("Malgun Gothic", 9))
+ctk.CTkLabel(buff_top, text="단축창", text_color="#a6adc8", font=("Malgun Gothic", 8, "bold")).pack(side="left", padx=(8, 3))
+buff_hotbar_combo = make_pick_btn(buff_top, BUFF_HOTBARS, buff_hotbar_var, width=44, height=20, font=("Malgun Gothic", 8), arrow=False)
 buff_hotbar_combo.pack(side="left")
 
 buff_page_host = ctk.CTkFrame(buff_body, fg_color="transparent")
-buff_page_host.pack(fill="x", padx=2, pady=(0, 4))
+buff_page_host.pack(fill="x", padx=2, pady=(0, 2))
 _buff_pages = {}
 
 def _parse_buff_saved(hb, slot):
@@ -5539,6 +5533,8 @@ for hb in BUFF_HOTBARS:
     page = ctk.CTkFrame(buff_page_host, fg_color="transparent")
     _buff_pages[hb] = page
     rows = []
+    for ci in range(4):
+        page.grid_columnconfigure(ci, weight=1)
     for ri, slots in enumerate([BUFF_SLOT_LABELS[:4], BUFF_SLOT_LABELS[4:]]):
         for ci, slot in enumerate(slots):
             cell = ctk.CTkFrame(page, fg_color="transparent")
@@ -5573,41 +5569,46 @@ def _show_buff_page(choice=None):
 buff_hotbar_combo.set_pick_command(_show_buff_page)
 _show_buff_page("F1")
 
-ctk.CTkLabel(buff_body, text="─ 자기 버프 (헤이스트 등) ─", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(pady=(4, 2))
+ctk.CTkLabel(buff_body, text="자기버프 (연타)", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(pady=(2, 1))
+_self_buff_grid = ctk.CTkFrame(buff_body, fg_color="transparent")
+_self_buff_grid.pack(fill="x", padx=2, pady=(0, 2))
+_self_buff_grid.grid_columnconfigure(0, weight=1)
+_self_buff_grid.grid_columnconfigure(1, weight=1)
 _self_buff_cfg = []
 for _sb_idx in range(1, SELF_BUFF_COUNT + 1):
-    _sb_on, _sb_hb, _sb_slot, _sb_sec, _sb_dbl = _parse_self_buff_saved(_sb_idx)
-    _sb_row = ctk.CTkFrame(buff_body, fg_color="transparent")
-    _sb_row.pack(fill="x", padx=4, pady=1)
+    _sb_on, _sb_hb, _sb_slot, _sb_sec = _parse_self_buff_saved(_sb_idx)
+    _sb_cell = ctk.CTkFrame(_self_buff_grid, fg_color="transparent")
+    _sb_cell.grid(row=(_sb_idx - 1) // 2, column=(_sb_idx - 1) % 2, padx=2, pady=1, sticky="nw")
+    _sb_row1 = ctk.CTkFrame(_sb_cell, fg_color="transparent")
+    _sb_row1.pack(anchor="w")
+    _sb_row2 = ctk.CTkFrame(_sb_cell, fg_color="transparent")
+    _sb_row2.pack(anchor="w")
     _sb_cb = ctk.BooleanVar(value=_sb_on)
     _sb_hb_var = tk.StringVar(value=_sb_hb if _sb_hb in BUFF_HOTBARS else "F1")
     _sb_slot_var = tk.StringVar(value=_sb_slot if _sb_slot in BUFF_SLOT_LABELS else "F5")
     _sb_sec_var = tk.StringVar(value=str(_sb_sec or "1200"))
-    _sb_dbl_var = ctk.BooleanVar(value=_sb_dbl)
     def _on_self_buff_row(_i=_sb_idx, _c=_sb_cb):
         log_event(f"⚡ 자기버프{_i} {'ON' if _c.get() else 'OFF'}")
         try:
             save_hidden_config(loaded_pwd if loaded_pwd else "")
         except Exception:
             pass
-    ctk.CTkCheckBox(_sb_row, text=str(_sb_idx), variable=_sb_cb, width=28, checkbox_width=14, checkbox_height=14,
+    ctk.CTkCheckBox(_sb_row1, text=str(_sb_idx), variable=_sb_cb, width=22, checkbox_width=13, checkbox_height=13,
                     font=("Malgun Gothic", 8, "bold"), text_color="#f9e2af",
-                    fg_color="#800020", hover_color="#9e1a3a", command=_on_self_buff_row).pack(side="left", padx=(0, 2))
-    _sb_hb_btn = make_pick_btn(_sb_row, BUFF_HOTBARS, _sb_hb_var, width=44, height=20, font=("Malgun Gothic", 8))
+                    fg_color="#800020", hover_color="#9e1a3a", command=_on_self_buff_row).pack(side="left")
+    _sb_hb_btn = make_pick_btn(_sb_row1, BUFF_HOTBARS, _sb_hb_var, width=30, height=18,
+                               font=("Malgun Gothic", 8), arrow=False)
     _sb_hb_btn.pack(side="left", padx=1)
     _sb_hb_btn.set_pick_command(lambda *a: _schedule_buff_cfg_save())
-    _sb_slot_btn = make_pick_btn(_sb_row, BUFF_SLOT_LABELS, _sb_slot_var, width=44, height=20, font=("Malgun Gothic", 8))
+    _sb_slot_btn = make_pick_btn(_sb_row1, BUFF_SLOT_LABELS, _sb_slot_var, width=30, height=18,
+                                 font=("Malgun Gothic", 8), arrow=False)
     _sb_slot_btn.pack(side="left", padx=1)
     _sb_slot_btn.set_pick_command(lambda *a: _schedule_buff_cfg_save())
-    ctk.CTkEntry(_sb_row, textvariable=_sb_sec_var, width=40, height=20, font=("Malgun Gothic", 8),
-                 text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=2)
+    ctk.CTkEntry(_sb_row2, textvariable=_sb_sec_var, width=36, height=18, font=("Malgun Gothic", 8),
+                 text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=(22, 1))
     _sb_sec_var.trace_add("write", lambda *a: _schedule_buff_cfg_save())
-    ctk.CTkLabel(_sb_row, text="초", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(side="left")
-    ctk.CTkCheckBox(_sb_row, text="연타", variable=_sb_dbl_var, width=40, checkbox_width=14, checkbox_height=14,
-                    font=("Malgun Gothic", 7), text_color="#cdd6f4",
-                    fg_color="#800020", hover_color="#9e1a3a",
-                    command=lambda: _schedule_buff_cfg_save()).pack(side="left", padx=(4, 0))
-    _self_buff_cfg.append((_sb_cb, _sb_hb_var, _sb_slot_var, _sb_sec_var, _sb_dbl_var))
+    ctk.CTkLabel(_sb_row2, text="초", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(side="left")
+    _self_buff_cfg.append((_sb_cb, _sb_hb_var, _sb_slot_var, _sb_sec_var))
 
 # ─── 접이식: 힐·물약 ───
 coll_heal = Collapsible(root, "힐·물약", start_open=False)
