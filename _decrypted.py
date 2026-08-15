@@ -223,6 +223,24 @@ class RoundedToggle(ctk.CTkFrame):
     def set(self, v): self.var.set(v); self.box.configure(fg_color=self.on_color if v else self.off_color)
 
 
+SLIDER_PROGRESS_DEFAULT = "#f38ba8"  # HP·힐% 임계값 공통
+SLIDER_PROGRESS_MNA = "#89b4fa"      # 파랭이(마나)만 파랑
+
+
+def make_pct_slider(parent, from_, to, variable, progress_color=SLIDER_PROGRESS_DEFAULT, width=68, steps=None):
+    """힐% 슬라이더 — 얇은 트랙 + 동그란 골드 손잡이."""
+    kw = dict(
+        from_=from_, to=to, variable=variable, width=width, height=8,
+        corner_radius=4, button_corner_radius=7, button_length=7,
+        fg_color="#16161f", border_color="#3b3d4a", border_width=1,
+        button_color="#d4af37", button_hover_color="#f0d878",
+        progress_color=progress_color,
+    )
+    if steps is not None:
+        kw["number_of_steps"] = steps
+    return ctk.CTkSlider(parent, **kw)
+
+
 class Collapsible(ctk.CTkFrame):
     """▶/▼ 접이식 섹션 (뚱헌터 Collapsible과 동일 개념)."""
     def __init__(self, parent, title, start_open=False, **kwargs):
@@ -249,6 +267,10 @@ class Collapsible(ctk.CTkFrame):
             self.body.pack(fill="x", padx=2, pady=(0, 2))
         else:
             self.body.pack_forget()
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
         top = self.winfo_toplevel()
         if top and top.winfo_exists():
             def _sync():
@@ -537,6 +559,41 @@ def mna_potion_keys():
     return [hb, sk, "1"]
 
 
+def get_heal_hotbar_slot(strong=False):
+    """UI·저장값에서 일반/상위힐 핫바+슬롯."""
+    if strong:
+        hb = strong_heal_hotbar_var.get() if strong_heal_hotbar_var else STRONG_HEAL_HOTBAR
+        sl = strong_heal_slot_var.get() if strong_heal_slot_var else STRONG_HEAL_SLOT
+        d_slot = "F7"
+    else:
+        hb = heal_hotbar_var.get() if heal_hotbar_var else HEAL_HOTBAR
+        sl = heal_slot_var.get() if heal_slot_var else HEAL_SLOT
+        d_slot = "F9"
+    if hb not in BUFF_HOTBARS:
+        hb = "F1"
+    if sl not in BUFF_SLOT_LABELS:
+        sl = d_slot
+    return hb, sl
+
+
+def heal_action_keys(hotbar_label, slot_label, double=False):
+    """힐 단축키 → 펌웨어 키 시퀀스. F1이면 슬롯만, F2/F3이면 핫바전환+슬롯."""
+    hb = (hotbar_label or "F1").replace("F", "")
+    slot = slot_label if slot_label in BUFF_SLOT_LABELS else "F9"
+    sk = BUFF_SLOT_KEYS.get(slot, "9")
+    if hb == "1":
+        keys = [sk]
+    else:
+        keys = [hb, sk]
+    if double:
+        keys.append(sk)
+    return keys
+
+
+def heal_slot_label(hotbar_label, slot_label):
+    return "%s+%s" % (hotbar_label, slot_label)
+
+
 def buff_interval_jitter(base_sec):
     """설정 초 ± 랜덤 (기계적 1200초 고정 방지)."""
     base = max(5, int(base_sec))
@@ -633,15 +690,25 @@ MNA_HOTBAR = "F2"   # 파랭이가 실제로 있는 핫바(F1/F2/F3) — UI에�
 MNA_SLOT = "F8"     # 파랭이가 실제로 있는 슬롯(F5~F12) — 기본값은 예전 하드코딩(F2+F8)과 동일
 mna_hotbar_var = None
 mna_slot_var = None
+HEAL_HOTBAR = "F1"
+HEAL_SLOT = "F9"
+STRONG_HEAL_HOTBAR = "F1"
+STRONG_HEAL_SLOT = "F7"
+heal_hotbar_var = None
+heal_slot_var = None
+strong_heal_hotbar_var = None
+strong_heal_slot_var = None
 strong_heal_pct = 30
 self_strong_heal_pct = 30
 chk_strong_heal = None
+chk_self_strong_heal = None
 last_mna_potion = 0
 chk_mna = None
 # 힐·물약 스위치 저장값 (재시작 복원) — 기본은 기존 UI 기본과 동일
 saved_chk_self_heal = "1"
 saved_chk_danger = "1"
 saved_chk_strong_heal = "1"
+saved_chk_self_strong_heal = "1"
 saved_chk_attacker = "1"
 saved_chk_mna = "0"
 saved_chk_end_bert = "0"
@@ -993,12 +1060,13 @@ saved_v_f10 = "1200"
 saved_v_f11 = "1200"
 saved_expire_start = ""
 saved_expire_days = "0"
-saved_win_w = 195
+saved_win_w = 178
 saved_win_h = 380
 sheet_expire_info = ""   # 구글시트 C열 (일수 또는 만료일) — 표시·판정은 여기만 사용
 sheet_expire_end = ""    # 구글시트 D열 (만료일)
 
 root = None
+main_body = None  # 옵션·버프·힐 스크롤 영역
 chk_fix = None
 chk_follow = None
 chk_force_fix = None
@@ -1118,10 +1186,11 @@ def load_hidden_config():
     global saved_party_flags, saved_party_mode_flags
     global SELF_HP_ROI, SELF_HP_100_REF, DANGER_HP_ROI, DANGER_HP_100_REF
     global MNA_ROI, MNA_100_REF, mna_threshold, MNA_HOTBAR, MNA_SLOT
+    global HEAL_HOTBAR, HEAL_SLOT, STRONG_HEAL_HOTBAR, STRONG_HEAL_SLOT
     global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold
     global PARTY_ROIS, PARTY_HP_100_REF, PARTY_HP_THRESHOLDS, PARTY_USE_ROI
     global _stream_roi
-    global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_attacker, saved_chk_mna, saved_chk_end_bert, saved_chk_wheel_heal
+    global saved_chk_self_heal, saved_chk_danger, saved_chk_strong_heal, saved_chk_self_strong_heal, saved_chk_attacker, saved_chk_mna, saved_chk_end_bert, saved_chk_wheel_heal
     global strong_heal_pct, self_strong_heal_pct, saved_win_w, saved_win_h
     
     text_value_keys = {"V_BL", "V_SH", "V_BLU", "V_F10", "V_F11",
@@ -1139,6 +1208,7 @@ def load_hidden_config():
     saved_chk_self_heal = "1"
     saved_chk_danger = "1"
     saved_chk_strong_heal = "1"
+    saved_chk_self_strong_heal = "1"
     saved_chk_attacker = "1"
     saved_chk_mna = "0"
     saved_chk_end_bert = "0"
@@ -1229,11 +1299,16 @@ def load_hidden_config():
                 if key == "MNA_THRESHOLD": mna_threshold = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
                 if key == "MNA_HOTBAR": MNA_HOTBAR = val_str if val_str in BUFF_HOTBARS else "F2"; continue
                 if key == "MNA_SLOT": MNA_SLOT = val_str if val_str in BUFF_SLOT_LABELS else "F8"; continue
+                if key == "HEAL_HOTBAR": HEAL_HOTBAR = val_str if val_str in BUFF_HOTBARS else "F1"; continue
+                if key == "HEAL_SLOT": HEAL_SLOT = val_str if val_str in BUFF_SLOT_LABELS else "F9"; continue
+                if key == "STRONG_HEAL_HOTBAR": STRONG_HEAL_HOTBAR = val_str if val_str in BUFF_HOTBARS else "F1"; continue
+                if key == "STRONG_HEAL_SLOT": STRONG_HEAL_SLOT = val_str if val_str in BUFF_SLOT_LABELS else "F7"; continue
                 if key == "STRONG_HEAL_PCT": strong_heal_pct = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
                 if key == "SELF_STRONG_HEAL_PCT": self_strong_heal_pct = int(val_str) if val_str.lstrip('-').isdigit() else 30; continue
                 if key == "CHK_SELF_HEAL": saved_chk_self_heal = val_str; continue
                 if key == "CHK_DANGER": saved_chk_danger = val_str; continue
                 if key == "CHK_STRONG_HEAL": saved_chk_strong_heal = val_str; continue
+                if key == "CHK_SELF_STRONG_HEAL": saved_chk_self_strong_heal = val_str; continue
                 if key == "CHK_ATTACKER": saved_chk_attacker = val_str; continue
                 if key == "CHK_MNA": saved_chk_mna = val_str; continue
                 if key == "CHK_END_BERT": saved_chk_end_bert = val_str; continue
@@ -1376,6 +1451,12 @@ def save_hidden_config(pwd_to_save):
             cur_mna_hb = mna_hotbar_var.get() if ('mna_hotbar_var' in globals() and mna_hotbar_var) else MNA_HOTBAR
             cur_mna_slot = mna_slot_var.get() if ('mna_slot_var' in globals() and mna_slot_var) else MNA_SLOT
             f.write(f"MNA_HOTBAR={cur_mna_hb}\nMNA_SLOT={cur_mna_slot}\n")
+            cur_heal_hb = heal_hotbar_var.get() if ('heal_hotbar_var' in globals() and heal_hotbar_var) else HEAL_HOTBAR
+            cur_heal_slot = heal_slot_var.get() if ('heal_slot_var' in globals() and heal_slot_var) else HEAL_SLOT
+            cur_str_hb = strong_heal_hotbar_var.get() if ('strong_heal_hotbar_var' in globals() and strong_heal_hotbar_var) else STRONG_HEAL_HOTBAR
+            cur_str_slot = strong_heal_slot_var.get() if ('strong_heal_slot_var' in globals() and strong_heal_slot_var) else STRONG_HEAL_SLOT
+            f.write(f"HEAL_HOTBAR={cur_heal_hb}\nHEAL_SLOT={cur_heal_slot}\n")
+            f.write(f"STRONG_HEAL_HOTBAR={cur_str_hb}\nSTRONG_HEAL_SLOT={cur_str_slot}\n")
             f.write(f"STRONG_HEAL_PCT={strong_heal_pct}\nSELF_STRONG_HEAL_PCT={self_strong_heal_pct}\n")
             def _sw01(var, fallback):
                 if var is not None:
@@ -1386,6 +1467,7 @@ def save_hidden_config(pwd_to_save):
             cur_self = _sw01(chk_self_heal_sw if 'chk_self_heal_sw' in globals() else None, saved_chk_self_heal)
             cur_danger = _sw01(chk_danger_sw if 'chk_danger_sw' in globals() else None, saved_chk_danger)
             cur_strong = _sw01(chk_strong_heal, saved_chk_strong_heal)
+            cur_self_strong = _sw01(chk_self_strong_heal if 'chk_self_strong_heal' in globals() else None, saved_chk_self_strong_heal)
             cur_atk = _sw01(chk_attacker_sw if 'chk_attacker_sw' in globals() else None, saved_chk_attacker)
             cur_mna = _sw01(chk_mna, saved_chk_mna)
             cur_end_bert = _sw01(chk_end_bert if 'chk_end_bert' in globals() else None, saved_chk_end_bert)
@@ -1393,11 +1475,12 @@ def save_hidden_config(pwd_to_save):
             globals()['saved_chk_self_heal'] = cur_self
             globals()['saved_chk_danger'] = cur_danger
             globals()['saved_chk_strong_heal'] = cur_strong
+            globals()['saved_chk_self_strong_heal'] = cur_self_strong
             globals()['saved_chk_attacker'] = cur_atk
             globals()['saved_chk_mna'] = cur_mna
             globals()['saved_chk_end_bert'] = cur_end_bert
             globals()['saved_chk_wheel_heal'] = cur_wheel_heal
-            f.write(f"CHK_SELF_HEAL={cur_self}\nCHK_DANGER={cur_danger}\nCHK_STRONG_HEAL={cur_strong}\nCHK_ATTACKER={cur_atk}\nCHK_MNA={cur_mna}\nCHK_END_BERT={cur_end_bert}\nCHK_WHEEL_HEAL={cur_wheel_heal}\n")
+            f.write(f"CHK_SELF_HEAL={cur_self}\nCHK_DANGER={cur_danger}\nCHK_STRONG_HEAL={cur_strong}\nCHK_SELF_STRONG_HEAL={cur_self_strong}\nCHK_ATTACKER={cur_atk}\nCHK_MNA={cur_mna}\nCHK_END_BERT={cur_end_bert}\nCHK_WHEEL_HEAL={cur_wheel_heal}\n")
             for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
                 on_sb = "1" if cb_sb.get() else "0"
                 hb_sb = hb_var.get() if hb_var.get() in BUFF_HOTBARS else "F1"
@@ -1856,7 +1939,7 @@ def _open_admin_panel_impl():
         hp_pct_lbl.pack(side="left"); entries[f"{prefix}_PCT"] = hp_pct_lbl
         ctk.CTkLabel(roi_row, text="힐↓", text_color="#f38ba8", font=("Malgun Gothic", 8)).pack(side="left", padx=(3,1))
         var = tk.IntVar(value=PARTY_HP_THRESHOLDS[pi])
-        sld = ctk.CTkSlider(roi_row, from_=10, to=90, number_of_steps=16, width=45, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8", variable=var)
+        sld = make_pct_slider(roi_row, 10, 90, var, width=48, steps=16)
         sld.pack(side="left", padx=1)
         thr_lbl = ctk.CTkLabel(roi_row, text=f"{var.get()}%", text_color="#f38ba8", font=("Malgun Gothic", 9, "bold"), width=24)
         thr_lbl.pack(side="left")
@@ -1973,10 +2056,10 @@ def open_guide_panel():
     add_sep()
 
     add_t("💚 힐 · 휠힐 설정", "#94e2d5")
-    add_w("게임 단축창: 휠(마우스 가운데) 슬롯에 일반힐(F9) 고정")
+    add_w("게임 단축창: 힐·물약 섹션에서 F1~F3 + F5~F12 슬롯 지정 (기본 일반 F9 / 상위 F7)")
     add_w("WDT4 펌이면 Insert 연결 시 휠힐 자동 ON (별도 펌업 불필요)")
     add_w("최신 펌웨어: 일반 파티힐·격수힐 → 가운데 휠클릭으로 대상 지정 (항상 켜짐)")
-    add_w("상위힐(F7)은 휠이 아니라 좌클릭으로 대상 지정 (더 정확함)")
+    add_w("상위힐은 휠이 아니라 좌클릭으로 대상 지정 — 슬롯은 힐·물약에서 변경")
     add_w("버프·해독·줍기는 항상 좌클릭")
     add_sep()
 
@@ -3154,28 +3237,30 @@ SELF_POTION_COMBO_PCT = 50.0
 
 def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     """쫄법 자힐.
-    - 평소: B → 펌웨어에서 F9 연타 2번 / 상위힐은 7 연타 2번
+    - 평소: 설정한 일반힐 슬롯 2연타
     - 피 <= 50%: 물약(E)+힐 같이 (위험할 때만 물약)
     - 마나부족: 물약만"""
     ed = human_delay(end_delay * 0.88, end_delay * 1.12)
     gap_f1 = (0.10, 0.20)
-    gap_heal2 = (0.07, 0.13)  # 펌웨어 case 'B' 와 동일 간격
+    gap_heal2 = (0.07, 0.13)
+    hb_n, sl_n = get_heal_hotbar_slot(False)
+    hb_s, sl_s = get_heal_hotbar_slot(True)
     if mp_low:
         execute_keys(['1', 'E'], ed, key_gap=gap_f1)
         return "물약(마나)"
     if self_hp is not None and self_hp <= SELF_POTION_COMBO_PCT:
         if use_strong:
-            execute_keys(['1', 'E', '7', '7'], ed, key_gap=gap_heal2)
+            execute_keys(['1', 'E'] + heal_action_keys(hb_s, sl_s, double=True), ed, key_gap=gap_heal2)
             return "물약+상위힐"
-        execute_keys(['1', 'E', 'B'], ed, key_gap=(0.09, 0.18))
+        execute_keys(['1', 'E'] + heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=(0.09, 0.18))
         return "물약+힐"
     if use_strong:
-        execute_keys(['1', '7', '7'], ed, key_gap=gap_heal2)
+        execute_keys(heal_action_keys(hb_s, sl_s, double=True), ed, key_gap=gap_heal2)
         return "상위힐"
-    execute_keys(['1', 'B'], ed, key_gap=gap_f1)
+    execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 16:06"
+PATCH_UPDATED_AT = "2026-08-16 04:32"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3487,6 +3572,9 @@ def on_update_check_click():
     Thread(target=lambda: check_for_update(force=True, manual=True), daemon=True).start()
 
 LATEST_PATCH = [
+    "⌨ 힐 단축키 — 일반·상위힐 F1~F3 + F5~F12 슬롯 설정 (힐·물약 섹션)",
+    "⚡ 자힐상위 — 파티 상위힐과 별도 ON/OFF 체크",
+    "✨ 버프 UI — 힐 단축키와 같은 카드 스타일로 정리",
     "📡 쫄화면 송출 — 쫄 PC 게임 화면을 격수 PC로 실시간 전송",
     "📐 송출 영역 — 제어판에서 드래그로 게임창만 잘라서 보냄",
     "🖱️ 쫄화면 조종 — 격수 PC Alt+마우스로 쫄 PC 원격 클릭·휠",
@@ -4543,8 +4631,8 @@ def heal_target_click():
     return 'M' if wheel_heal_enabled() else 'K'
 
 
-def run_target_heal(heal_cmd, end_delay=0.08, use_wheel=None):
-    """타겟 힐 — ① 단축창+힐키 ② 대상 클릭(휠 또는 좌클릭).
+def run_target_heal(hotbar, slot, end_delay=0.08, use_wheel=None):
+    """타겟 힐 — ① 핫바+힐슬롯 ② 대상 클릭(휠 또는 좌클릭).
     use_wheel=None이면 휠힐 설정 따름. 상위힐은 use_wheel=False(좌클릭)."""
     global ser, running
     if not running or not ser or not getattr(ser, "is_open", False):
@@ -4552,7 +4640,8 @@ def run_target_heal(heal_cmd, end_delay=0.08, use_wheel=None):
     if use_wheel is None:
         use_wheel = wheel_heal_enabled()
     click = 'M' if use_wheel else 'K'
-    execute_keys(['1', heal_cmd], max(0.10, end_delay * 0.35), skip_follow_toggle=True, key_gap=(0.09, 0.16))
+    keys = heal_action_keys(hotbar, slot)
+    execute_keys(keys, max(0.10, end_delay * 0.35), skip_follow_toggle=True, key_gap=(0.09, 0.16))
     if not running or not ser or not getattr(ser, "is_open", False):
         return False
     focus_lineage_window()
@@ -4875,7 +4964,7 @@ def expert_logic():
     global last_self_heal, last_party_heal, last_party_cure, last_noparty_heal
     global party_mode_flags, selected_party_flags
     global SELF_HP_ROI, SELF_HP_100_REF, DANGER_HP_ROI, DANGER_HP_100_REF
-    global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold, mna_threshold, strong_heal_pct, self_strong_heal_pct, chk_strong_heal
+    global self_hp_threshold, danger_hp_threshold, attacker_hp_threshold, mna_threshold, strong_heal_pct, self_strong_heal_pct, chk_strong_heal, chk_self_strong_heal
     global attacker_hp_udp, attacker_poisoned, attacker_petrified
     global MNA_ROI, MNA_100_REF, last_mna_potion, chk_mna, chk_self_heal_sw, chk_danger_sw, chk_attacker_sw
     global buff_next_due, last_buff_global, _buff_cfg, _self_buff_cfg
@@ -5049,7 +5138,7 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < self_strong_heal_pct
+                        use_strong = chk_self_strong_heal and chk_self_strong_heal.get() and self_hp < self_strong_heal_pct
                         tag = do_self_heal(self_hp, end_delay=1.0, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
@@ -5072,13 +5161,13 @@ def expert_logic():
                             was_fixed, was_follow = _pause_attack_click()
                             try:
                                 use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
-                                heal_key = '7' if use_strong else 'A'
-                                run_target_heal(heal_key, end_delay=0.45, use_wheel=wheel_heal_enabled() and not use_strong)
+                                hb_h, sl_h = get_heal_hotbar_slot(use_strong)
+                                run_target_heal(hb_h, sl_h, end_delay=0.45, use_wheel=wheel_heal_enabled() and not use_strong)
                                 if use_strong:
-                                    log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}%")
+                                    log_event(f"⚡ 상위힐 P{best_i+1} HP{best_hp:.0f}% ({heal_slot_label(hb_h, sl_h)})")
                                 else:
                                     tag = "휠" if wheel_heal_enabled() else None
-                                    log_event(f"💚 파티힐 P{best_i+1} HP{best_hp:.0f}%" + (f" ({tag})" if tag else ""))
+                                    log_event(f"💚 파티힐 P{best_i+1} HP{best_hp:.0f}% ({heal_slot_label(hb_h, sl_h)})" + (f" {tag}" if tag else ""))
                                 healed = True
                             finally:
                                 _resume_attack_click(was_fixed, was_follow)
@@ -5090,7 +5179,7 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.3):
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < self_strong_heal_pct
+                        use_strong = chk_self_strong_heal and chk_self_strong_heal.get() and self_hp < self_strong_heal_pct
                         tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; healed = True; log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
                 elif chk_self_heal_sw.get() and chk_color(frame, SELF_HP_COORD, SELF_HP_RGB, 18) and (now - last_self_heal >= 0.3):
@@ -5119,12 +5208,12 @@ def expert_logic():
                             heal_roi = PARTY_ROIS[best_pi]
                             human_mouse_move((heal_roi[0] + heal_roi[2]) // 2, (heal_roi[1] + heal_roi[3]) // 2, fast=True, roi=heal_roi); time.sleep(0.02)
                             use_strong = chk_strong_heal and chk_strong_heal.get() and best_hp < strong_heal_pct
-                            heal_key = '7' if use_strong else 'A'
-                            run_target_heal(heal_key, end_delay=0.08, use_wheel=wheel_heal_enabled() and not use_strong)
+                            hb_h, sl_h = get_heal_hotbar_slot(use_strong)
+                            run_target_heal(hb_h, sl_h, end_delay=0.08, use_wheel=wheel_heal_enabled() and not use_strong)
                             if use_strong:
-                                log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}%")
+                                log_event(f"⚡ 상위힐 P{best_pi + 1} HP{best_hp:.0f}% ({heal_slot_label(hb_h, sl_h)})")
                             else:
-                                log_event(f"💚 파티힐 P{best_pi + 1} HP{best_hp:.0f}%" + (" (휠)" if wheel_heal_enabled() else ""))
+                                log_event(f"💚 파티힐 P{best_pi + 1} HP{best_hp:.0f}% ({heal_slot_label(hb_h, sl_h)})" + (" 휠" if wheel_heal_enabled() else ""))
                             human_mouse_move(orig_x, orig_y, fast=True)
                             _resume_attack_click(was_fixed, was_follow)
                             last_party_heal = now; healed = True
@@ -5135,7 +5224,7 @@ def expert_logic():
                 if SELF_HP_ROI[0] != 0:
                     self_hp = roi_hp_pct(frame, SELF_HP_ROI, SELF_HP_100_REF, petrified=_self_petrified)
                     if chk_self_heal_sw.get() and self_hp < self_hp_threshold and (now - last_self_heal >= 0.2):
-                        use_strong = chk_strong_heal and chk_strong_heal.get() and self_hp < self_strong_heal_pct
+                        use_strong = chk_self_strong_heal and chk_self_strong_heal.get() and self_hp < self_strong_heal_pct
                         tag = do_self_heal(self_hp, end_delay=0.8, mp_low=_mp_low, use_strong=use_strong)
                         last_self_heal = now; action_taken = True
                         log_event(f'🔴 자힐 {tag} ({int(self_hp)}%)')
@@ -5150,21 +5239,21 @@ def expert_logic():
                     if chk_attacker_sw.get() and udp_ok and atk_hp < attacker_hp_threshold:
                         focus_lineage_window()
                         use_strong = chk_strong_heal and chk_strong_heal.get() and atk_hp < strong_heal_pct
-                        heal_key = '7' if use_strong else 'A'
+                        hb_h, sl_h = get_heal_hotbar_slot(use_strong)
                         was_fixed, was_follow = _pause_attack_click()
                         try:
                             if wheel_heal_enabled() and not use_strong:
-                                run_target_heal(heal_key, end_delay=0.45, use_wheel=True)
-                                log_event(f"💚 격수힐 HP{atk_hp:.0f}% (휠)")
+                                run_target_heal(hb_h, sl_h, end_delay=0.45, use_wheel=True)
+                                log_event(f"💚 격수힐 HP{atk_hp:.0f}% ({heal_slot_label(hb_h, sl_h)} 휠)")
                             elif wheel_heal_enabled() and use_strong:
-                                run_target_heal(heal_key, end_delay=0.45, use_wheel=False)
-                                log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%")
+                                run_target_heal(hb_h, sl_h, end_delay=0.45, use_wheel=False)
+                                log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}% ({heal_slot_label(hb_h, sl_h)})")
                             else:
-                                ser.write(b'1'); time.sleep(human_delay(0.08, 0.16))
+                                execute_keys(heal_action_keys(hb_h, sl_h), 0.45, skip_follow_toggle=True, key_gap=(0.09, 0.16))
                                 if use_strong:
-                                    ser.write(b'7'); log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
+                                    log_event(f"⚡ 상위힐 격수 HP{atk_hp:.0f}% ({heal_slot_label(hb_h, sl_h)})")
                                 elif random.randint(1, 100) <= 85:
-                                    ser.write(b'A'); log_event(f"💚 격수힐 HP{atk_hp:.0f}%"); time.sleep(human_delay(0.45, 0.7))
+                                    log_event(f"💚 격수힐 HP{atk_hp:.0f}% ({heal_slot_label(hb_h, sl_h)})")
                                 else:
                                     time.sleep(human_delay(0.2, 0.3))
                         finally:
@@ -5182,22 +5271,36 @@ def expert_logic():
 # =======================================================
 # 🚨 메인 구동
 # =======================================================
-_WIN_MIN_W, _WIN_MAX_W = 165, 420
+_WIN_MIN_W, _WIN_MAX_W = 158, 420
 _WIN_MIN_H, _WIN_MAX_H = 180, 900
+_sync_height_job = None
 
 def sync_window_height():
-    """내용 높이에 맞춰 창 높이 동기화 (펼침·접힘 모두). 높이는 저장 안 함."""
+    global _sync_height_job
+    if not root or not root.winfo_exists():
+        return
+    if _sync_height_job:
+        try:
+            root.after_cancel(_sync_height_job)
+        except Exception:
+            pass
+    _sync_height_job = root.after(50, _apply_window_height)
+
+def _apply_window_height():
+    """접으면 창을 줄이고, 펼치면 내용만큼 늘린다."""
+    global _sync_height_job
+    _sync_height_job = None
     try:
-        if root and root.winfo_exists() and not _ui_busy():
-            root.update_idletasks()
-            req_h = root.winfo_reqheight()
-            w = root.winfo_width()
-            if w < 120:
-                w = saved_win_w
-            if req_h > 200:
-                nh = max(_WIN_MIN_H, min(_WIN_MAX_H, req_h))
-                if abs(nh - root.winfo_height()) > 2:
-                    root.geometry(f"{int(w)}x{int(nh)}+{root.winfo_x()}+{root.winfo_y()}")
+        if not root or not root.winfo_exists() or _ui_busy():
+            return
+        root.update_idletasks()
+        w = root.winfo_width()
+        if w < 120:
+            w = saved_win_w
+        cap = int(root.winfo_screenheight() * 0.88)
+        req_h = root.winfo_reqheight()
+        nh = max(_WIN_MIN_H, min(_WIN_MAX_H, cap, req_h))
+        root.geometry(f"{int(w)}x{int(nh)}+{root.winfo_x()}+{root.winfo_y()}")
     except Exception:
         pass
 
@@ -5218,7 +5321,6 @@ def _end_resize(event):
     global saved_win_w
     try:
         saved_win_w = root.winfo_width()
-        sync_window_height()
         if loaded_pwd:
             save_hidden_config(loaded_pwd)
     except Exception:
@@ -5242,11 +5344,7 @@ def _set_taskmgr_title(win, title):
 root = ctk.CTk()
 root.geometry(f"{saved_win_w}x380+0+0")
 root.attributes("-topmost", True)
-def auto_resize_height():
-    sync_window_height()
-    if root:
-        root.after(500, auto_resize_height)
-root.after(1000, auto_resize_height)
+root.after(400, sync_window_height)
 root.configure(fg_color="#141420") 
 root.overrideredirect(True)
 _set_taskmgr_title(root, "sooplive client")
@@ -5416,14 +5514,17 @@ except Exception:
 frame_mode = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
 frame_mode.pack(pady=(2,1), padx=2, fill='x')
 frame_mode.grid_columnconfigure(0, weight=1)
-_pick_sel = dict(width=86, height=28, premium=True)
+_pick_sel = dict(width=72, height=26, premium=True)
 mode_seg = make_pick_btn(
     frame_mode, ["파티", "솔로(파티)", "노파티"], mode_var, **_pick_sel,
 )
 mode_seg.grid(row=0, column=0, padx=4, pady=3, sticky="ew")
 
+main_body = ctk.CTkFrame(root, fg_color="transparent")
+main_body.pack(fill="x", padx=2, pady=1)
+
 # ─── 접이식: 옵션 ───
-coll_opt = Collapsible(root, "옵션", start_open=False)
+coll_opt = Collapsible(main_body, "옵션", start_open=False)
 coll_opt.pack(pady=1, padx=2, fill="x")
 frame_opt = coll_opt.body
 frame_opt.grid_columnconfigure(0, weight=1)
@@ -5495,7 +5596,7 @@ except Exception:
     pass
 
 # ─── 접이식: 버프 그리드 ───
-coll_buff = Collapsible(root, "버프", start_open=False)
+coll_buff = Collapsible(main_body, "버프", start_open=True)
 coll_buff.pack(pady=1, padx=2, fill="x")
 buff_body = coll_buff.body
 def _on_buff_on():
@@ -5505,16 +5606,31 @@ def _on_buff_on():
         save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception:
         pass
-buff_top = ctk.CTkFrame(buff_body, fg_color="transparent")
-buff_top.pack(fill="x", padx=4, pady=(4, 2))
-RoundedToggle(buff_top, "버프 자동", "#a371f7", var=chk_buff_on, cmd=_on_buff_on).pack(side="left")
+_buff_card_kw = dict(fg_color="#1e1e2e", corner_radius=6, border_width=1, border_color="#45475a")
+_buff_pk = dict(premium=True, width=28, height=16, font=("Malgun Gothic", 8, "bold"), arrow=False)
+_buff_sec_entry = dict(width=36, height=16, font=("Malgun Gothic", 7), text_color="#ffffff",
+                       fg_color="#1e1e2e", border_color="#45475a", justify="center")
+
+frame_buff_card = ctk.CTkFrame(buff_body, **_buff_card_kw)
+frame_buff_card.pack(pady=(1, 2), padx=2, fill="x")
+buff_top = ctk.CTkFrame(frame_buff_card, fg_color="transparent")
+buff_top.pack(fill="x", padx=4, pady=(3, 2))
+buff_mode_var = tk.StringVar(value="일반")
+ctk.CTkLabel(buff_top, text="✨", text_color="#cba6f7", font=("Malgun Gothic", 8, "bold")).pack(side="left")
+buff_mode_btn = make_pick_btn(buff_top, ["일반", "자기"], buff_mode_var, width=36, height=16, font=("Malgun Gothic", 8, "bold"), premium=True, arrow=False)
+buff_mode_btn.pack(side="left", padx=(2, 4))
+buff_general_top = ctk.CTkFrame(buff_top, fg_color="transparent")
+buff_general_top.pack(side="left")
+RoundedToggle(buff_general_top, "자동", "#a371f7", var=chk_buff_on, cmd=_on_buff_on).pack(side="left", padx=(0, 4))
+ctk.CTkLabel(buff_general_top, text="창", text_color="#6c7086", font=("Malgun Gothic", 8)).pack(side="left", padx=(0, 2))
 buff_hotbar_var = tk.StringVar(value="F1")
-ctk.CTkLabel(buff_top, text="단축창", text_color="#a6adc8", font=("Malgun Gothic", 8, "bold")).pack(side="left", padx=(8, 3))
-buff_hotbar_combo = make_pick_btn(buff_top, BUFF_HOTBARS, buff_hotbar_var, width=44, height=20, font=("Malgun Gothic", 8), arrow=False)
+buff_hotbar_combo = make_pick_btn(buff_general_top, BUFF_HOTBARS, buff_hotbar_var, **_buff_pk)
 buff_hotbar_combo.pack(side="left")
 
-buff_page_host = ctk.CTkFrame(buff_body, fg_color="transparent")
-buff_page_host.pack(fill="x", padx=2, pady=(0, 2))
+buff_general_host = ctk.CTkFrame(frame_buff_card, fg_color="transparent")
+buff_general_host.pack(fill="x", padx=2, pady=(0, 3))
+buff_page_host = ctk.CTkFrame(buff_general_host, fg_color="transparent")
+buff_page_host.pack(fill="x")
 _buff_pages = {}
 
 def _parse_buff_saved(hb, slot):
@@ -5527,30 +5643,30 @@ def _parse_buff_saved(hb, slot):
 for hb in BUFF_HOTBARS:
     page = ctk.CTkFrame(buff_page_host, fg_color="transparent")
     _buff_pages[hb] = page
+    left_col = ctk.CTkFrame(page, fg_color="transparent")
+    right_col = ctk.CTkFrame(page, fg_color="transparent")
+    left_col.pack(side="left", fill="x", expand=True, anchor="n")
+    right_col.pack(side="left", fill="x", expand=True, anchor="n")
     rows = []
-    for ci in range(4):
-        page.grid_columnconfigure(ci, weight=1)
-    for ri, slots in enumerate([BUFF_SLOT_LABELS[:4], BUFF_SLOT_LABELS[4:]]):
-        for ci, slot in enumerate(slots):
-            cell = ctk.CTkFrame(page, fg_color="transparent")
-            cell.grid(row=ri, column=ci, padx=1, pady=1, sticky="n")
-            on_def, sec_def = _parse_buff_saved(hb, slot)
-            cb = ctk.BooleanVar(value=on_def)
-            iv = tk.StringVar(value=sec_def)
-            def _on_buff_slot(_hb=hb, _slot=slot):
-                try:
-                    save_hidden_config(loaded_pwd if loaded_pwd else "")
-                except Exception:
-                    pass
-            ctk.CTkCheckBox(cell, text=slot, variable=cb, width=42, checkbox_width=14, checkbox_height=14,
-                            font=("Malgun Gothic", 8, "bold"), text_color="#cdd6f4",
-                            fg_color="#800020", hover_color="#9e1a3a", command=_on_buff_slot).pack()
-            ent = ctk.CTkEntry(cell, textvariable=iv, width=34, height=18, font=("Malgun Gothic", 8),
-                               text_color="#ffffff", fg_color="#1e1e2e", justify="center")
-            ent.pack(pady=(0, 1))
-            ctk.CTkLabel(cell, text="초", text_color="#6c7086", font=("Malgun Gothic", 7)).pack()
-            iv.trace_add("write", lambda *a: _schedule_buff_cfg_save())
-            rows.append((slot, cb, iv))
+    for idx, slot in enumerate(BUFF_SLOT_LABELS):
+        parent = left_col if idx < 4 else right_col
+        cell = ctk.CTkFrame(parent, fg_color="transparent")
+        cell.pack(anchor="w", pady=0)
+        on_def, sec_def = _parse_buff_saved(hb, slot)
+        cb = ctk.BooleanVar(value=on_def)
+        iv = tk.StringVar(value=sec_def)
+        def _on_buff_slot(_hb=hb, _slot=slot):
+            try:
+                save_hidden_config(loaded_pwd if loaded_pwd else "")
+            except Exception:
+                pass
+        ctk.CTkCheckBox(cell, text=slot, variable=cb, width=32, checkbox_width=12, checkbox_height=12,
+                        font=("Malgun Gothic", 7, "bold"), text_color="#f0d9a8",
+                        fg_color="#800020", hover_color="#9e1a3a",
+                        command=_on_buff_slot).pack(side="left")
+        ctk.CTkEntry(cell, textvariable=iv, **_buff_sec_entry).pack(side="left", padx=(1, 0))
+        iv.trace_add("write", lambda *a: _schedule_buff_cfg_save())
+        rows.append((slot, cb, iv))
     _buff_cfg[hb] = rows
 
 def _show_buff_page(choice=None):
@@ -5564,20 +5680,17 @@ def _show_buff_page(choice=None):
 buff_hotbar_combo.set_pick_command(_show_buff_page)
 _show_buff_page("F1")
 
-ctk.CTkLabel(buff_body, text="자기버프 (연타)", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(pady=(2, 1))
-_self_buff_grid = ctk.CTkFrame(buff_body, fg_color="transparent")
-_self_buff_grid.pack(fill="x", padx=2, pady=(0, 2))
-_self_buff_grid.grid_columnconfigure(0, weight=1)
-_self_buff_grid.grid_columnconfigure(1, weight=1)
+buff_self_host = ctk.CTkFrame(frame_buff_card, fg_color="transparent")
+_self_left = ctk.CTkFrame(buff_self_host, fg_color="transparent")
+_self_right = ctk.CTkFrame(buff_self_host, fg_color="transparent")
+_self_left.pack(side="left", fill="x", expand=True, anchor="n")
+_self_right.pack(side="left", fill="x", expand=True, anchor="n")
 _self_buff_cfg = []
 for _sb_idx in range(1, SELF_BUFF_COUNT + 1):
     _sb_on, _sb_hb, _sb_slot, _sb_sec = _parse_self_buff_saved(_sb_idx)
-    _sb_cell = ctk.CTkFrame(_self_buff_grid, fg_color="transparent")
-    _sb_cell.grid(row=(_sb_idx - 1) // 2, column=(_sb_idx - 1) % 2, padx=2, pady=1, sticky="nw")
-    _sb_row1 = ctk.CTkFrame(_sb_cell, fg_color="transparent")
-    _sb_row1.pack(anchor="w")
-    _sb_row2 = ctk.CTkFrame(_sb_cell, fg_color="transparent")
-    _sb_row2.pack(anchor="w")
+    _sb_parent = _self_left if _sb_idx <= 2 else _self_right
+    _sb_cell = ctk.CTkFrame(_sb_parent, fg_color="transparent")
+    _sb_cell.pack(anchor="w", pady=0)
     _sb_cb = ctk.BooleanVar(value=_sb_on)
     _sb_hb_var = tk.StringVar(value=_sb_hb if _sb_hb in BUFF_HOTBARS else "F1")
     _sb_slot_var = tk.StringVar(value=_sb_slot if _sb_slot in BUFF_SLOT_LABELS else "F5")
@@ -5588,41 +5701,96 @@ for _sb_idx in range(1, SELF_BUFF_COUNT + 1):
             save_hidden_config(loaded_pwd if loaded_pwd else "")
         except Exception:
             pass
-    ctk.CTkCheckBox(_sb_row1, text=str(_sb_idx), variable=_sb_cb, width=22, checkbox_width=13, checkbox_height=13,
-                    font=("Malgun Gothic", 8, "bold"), text_color="#f9e2af",
+    ctk.CTkCheckBox(_sb_cell, text=str(_sb_idx), variable=_sb_cb, width=16, checkbox_width=12, checkbox_height=12,
+                    font=("Malgun Gothic", 7, "bold"), text_color="#f9e2af",
                     fg_color="#800020", hover_color="#9e1a3a", command=_on_self_buff_row).pack(side="left")
-    _sb_hb_btn = make_pick_btn(_sb_row1, BUFF_HOTBARS, _sb_hb_var, width=30, height=18,
-                               font=("Malgun Gothic", 8), arrow=False)
+    _sb_hb_btn = make_pick_btn(_sb_cell, BUFF_HOTBARS, _sb_hb_var, width=26, height=16, font=("Malgun Gothic", 7, "bold"), premium=True, arrow=False)
     _sb_hb_btn.pack(side="left", padx=1)
     _sb_hb_btn.set_pick_command(lambda *a: _schedule_buff_cfg_save())
-    _sb_slot_btn = make_pick_btn(_sb_row1, BUFF_SLOT_LABELS, _sb_slot_var, width=30, height=18,
-                                 font=("Malgun Gothic", 8), arrow=False)
+    _sb_slot_btn = make_pick_btn(_sb_cell, BUFF_SLOT_LABELS, _sb_slot_var, width=28, height=16, font=("Malgun Gothic", 7, "bold"), premium=True, arrow=False)
     _sb_slot_btn.pack(side="left", padx=1)
     _sb_slot_btn.set_pick_command(lambda *a: _schedule_buff_cfg_save())
-    ctk.CTkEntry(_sb_row2, textvariable=_sb_sec_var, width=36, height=18, font=("Malgun Gothic", 8),
-                 text_color="#ffffff", fg_color="#1e1e2e", justify="center").pack(side="left", padx=(22, 1))
+    ctk.CTkEntry(_sb_cell, textvariable=_sb_sec_var, **_buff_sec_entry).pack(side="left", padx=1)
     _sb_sec_var.trace_add("write", lambda *a: _schedule_buff_cfg_save())
-    ctk.CTkLabel(_sb_row2, text="초", text_color="#6c7086", font=("Malgun Gothic", 7)).pack(side="left")
     _self_buff_cfg.append((_sb_cb, _sb_hb_var, _sb_slot_var, _sb_sec_var))
 
+def _show_buff_mode(choice=None):
+    mode = choice or buff_mode_var.get()
+    if mode == "자기":
+        buff_general_top.pack_forget()
+        buff_general_host.pack_forget()
+        buff_self_host.pack(fill="x", padx=2, pady=(0, 3))
+    else:
+        buff_self_host.pack_forget()
+        buff_general_top.pack(side="left")
+        buff_general_host.pack(fill="x", padx=2, pady=(0, 3))
+        _show_buff_page()
+    try:
+        sync_window_height()
+    except Exception:
+        pass
+
+buff_mode_btn.set_pick_command(_show_buff_mode)
+_show_buff_mode("일반")
+
 # ─── 접이식: 힐·물약 ───
-coll_heal = Collapsible(root, "힐·물약", start_open=False)
+coll_heal = Collapsible(main_body, "힐·물약", start_open=False)
 coll_heal.pack(pady=1, padx=2, fill="x")
 heal_body = coll_heal.body
 
+frame_heal_slot = ctk.CTkFrame(heal_body, fg_color="#1e1e2e", corner_radius=8, border_width=1, border_color="#45475a")
+frame_heal_slot.pack(pady=(2, 4), padx=2, fill="x")
+ctk.CTkLabel(frame_heal_slot, text="⌨ 힐 단축키", text_color="#cba6f7", font=("Malgun Gothic", 9, "bold")).pack(anchor="w", padx=6, pady=(5, 2))
+_row_hk = dict(premium=True, width=28, height=18, font=("Malgun Gothic", 8, "bold"), arrow=False)
+_hk_split = ctk.CTkFrame(frame_heal_slot, fg_color="transparent")
+_hk_split.pack(fill="x", padx=4, pady=(0, 5))
+_row_n = ctk.CTkFrame(_hk_split, fg_color="transparent")
+_row_n.pack(side="left", fill="x", expand=True, padx=(0, 2))
+ctk.CTkLabel(_row_n, text="💚 일반", text_color="#a6e3a1", font=("Malgun Gothic", 8, "bold")).pack(side="left")
+heal_hotbar_var = tk.StringVar(value=HEAL_HOTBAR)
+heal_slot_var = tk.StringVar(value=HEAL_SLOT)
+heal_hb_btn = make_pick_btn(_row_n, BUFF_HOTBARS, heal_hotbar_var, **_row_hk)
+heal_hb_btn.pack(side="left", padx=(2, 1))
+ctk.CTkLabel(_row_n, text="+", text_color="#6c7086", font=("Malgun Gothic", 8)).pack(side="left")
+heal_sl_btn = make_pick_btn(_row_n, BUFF_SLOT_LABELS, heal_slot_var, width=30, height=18, font=("Malgun Gothic", 8, "bold"), premium=True, arrow=False)
+heal_sl_btn.pack(side="left", padx=1)
+_row_s = ctk.CTkFrame(_hk_split, fg_color="transparent")
+_row_s.pack(side="left", fill="x", expand=True, padx=(2, 0))
+ctk.CTkLabel(_row_s, text="⚡ 상위", text_color="#89b4fa", font=("Malgun Gothic", 8, "bold")).pack(side="left")
+strong_heal_hotbar_var = tk.StringVar(value=STRONG_HEAL_HOTBAR)
+strong_heal_slot_var = tk.StringVar(value=STRONG_HEAL_SLOT)
+str_hb_btn = make_pick_btn(_row_s, BUFF_HOTBARS, strong_heal_hotbar_var, **_row_hk)
+str_hb_btn.pack(side="left", padx=(2, 1))
+ctk.CTkLabel(_row_s, text="+", text_color="#6c7086", font=("Malgun Gothic", 8)).pack(side="left")
+str_sl_btn = make_pick_btn(_row_s, BUFF_SLOT_LABELS, strong_heal_slot_var, width=30, height=18, font=("Malgun Gothic", 8, "bold"), premium=True, arrow=False)
+str_sl_btn.pack(side="left", padx=1)
+def update_heal_slots(*a):
+    global HEAL_HOTBAR, HEAL_SLOT, STRONG_HEAL_HOTBAR, STRONG_HEAL_SLOT
+    HEAL_HOTBAR = heal_hotbar_var.get()
+    HEAL_SLOT = heal_slot_var.get()
+    STRONG_HEAL_HOTBAR = strong_heal_hotbar_var.get()
+    STRONG_HEAL_SLOT = strong_heal_slot_var.get()
+    log_event(f"⌨ 힐키 → 일반 {heal_slot_label(HEAL_HOTBAR, HEAL_SLOT)} / 상위 {heal_slot_label(STRONG_HEAL_HOTBAR, STRONG_HEAL_SLOT)}")
+    if loaded_pwd:
+        save_hidden_config(loaded_pwd)
+for _b in (heal_hb_btn, heal_sl_btn, str_hb_btn, str_sl_btn):
+    _b.set_pick_command(update_heal_slots)
+
 frame_selfhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_selfhp.pack(pady=1, padx=2, fill='x')
+frame_selfhp.grid_columnconfigure(1, weight=1)
 chk_self_heal_sw = ctk.BooleanVar(value=saved_chk_self_heal in ("1", "true", "True"))
 def _on_self_heal_sw():
     log_event(f"🔴 자힐 {'ON' if chk_self_heal_sw.get() else 'OFF'}")
     try: save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception: pass
-RoundedToggle(frame_selfhp, "🔴 자힐", "#58a6ff", var=chk_self_heal_sw, cmd=_on_self_heal_sw).pack(side='left', padx=5)
+_tg_self = RoundedToggle(frame_selfhp, "🔴 자힐", "#58a6ff", var=chk_self_heal_sw, cmd=_on_self_heal_sw)
+_tg_self.grid(row=0, column=0, sticky="w", padx=2)
 self_hp_var = ctk.IntVar(value=self_hp_threshold)
-self_hp_sld = ctk.CTkSlider(frame_selfhp, from_=10, to=90, variable=self_hp_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8")
-self_hp_sld.pack(side='left', padx=2)
+self_hp_sld = make_pct_slider(frame_selfhp, 10, 90, self_hp_var)
+self_hp_sld.grid(row=0, column=1, sticky="ew", padx=2)
 self_hp_lbl = ctk.CTkLabel(frame_selfhp, text=f"{self_hp_threshold}%", text_color="#f38ba8", font=('Malgun Gothic', 10, 'bold'), width=28)
-self_hp_lbl.pack(side='left')
+self_hp_lbl.grid(row=0, column=2, sticky="e")
 def update_self_hp_thr(*a):
     global self_hp_threshold
     self_hp_threshold = self_hp_var.get(); self_hp_lbl.configure(text=f"{self_hp_threshold}%")
@@ -5631,12 +5799,19 @@ self_hp_var.trace_add("write", update_self_hp_thr)
 
 frame_self_strong = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_self_strong.pack(pady=1, padx=2, fill='x')
-ctk.CTkLabel(frame_self_strong, text="⚡ 자힐상위", text_color="#a6adc8", font=("Malgun Gothic", 9, "bold"), width=58).pack(side='left', padx=(8, 2))
+frame_self_strong.grid_columnconfigure(1, weight=1)
+chk_self_strong_heal = ctk.BooleanVar(value=saved_chk_self_strong_heal in ("1", "true", "True"))
+def _on_self_strong_heal():
+    log_event(f"⚡ 자힐상위 {'ON' if chk_self_strong_heal.get() else 'OFF'}")
+    try: save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception: pass
+_tg_self_s = RoundedToggle(frame_self_strong, "⚡ 자힐상위", "#58a6ff", var=chk_self_strong_heal, cmd=_on_self_strong_heal)
+_tg_self_s.grid(row=0, column=0, sticky="w", padx=2)
 self_strong_var = ctk.IntVar(value=self_strong_heal_pct)
-self_strong_sld = ctk.CTkSlider(frame_self_strong, from_=5, to=70, variable=self_strong_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8")
-self_strong_sld.pack(side='left', padx=2)
+self_strong_sld = make_pct_slider(frame_self_strong, 5, 70, self_strong_var)
+self_strong_sld.grid(row=0, column=1, sticky="ew", padx=2)
 self_strong_lbl = ctk.CTkLabel(frame_self_strong, text=f"{self_strong_heal_pct}%", text_color="#f38ba8", font=('Malgun Gothic', 10, 'bold'), width=28)
-self_strong_lbl.pack(side='left')
+self_strong_lbl.grid(row=0, column=2, sticky="e")
 def update_self_strong_thr(*a):
     global self_strong_heal_pct
     self_strong_heal_pct = self_strong_var.get()
@@ -5646,17 +5821,19 @@ self_strong_var.trace_add("write", update_self_strong_thr)
 
 frame_dangerhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_dangerhp.pack(pady=1, padx=2, fill='x')
+frame_dangerhp.grid_columnconfigure(1, weight=1)
 chk_danger_sw = ctk.BooleanVar(value=saved_chk_danger in ("1", "true", "True"))
 def _on_danger_sw():
     log_event(f"🛡️ 위기 {'ON' if chk_danger_sw.get() else 'OFF'}")
     try: save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception: pass
-RoundedToggle(frame_dangerhp, "🛡️ 위기", "#58a6ff", var=chk_danger_sw, cmd=_on_danger_sw).pack(side='left', padx=4)
+_tg_danger = RoundedToggle(frame_dangerhp, "🛡️ 위기", "#58a6ff", var=chk_danger_sw, cmd=_on_danger_sw)
+_tg_danger.grid(row=0, column=0, sticky="w", padx=2)
 danger_hp_var = ctk.IntVar(value=danger_hp_threshold)
-danger_hp_sld = ctk.CTkSlider(frame_dangerhp, from_=5, to=50, variable=danger_hp_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#ef4444")
-danger_hp_sld.pack(side='left', padx=2)
-danger_hp_lbl = ctk.CTkLabel(frame_dangerhp, text=f"{danger_hp_threshold}%", text_color="#ef4444", font=('Malgun Gothic', 10, 'bold'), width=28)
-danger_hp_lbl.pack(side='left')
+danger_hp_sld = make_pct_slider(frame_dangerhp, 5, 50, danger_hp_var)
+danger_hp_sld.grid(row=0, column=1, sticky="ew", padx=2)
+danger_hp_lbl = ctk.CTkLabel(frame_dangerhp, text=f"{danger_hp_threshold}%", text_color=SLIDER_PROGRESS_DEFAULT, font=('Malgun Gothic', 10, 'bold'), width=28)
+danger_hp_lbl.grid(row=0, column=2, sticky="e")
 def update_danger_hp_thr(*a):
     global danger_hp_threshold
     danger_hp_threshold = danger_hp_var.get(); danger_hp_lbl.configure(text=f"{danger_hp_threshold}%")
@@ -5665,16 +5842,19 @@ danger_hp_var.trace_add("write", update_danger_hp_thr)
 
 frame_strong = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_strong.pack(pady=1, padx=2, fill="x")
+frame_strong.grid_columnconfigure(1, weight=1)
 chk_strong_heal = ctk.BooleanVar(value=saved_chk_strong_heal in ("1", "true", "True"))
 def _on_strong_heal():
     log_event(f"⚡ 상위힐 {'ON' if chk_strong_heal.get() else 'OFF'}")
     try: save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception: pass
-RoundedToggle(frame_strong, "⚡ 상위힐", "#58a6ff", var=chk_strong_heal, cmd=_on_strong_heal).pack(side="left", padx=4)
+_tg_strong = RoundedToggle(frame_strong, "⚡ 상위힐", "#58a6ff", var=chk_strong_heal, cmd=_on_strong_heal)
+_tg_strong.grid(row=0, column=0, sticky="w", padx=2)
 sv = ctk.IntVar(value=strong_heal_pct)
-ctk.CTkSlider(frame_strong, from_=5, to=70, variable=sv, width=60, height=18, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#f38ba8").pack(side="left", padx=2)
+_strong_sld = make_pct_slider(frame_strong, 5, 70, sv)
+_strong_sld.grid(row=0, column=1, sticky="ew", padx=2)
 s_lbl = ctk.CTkLabel(frame_strong, text=f"{strong_heal_pct}%", text_color="#f38ba8", font=("Malgun Gothic",10,"bold"), width=28)
-s_lbl.pack(side="left")
+s_lbl.grid(row=0, column=2, sticky="e")
 def update_strong_thr(v, lbl=s_lbl):
     global strong_heal_pct
     strong_heal_pct = sv.get(); lbl.configure(text=f"{strong_heal_pct}%")
@@ -5684,17 +5864,19 @@ sv.trace_add("write", lambda *a: update_strong_thr(sv, s_lbl))
 
 frame_atkhp = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_atkhp.pack(pady=1, padx=2, fill='x')
+frame_atkhp.grid_columnconfigure(1, weight=1)
 chk_attacker_sw = ctk.BooleanVar(value=saved_chk_attacker in ("1", "true", "True"))
 def _on_attacker_sw():
     log_event(f"⚔️ 격수 {'ON' if chk_attacker_sw.get() else 'OFF'}")
     try: save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception: pass
-RoundedToggle(frame_atkhp, "⚔️ 격수", "#58a6ff", var=chk_attacker_sw, cmd=_on_attacker_sw).pack(side='left', padx=4)
+_tg_atk = RoundedToggle(frame_atkhp, "⚔️ 격수", "#58a6ff", var=chk_attacker_sw, cmd=_on_attacker_sw)
+_tg_atk.grid(row=0, column=0, sticky="w", padx=2)
 atkhp_var = ctk.IntVar(value=int(attacker_hp_threshold))
-atkhp_sld = ctk.CTkSlider(frame_atkhp, from_=10, to=99, variable=atkhp_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#ef4444")
-atkhp_sld.pack(side='left', padx=2)
-atkhp_lbl = ctk.CTkLabel(frame_atkhp, text=f"{int(attacker_hp_threshold)}%", text_color="#ef4444", font=('Malgun Gothic', 10, 'bold'), width=28)
-atkhp_lbl.pack(side='left')
+atkhp_sld = make_pct_slider(frame_atkhp, 10, 99, atkhp_var)
+atkhp_sld.grid(row=0, column=1, sticky="ew", padx=2)
+atkhp_lbl = ctk.CTkLabel(frame_atkhp, text=f"{int(attacker_hp_threshold)}%", text_color=SLIDER_PROGRESS_DEFAULT, font=('Malgun Gothic', 10, 'bold'), width=28)
+atkhp_lbl.grid(row=0, column=2, sticky="e")
 def update_atkhp_thr(*a):
     global attacker_hp_threshold
     attacker_hp_threshold = atkhp_var.get(); atkhp_lbl.configure(text=f"{int(attacker_hp_threshold)}%")
@@ -5702,19 +5884,21 @@ def update_atkhp_thr(*a):
 atkhp_var.trace_add("write", update_atkhp_thr)
 
 # 마나 물약 (맨 밑)
-chk_mna = ctk.BooleanVar(value=saved_chk_mna in ("1", "true", "True"))
 frame_mna = ctk.CTkFrame(heal_body, fg_color="transparent")
 frame_mna.pack(pady=1, padx=2, fill='x')
+frame_mna.grid_columnconfigure(1, weight=1)
+chk_mna = ctk.BooleanVar(value=saved_chk_mna in ("1", "true", "True"))
 def _on_mna_sw():
     log_event(f"💙 파랭이 {'ON' if chk_mna.get() else 'OFF'}")
     try: save_hidden_config(loaded_pwd if loaded_pwd else "")
     except Exception: pass
-RoundedToggle(frame_mna, "💙 파랭이", "#58a6ff", var=chk_mna, cmd=_on_mna_sw).pack(side='left', padx=4)
+_tg_mna = RoundedToggle(frame_mna, "💙 파랭이", "#58a6ff", var=chk_mna, cmd=_on_mna_sw)
+_tg_mna.grid(row=0, column=0, sticky="w", padx=2)
 mna_var = ctk.IntVar(value=mna_threshold)
-mna_sld = ctk.CTkSlider(frame_mna, from_=10, to=80, variable=mna_var, width=70, height=18, corner_radius=9, fg_color="#21262d", button_color="#10b981", button_hover_color="#34d399", progress_color="#89b4fa")
-mna_sld.pack(side='left', padx=2)
-mna_lbl = ctk.CTkLabel(frame_mna, text=f"{mna_threshold}%", text_color="#89b4fa", font=('Malgun Gothic', 10, 'bold'), width=28)
-mna_lbl.pack(side='left')
+mna_sld = make_pct_slider(frame_mna, 10, 80, mna_var, progress_color=SLIDER_PROGRESS_MNA)
+mna_sld.grid(row=0, column=1, sticky="ew", padx=2)
+mna_lbl = ctk.CTkLabel(frame_mna, text=f"{mna_threshold}%", text_color=SLIDER_PROGRESS_MNA, font=('Malgun Gothic', 10, 'bold'), width=28)
+mna_lbl.grid(row=0, column=2, sticky="e")
 def update_mna_thr(*a):
     global mna_threshold
     mna_threshold = mna_var.get(); mna_lbl.configure(text=f"{mna_threshold}%")
@@ -5724,14 +5908,15 @@ mna_var.trace_add("write", update_mna_thr)
 # 파랭이 위치(핫바+슬롯) — 잘못된 슬롯(예: F1의 F8=귀환주문서)이 실수로 눌리는 사고 방지용.
 # 실제 파랭이가 있는 핫바/슬롯으로 맞춰두면 그 자리가 그대로 눌림.
 frame_mna_slot = ctk.CTkFrame(heal_body, fg_color="transparent")
-frame_mna_slot.pack(pady=(0,1), padx=2, fill='x')
-ctk.CTkLabel(frame_mna_slot, text="　위치:", text_color="#89b4fa", font=('Malgun Gothic', 9)).pack(side='left', padx=(4,0))
+frame_mna_slot.pack(pady=(0, 1), padx=2, fill='x')
+frame_mna_slot.grid_columnconfigure(3, weight=1)
+ctk.CTkLabel(frame_mna_slot, text="위치", text_color="#89b4fa", font=('Malgun Gothic', 9)).grid(row=0, column=0, sticky="w", padx=(4, 0))
 mna_hotbar_var = ctk.StringVar(value=MNA_HOTBAR)
-mna_hotbar_combo = make_pick_btn(frame_mna_slot, BUFF_HOTBARS, mna_hotbar_var, width=48, height=18, font=('Malgun Gothic', 9))
-mna_hotbar_combo.pack(side='left', padx=2)
+mna_hotbar_combo = make_pick_btn(frame_mna_slot, BUFF_HOTBARS, mna_hotbar_var, width=32, height=18, font=('Malgun Gothic', 9))
+mna_hotbar_combo.grid(row=0, column=1, padx=2, sticky="w")
 mna_slot_var = ctk.StringVar(value=MNA_SLOT)
-mna_slot_combo = make_pick_btn(frame_mna_slot, BUFF_SLOT_LABELS, mna_slot_var, width=56, height=18, font=('Malgun Gothic', 9))
-mna_slot_combo.pack(side='left', padx=2)
+mna_slot_combo = make_pick_btn(frame_mna_slot, BUFF_SLOT_LABELS, mna_slot_var, width=36, height=18, font=('Malgun Gothic', 9))
+mna_slot_combo.grid(row=0, column=2, padx=2, sticky="w")
 def update_mna_slot(*a):
     global MNA_HOTBAR, MNA_SLOT
     MNA_HOTBAR = mna_hotbar_var.get(); MNA_SLOT = mna_slot_var.get()
