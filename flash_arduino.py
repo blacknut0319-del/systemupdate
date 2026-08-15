@@ -126,24 +126,37 @@ def _download(remote, dest, flog=None, callback=None, label=None):
 
 
 def ensure_firmware(flog=None, callback=None):
-    """hex: 로컬(개발폴더) 우선 → 없으면 GitHub. avrdude는 캐시 OK."""
+    """hex: GitHub 항상 재다운로드. 실패 시에만 로컬. avrdude는 캐시 OK."""
     root = TMP_ROOT
     os.makedirs(os.path.join(root, "avrdude"), exist_ok=True)
     hex_dest = os.path.join(root, HEX_NAME)
 
-    # 로컬 hex 우선 (개발/테스트 — GitHub 옛 hex보다 먼저)
-    for cand in (
-        os.path.join(HERE, "firmware", HEX_NAME),
-        os.path.join(DESKTOP, "뚱힐러_github", "firmware", HEX_NAME),
-    ):
-        if os.path.isfile(cand) and os.path.getsize(cand) > 1000:
-            try:
-                import shutil
-                shutil.copy2(cand, hex_dest)
-                flog and flog.log(f"hex 로컬: {cand} size={os.path.getsize(hex_dest)}")
-                break
-            except Exception as e:
-                flog and flog.log(f"hex 로컬복사 실패: {e}")
+    # hex는 항상 GitHub에서 다시 받음. 로컬/TEMP 옛 캐시를 그대로 구우면
+    # 오늘 아침 흔들림 hex가 다시 들어감.
+    hex_got = False
+    try:
+        new_sz = _download(
+            f"firmware/{HEX_NAME}", hex_dest, flog=flog, callback=callback, label=HEX_NAME
+        )
+        flog and flog.log(f"hex GitHub: {new_sz}")
+        hex_got = True
+    except Exception as e:
+        flog and flog.log(f"hex GitHub 실패: {e}")
+
+    if not hex_got:
+        for cand in (
+            os.path.join(HERE, "firmware", HEX_NAME),
+            os.path.join(DESKTOP, "뚱힐러_github", "firmware", HEX_NAME),
+        ):
+            if os.path.isfile(cand) and os.path.getsize(cand) > 1000:
+                try:
+                    import shutil
+                    shutil.copy2(cand, hex_dest)
+                    flog and flog.log(f"hex 로컬폴백: {cand} size={os.path.getsize(hex_dest)}")
+                    hex_got = True
+                    break
+                except Exception as e:
+                    flog and flog.log(f"hex 로컬복사 실패: {e}")
 
     # 로컬 avrdude 복사
     for cand in (
@@ -174,18 +187,9 @@ def ensure_firmware(flog=None, callback=None):
             flog and flog.log(f"도구 다운로드 실패: {e}")
             return None
 
-    # hex 없으면 GitHub
     if not os.path.isfile(hex_dest) or os.path.getsize(hex_dest) < 1000:
-        old = os.path.getsize(hex_dest) if os.path.isfile(hex_dest) else 0
-        try:
-            new_sz = _download(
-                f"firmware/{HEX_NAME}", hex_dest, flog=flog, callback=callback, label=HEX_NAME
-            )
-            flog and flog.log(f"hex GitHub: {old} → {new_sz}")
-        except Exception as e:
-            flog and flog.log(f"hex 다운로드 실패: {e}")
-            if not os.path.isfile(hex_dest) or os.path.getsize(hex_dest) < 1000:
-                return None
+        flog and flog.log("hex 없음")
+        return None
 
     flog and flog.log(f"펌웨어 폴더: {root}")
     return root
