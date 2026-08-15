@@ -3175,7 +3175,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(['1', 'B'], ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-15 14:15"
+PATCH_UPDATED_AT = "2026-08-15 14:26"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3497,6 +3497,7 @@ LATEST_PATCH = [
     "🔌 WDT4 — Insert 연결 시 펌 자동 확인, 휠힐 별도 펌업 없이 사용",
     "🏃 강제베르 — End/격수 명령 시 위기베르처럼 자동 정지",
     "🩹 게임 켠 채로 뚱힐러가 안 뜨던 문제 — 핫키 훅을 창 표시 후로 옮김",
+    "🩹 펌업 — 옛 flash/hex 캐시 안 쓰고 GitHub 최신본으로 구움",
     "🖱️ 따라가기 자동클릭 — 클릭 직전 커서 흔들림 제거 (오늘 펌업한 뚱USB는 펌업 한 번 더)",
     "🖱️ 따라가기 자동클릭 — 클릭 직전 커서 ±3 흔들림 제거",
     "📌 강제고정 — 쫄·격수 PageUp 모두 시프트 제자리공격 ON/OFF",
@@ -4377,7 +4378,7 @@ def _set_hw_label(text, color, gen):
         except Exception: pass
 
 def _load_flash_module():
-    """flash_arduino.py 로드 — 로컬(뚱힐러_github) 우선, GitHub TEMP는 폴백."""
+    """flash_arduino.py — 펌업마다 GitHub 최신본 받음. TEMP 옛 캐시 쓰면 흔들림 hex 재구움."""
     import importlib.util
     import tempfile
 
@@ -4391,21 +4392,6 @@ def _load_flash_module():
         except Exception:
             return None
         return None
-
-    cands = []
-    try:
-        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py"))
-    except Exception:
-        pass
-    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py"))
-    dd = os.environ.get("DDONG_APP_DIR", "").strip()
-    if dd:
-        cands.insert(0, os.path.join(dd, "flash_arduino.py"))
-    for path in cands:
-        if path and os.path.isfile(path):
-            mod = _load_path(path)
-            if mod:
-                return mod
 
     tmp = os.path.join(tempfile.gettempdir(), "ddong_firmware", "flash_arduino.py")
     try:
@@ -4421,12 +4407,27 @@ def _load_flash_module():
             os.makedirs(os.path.dirname(tmp), exist_ok=True)
             with open(tmp, "wb") as f:
                 f.write(data)
+            mod = _load_path(tmp)
+            if mod:
+                return mod
     except Exception:
         pass
-    if os.path.isfile(tmp):
-        mod = _load_path(tmp)
-        if mod:
-            return mod
+
+    cands = []
+    dd = os.environ.get("DDONG_APP_DIR", "").strip()
+    if dd:
+        cands.append(os.path.join(dd, "flash_arduino.py"))
+    try:
+        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py"))
+    except Exception:
+        pass
+    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py"))
+    cands.append(tmp)
+    for path in cands:
+        if path and os.path.isfile(path):
+            mod = _load_path(path)
+            if mod:
+                return mod
     return None
 
 def _call_flash(mod, callback, port, ask_manual_reset=None):

