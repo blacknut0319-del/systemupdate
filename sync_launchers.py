@@ -75,21 +75,37 @@ def _read_utf16z(data, off):
 
 
 def _extract_rt_version(path):
-    import pefile
+    """RT_VERSION 추출 — pefile 없이 kernel32만 사용."""
+    import ctypes
+    from ctypes import wintypes
 
-    pe = pefile.PE(path, fast_load=True)
-    pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"]])
-    if not hasattr(pe, "DIRECTORY_ENTRY_RESOURCE"):
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
+    k32.LoadLibraryExW.restype = wintypes.HMODULE
+    k32.FindResourceW.argtypes = [wintypes.HMODULE, ctypes.c_void_p, ctypes.c_void_p]
+    k32.FindResourceW.restype = wintypes.HRSRC
+    k32.SizeofResource.argtypes = [wintypes.HMODULE, wintypes.HRSRC]
+    k32.SizeofResource.restype = wintypes.DWORD
+    k32.LoadResource.argtypes = [wintypes.HMODULE, wintypes.HRSRC]
+    k32.LoadResource.restype = wintypes.HGLOBAL
+    k32.LockResource.argtypes = [wintypes.HGLOBAL]
+    k32.LockResource.restype = ctypes.c_void_p
+    k32.FreeLibrary.argtypes = [wintypes.HMODULE]
+    h = k32.LoadLibraryExW(path, None, 0x00000002)
+    if not h:
         return None
-    for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries:
-        if entry.id != pefile.RESOURCE_TYPE["RT_VERSION"]:
-            continue
-        for res in entry.directory.entries:
-            for lang in res.directory.entries:
-                rva = lang.data.struct.OffsetToData
-                size = lang.data.struct.Size
-                return pe.get_data(rva, size)
-    return None
+    try:
+        hrsrc = k32.FindResourceW(h, 1, 16)
+        if not hrsrc:
+            return None
+        size = k32.SizeofResource(h, hrsrc)
+        hglob = k32.LoadResource(h, hrsrc)
+        ptr = k32.LockResource(hglob)
+        if not ptr or not size:
+            return None
+        return ctypes.string_at(ptr, size)
+    finally:
+        k32.FreeLibrary(h)
 
 
 def _parse_string_block(data, off):
@@ -215,18 +231,29 @@ def _build_version_resource(strings, fixed, varfileinfo):
 
 
 def _write_rt_version(path, resource):
-    import win32api
+    """VERSIONINFO 기록 — pywin32 없이 kernel32만 사용."""
+    import ctypes
+    from ctypes import wintypes
 
-    h = win32api.BeginUpdateResource(path, 0)
-    try:
-        win32api.UpdateResource(h, 16, 1, resource, 1033)
-        win32api.EndUpdateResource(h, 0)
-    except Exception:
-        try:
-            win32api.EndUpdateResource(h, 1)
-        except Exception:
-            pass
-        raise
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.BeginUpdateResourceW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL]
+    k32.BeginUpdateResourceW.restype = wintypes.HANDLE
+    k32.UpdateResourceW.argtypes = [
+        wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p,
+        wintypes.WORD, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    k32.UpdateResourceW.restype = wintypes.BOOL
+    k32.EndUpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.BOOL]
+    k32.EndUpdateResourceW.restype = wintypes.BOOL
+    h = k32.BeginUpdateResourceW(path, False)
+    if not h:
+        raise OSError("BeginUpdateResource")
+    buf = ctypes.create_string_buffer(resource, len(resource))
+    if not k32.UpdateResourceW(h, 16, 1, 1033, buf, len(resource)):
+        k32.EndUpdateResourceW(h, True)
+        raise OSError("UpdateResource")
+    if not k32.EndUpdateResourceW(h, False):
+        raise OSError("EndUpdateResource")
 
 
 def _patch_app_display_name(path, is_client=True):
@@ -237,7 +264,7 @@ def _patch_app_display_name(path, is_client=True):
             original = _extract_rt_version(path)
         strings, fixed, varfileinfo = _parse_version_strings(original)
         if not strings:
-            return
+            strings = {"FileVersion": "1.0.0", "ProductVersion": "1.0.0"}
         if is_client:
             overrides = {
                 "CompanyName": "Soop Client",
@@ -319,28 +346,27 @@ def _ensure_local_launcher(name, is_client):
             ok = False
     if not ok:
         gh = _fetch_github_launcher(name)
-        if _valid_launcher(gh):
+        if _valid_launcher(gh) and _launcher_display_name(gh) == expect:
             local_dst = gh
-            ok = _launcher_display_name(local_dst) == expect or _valid_launcher(local_dst)
-    return local_dst if ok or _valid_launcher(local_dst) else ""
+            ok = True
+    return local_dst if ok else ""
 
 
 def reexec_target(name, app_dir=None):
-    """선호 런처(LOCALAPPDATA 패치본)가 아니면 그 경로 반환."""
-    if os.environ.get("DDONG_LAUNCHER") == "1":
-        return ""
+    """지금 exe 표시명이 아니면 패치 런처 경로 반환."""
     app_dir = app_dir or os.getcwd()
+    is_client = "client" in name.lower()
+    expect = _expected_display_name(is_client)
     sync_launcher(name, app_dir)
     pref = resolve_launcher(name, app_dir)
-    if not _valid_launcher(pref):
+    if not _valid_launcher(pref) or _launcher_display_name(pref) != expect:
         return ""
     cur = os.path.normcase(os.path.abspath(sys.executable or ""))
     if cur == os.path.normcase(os.path.abspath(pref)):
         return ""
-    base = os.path.basename(sys.executable or "").lower()
-    if base in ("python.exe", "pythonw.exe") or base == name.lower():
-        return pref
-    return ""
+    if _launcher_display_name(sys.executable or "") == expect:
+        return ""
+    return pref
 
 
 def sync_launcher(name, app_dir=None):

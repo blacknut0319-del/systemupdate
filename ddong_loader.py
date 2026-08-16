@@ -19,8 +19,8 @@ _ctx.verify_mode = ssl.CERT_NONE
 
 
 def _download_sidecar(name):
-    """GitHub에서 .py 받기 (reexec 전에 sync_launchers 필요)."""
-    dest = os.path.join(os.getcwd(), name)
+    """GitHub에서 .py 받기. 공유폴더 쓰기 실패면 LOCALAPPDATA."""
+    data = None
     req = urllib.request.Request(
         RAW_BASE + name + "?t=%d" % int(time.time()),
         headers={
@@ -33,8 +33,26 @@ def _download_sidecar(name):
         data = r.read()
     if not data or len(data) < 50:
         raise RuntimeError("%s 다운로드 실패" % name)
-    with open(dest, "wb") as f:
-        f.write(data)
+    dests = [os.path.join(os.getcwd(), name)]
+    local = os.path.join(os.environ.get("LOCALAPPDATA", "") or os.path.expanduser("~"), "ddong_launchers")
+    try:
+        os.makedirs(local, exist_ok=True)
+        dests.append(os.path.join(local, name))
+    except Exception:
+        pass
+    wrote = False
+    for dest in dests:
+        try:
+            with open(dest, "wb") as f:
+                f.write(data)
+            wrote = True
+            parent = os.path.dirname(dest)
+            if parent and parent not in sys.path:
+                sys.path.insert(0, parent)
+        except Exception:
+            pass
+    if not wrote:
+        raise RuntimeError("%s 저장 실패" % name)
 
 
 def _bootstrap_sync_launchers():
@@ -76,9 +94,7 @@ def _sync_client_launcher():
 
 
 def _reexec_via_client_if_needed():
-    """bat/공유폴더 런처로 실행되면 LOCALAPPDATA 패치 런처로 다시 실행."""
-    if os.environ.get("DDONG_LAUNCHER") == "1":
-        return
+    """표시명이 Python이면 패치 런처로 다시 실행."""
     launcher = ""
     try:
         import sync_launchers

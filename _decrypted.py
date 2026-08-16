@@ -25,9 +25,7 @@ def _sync_healer_launcher():
         return os.path.join(APP_DIR, SOOPLIVE_CLIENT_LAUNCHER)
 
 def _reexec_via_sooplive_if_needed():
-    """python / 공유폴더 런처로 실행되면 LOCALAPPDATA 패치 런처로 다시 띄움."""
-    if os.environ.get("DDONG_LAUNCHER") == "1":
-        return
+    """표시명이 Python이면 패치 런처로 다시 띄움."""
     try:
         launcher = ""
         try:
@@ -3349,7 +3347,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 15:39"
+PATCH_UPDATED_AT = "2026-08-16 15:54"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
