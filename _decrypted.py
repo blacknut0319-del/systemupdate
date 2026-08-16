@@ -26,6 +26,8 @@ def _sync_healer_launcher():
 
 def _reexec_via_sooplive_if_needed():
     """표시명이 Python이면 패치 런처로 다시 띄움."""
+    if os.environ.get("DDONG_LAUNCHER") == "1":
+        return
     try:
         launcher = ""
         try:
@@ -978,13 +980,30 @@ UDP_ATTACKER_PORT = 9999
 STREAM_TCP_PORT = 9100
 
 def _ensure_udp_firewall(port, rule_name):
-    """reexec(sooplive client.exe) 후 예전 pythonw 방화벽 허용과 별개로 UDP 수신 허용."""
+    """UDP 수신 허용 — 포트 규칙은 항상, exe 규칙은 sooplive/pythonw일 때만."""
     try:
+        import subprocess
+        flags = 0x08000000
+        port_rule = "%s (port)" % rule_name
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", "name=%s" % port_rule],
+            capture_output=True, timeout=5, creationflags=flags,
+        )
+        subprocess.run(
+            [
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=%s" % port_rule,
+                "dir=in", "action=allow", "protocol=UDP",
+                "localport=%d" % int(port),
+                "enable=yes",
+            ],
+            capture_output=True,
+            timeout=10,
+            creationflags=flags,
+        )
         exe = os.path.abspath(sys.executable)
         if not exe.lower().endswith(".exe"):
             return
-        import subprocess
-        flags = 0x08000000
         subprocess.run(
             ["netsh", "advfirewall", "firewall", "delete", "rule", "name=%s" % rule_name],
             capture_output=True, timeout=5, creationflags=flags,
@@ -996,25 +1015,6 @@ def _ensure_udp_firewall(port, rule_name):
                 "dir=in", "action=allow", "protocol=UDP",
                 "localport=%d" % int(port),
                 "program=%s" % exe,
-                "enable=yes",
-            ],
-            capture_output=True,
-            timeout=10,
-            creationflags=flags,
-        )
-        subprocess.run(
-            [
-                "netsh", "advfirewall", "firewall", "delete", "rule",
-                "name=%s (port)" % rule_name,
-            ],
-            capture_output=True, timeout=5, creationflags=flags,
-        )
-        subprocess.run(
-            [
-                "netsh", "advfirewall", "firewall", "add", "rule",
-                "name=%s (port)" % rule_name,
-                "dir=in", "action=allow", "protocol=UDP",
-                "localport=%d" % int(port),
                 "enable=yes",
             ],
             capture_output=True,
@@ -3394,7 +3394,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:43"
+PATCH_UPDATED_AT = "2026-08-16 16:51"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -5149,6 +5149,7 @@ def connect_hardware():
             else:
                 found = auto_find_arduino()
                 if found:
+                    globals()['SERIAL_PORT'] = found
                     SERIAL_PORT = found
                 ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
                 _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)
@@ -6218,25 +6219,44 @@ if os.path.exists(UDP_CONFIG_FILE):
 def save_udp_config():
     with open(UDP_CONFIG_FILE, "w", encoding="utf-8") as f: json.dump({"target_ip": udp_ip_var.get()}, f)
 
-def get_my_ip():
+def _local_ipv4_addrs():
+    addrs = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127."):
+                addrs.add(ip)
+    except Exception:
+        pass
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80)); ip = s.getsockname()[0]; s.close()
-        return ip
-    except: return "..."
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and not ip.startswith("127."):
+            addrs.add(ip)
+    except Exception:
+        pass
+    return sorted(addrs)
+
+def get_my_ip():
+    ips = _local_ipv4_addrs()
+    return ips[0] if ips else "..."
 
 def broadcast_healer_ip():
     """같은 공유기 안 격수에 힐러 IP 알려줌."""
-    ip = get_my_ip()
-    if not ip or ip in ("...", "???"):
+    ips = _local_ipv4_addrs()
+    if not ips:
         log_event("📡 격수연결 실패 — 내IP 없음")
         return
-    msg = json.dumps({"t": "ddong_healer", "ip": ip}, ensure_ascii=False).encode("utf-8")
-    targets = ["255.255.255.255", "127.0.0.1"]
-    parts = str(ip).split(".")
-    if len(parts) == 4 and all(p.isdigit() for p in parts):
-        targets.append(".".join(parts[:3] + ["255"]))
-        targets.append(ip)
+    ip = ips[0]
+    msg = json.dumps({"t": "ddong_healer", "ip": ip, "ips": ips}, ensure_ascii=False).encode("utf-8")
+    targets = {"255.255.255.255", "127.0.0.1"}
+    for one in ips:
+        targets.add(one)
+        parts = str(one).split(".")
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            targets.add(".".join(parts[:3] + ["255"]))
     ok = 0
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -6262,7 +6282,7 @@ def broadcast_healer_ip():
         log_event("📡 격수연결 실패 — %s" % e)
         return
     if ok:
-        log_event("📡 격수연결 신호 보냄 (%s)" % ip)
+        log_event("📡 격수연결 신호 보냄 (%s)" % ", ".join(ips))
     else:
         log_event("📡 격수연결 전송 실패")
 

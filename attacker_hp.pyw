@@ -52,6 +52,8 @@ def _bootstrap_sync_launchers():
             sys.path.insert(0, p)
 
 def _reexec_via_service_if_needed():
+    if os.environ.get("DDONG_LAUNCHER") == "1":
+        return
     launcher = ""
     try:
         import sync_launchers
@@ -191,7 +193,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 16:43"
+PATCH_UPDATED_AT = "2026-08-16 16:51"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -800,11 +802,28 @@ def _target_healer_ip():
 
 def _ensure_udp_firewall(port, rule_name):
     try:
+        import subprocess
+        flags = 0x08000000
+        port_rule = "%s (port)" % rule_name
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", "name=%s" % port_rule],
+            capture_output=True, timeout=5, creationflags=flags,
+        )
+        subprocess.run(
+            [
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=%s" % port_rule,
+                "dir=in", "action=allow", "protocol=UDP",
+                "localport=%d" % int(port),
+                "enable=yes",
+            ],
+            capture_output=True,
+            timeout=10,
+            creationflags=flags,
+        )
         exe = os.path.abspath(sys.executable)
         if not exe.lower().endswith(".exe"):
             return
-        import subprocess
-        flags = 0x08000000
         subprocess.run(
             ["netsh", "advfirewall", "firewall", "delete", "rule", "name=%s" % rule_name],
             capture_output=True, timeout=5, creationflags=flags,
@@ -1621,25 +1640,54 @@ def _hp_link_loop():
 
 threading.Thread(target=_hp_link_loop, daemon=True).start()
 
-def _apply_healer_ip(ip):
+def _probe_healer_ip(ip):
     ip = (ip or "").strip()
     if not ip:
+        return False
+    try:
+        sock.sendto(_HP_LINK_PKT, (ip, TARGET_PORT))
+        return True
+    except Exception:
+        return False
+
+def _healer_ip_candidates(msg):
+    out = []
+    raw_ips = msg.get("ips") if isinstance(msg, dict) else None
+    if isinstance(raw_ips, (list, tuple)):
+        for x in raw_ips:
+            s = str(x).strip()
+            if s and s not in out:
+                out.append(s)
+    hip = str((msg or {}).get("ip") or "").strip()
+    if hip and hip not in out:
+        out.insert(0, hip)
+    return out
+
+def _apply_healer_discover(msg):
+    candidates = _healer_ip_candidates(msg)
+    if not candidates:
         return
     try:
-        same = ip_var.get().strip() == ip
-        if not same:
-            ip_var.set(ip)
-            save_cfg()
+        cur = ip_var.get().strip()
+        if cur and _probe_healer_ip(cur):
+            try:
+                lbl_status.config(text="힐러연결됨", fg="#10b981")
+            except Exception:
+                pass
+            return
+        for ip in candidates:
+            if not _probe_healer_ip(ip):
+                continue
+            if ip_var.get().strip() != ip:
+                ip_var.set(ip)
+                save_cfg()
+            else:
+                _ping_healer()
             try:
                 lbl_status.config(text="힐러자동연결", fg="#10b981")
             except Exception:
                 pass
             return
-        _ping_healer()
-        try:
-            lbl_status.config(text="힐러연결됨", fg="#10b981")
-        except Exception:
-            pass
     except Exception:
         pass
 
@@ -1666,12 +1714,11 @@ def discover_listener():
                     continue
                 if not isinstance(msg, dict) or msg.get("t") != "ddong_healer":
                     continue
-                hip = str(msg.get("ip") or "").strip()
-                if hip:
+                if _healer_ip_candidates(msg):
                     try:
-                        root.after(0, lambda p=hip: _apply_healer_ip(p))
+                        root.after(0, lambda m=dict(msg): _apply_healer_discover(m))
                     except Exception:
-                        _apply_healer_ip(hip)
+                        _apply_healer_discover(msg)
         except Exception:
             time.sleep(1.0)
         finally:
