@@ -410,11 +410,12 @@ def _request_admin_refresh():
 def _admin_grab_rgb(roi):
     if not roi or roi[2] <= roi[0] or roi[3] <= roi[1]:
         return None
-    import mss as _mss
-    sct = _mss.MSS()
-    x1, y1, x2, y2 = roi
-    img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
-    return np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
+    try:
+        if camera is None:
+            return None
+        return camera.grab_roi(roi)  # thread-safe + dxcam과 동일 캡처 (100% 기준/힐 일치)
+    except Exception:
+        return None
 
 def _admin_preview_label(roi, ref100, is_blue=False, strict=True):
     if roi[0] == 0:
@@ -3423,7 +3424,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 19:53"
+PATCH_UPDATED_AT = "2026-08-16 20:06"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
