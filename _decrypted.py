@@ -3394,7 +3394,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:54"
+PATCH_UPDATED_AT = "2026-08-16 16:58"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -4129,18 +4129,29 @@ def _start_worker():
     connect_hardware()·check_google_sheet()가 느릴 수 있어서, 키보드 후킹 콜백 안에서
     직접 돌리면 Windows가 300ms 넘는 후킹을 조용히 끊어버려 Insert/Home이
     전부 안 먹히게 됨. 그래서 후킹 콜백(on_main_toggle)은 이 스레드만 띄우고 바로 반환."""
-    global running, last_buff_seq, root, lbl_status
+    global running, last_buff_seq, root, lbl_status, SERIAL_PORT
     global last_loot, loot_interval, buff_next_due, last_buff_global
     global last_self_heal, last_party_heal, last_noparty_heal
     try:
         # 워커의 대기중 재연결과 시작버튼 연결이 겹치지 않게 재연결 요청 취소
         globals()['_reconnect_req'] = False
+        try:
+            found = auto_find_arduino()
+            if found:
+                globals()['SERIAL_PORT'] = found
+                SERIAL_PORT = found
+        except Exception:
+            pass
         connect_hardware()
         if not ser or not getattr(ser, "is_open", False):
             _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
             msg = "○ 뚱박스 연결실패" if _hw in ("뚱박스", "KMBox") else "○ 장치 연결실패"
             if root and lbl_status:
                 root.after(0, lambda m=msg: lbl_status.configure(text=m, text_color="#f85149"))
+            try:
+                log_event("❌ Insert %s — 장치:%s 모드:%s" % (msg, SERIAL_PORT, _hw))
+            except Exception:
+                pass
             # lbl_ard는 connect_hardware가 이미 최신 세대로 갱신함 — 여기서 또 after하면 덮어쓸 수 있음
             return
         # 시작 직 인증 즉시 재검증 — 만료 후 다시 시작해서 잠깐 더 돌리는 꼼수 차단
@@ -5088,6 +5099,32 @@ def _begin_fw_flash():
 
     Thread(target=_worker, daemon=True).start()
 
+def _arduino_port_candidates():
+    """Insert 시 열 COM 후보 — 자동탐지 + 저장값 + CH340류 전부."""
+    out = []
+    found = auto_find_arduino()
+    if found:
+        out.append(found)
+    try:
+        cur = (SERIAL_PORT or "").strip()
+        if cur and cur not in out:
+            out.append(cur)
+    except Exception:
+        pass
+    try:
+        for p in serial.tools.list_ports.comports():
+            d = p.device
+            if not d or d in out:
+                continue
+            desc = (p.description or "") + (p.hwid or "")
+            if any(k in desc for k in ("CH340", "Arduino", "USB", "직렬", "2341", "046D")):
+                out.append(d)
+    except Exception:
+        pass
+    if not out:
+        out.append(SERIAL_PORT or "COM5")
+    return out
+
 def refresh_device_status():
     """대기 중 장치 라벨 갱신. 뚱USB는 포트 탐색만(연결은 Insert), 뚱박스는 Insert 안내.
     드롭다운 변경으로 kmNet.init 하지 않음(응답없음 방지)."""
@@ -5147,11 +5184,24 @@ def connect_hardware():
                 except Exception: pass
                 _set_hw_label(f"● 뚱박스 {_kip}", '#3fb950', gen)
             else:
-                found = auto_find_arduino()
-                if found:
-                    globals()['SERIAL_PORT'] = found
-                    SERIAL_PORT = found
-                ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
+                open_err = None
+                for port in _arduino_port_candidates():
+                    try:
+                        ser = serial.Serial(port, BAUD_RATE, timeout=0)
+                        globals()['SERIAL_PORT'] = port
+                        SERIAL_PORT = port
+                        open_err = None
+                        break
+                    except Exception as e:
+                        open_err = e
+                        try:
+                            if ser:
+                                ser.close()
+                        except Exception:
+                            pass
+                        ser = None
+                if open_err:
+                    raise open_err
                 _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)
             connected = bool(ser and getattr(ser, "is_open", False))
             if connected:
@@ -5166,9 +5216,15 @@ def connect_hardware():
                 else:
                     Thread(target=lambda s=ser: refresh_fw_version(s, log=True), daemon=True).start()
             return connected
-        except Exception:
+        except Exception as e:
             ser = None
             _set_hw_label("○ 연결실패", '#f85149', gen)
+            try:
+                _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
+                log_event("❌ 장치연결 %s (%s)" % (_hw, SERIAL_PORT))
+                log_event("   %s" % str(e)[:120])
+            except Exception:
+                pass
             return False
 
 def expert_logic():
@@ -5762,6 +5818,19 @@ _toggle_km_fields()
 globals()['_hw_ui_ready'] = True
 try:
     root.after(200, refresh_device_status)
+    root.after(3000, broadcast_healer_ip)
+    def _hw_refresh_tick():
+        try:
+            if not running:
+                refresh_device_status()
+        except Exception:
+            pass
+        try:
+            if root and root.winfo_exists():
+                root.after(2000, _hw_refresh_tick)
+        except Exception:
+            pass
+    root.after(2000, _hw_refresh_tick)
 except Exception:
     pass
 
