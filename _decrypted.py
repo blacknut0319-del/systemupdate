@@ -3394,7 +3394,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:18"
+PATCH_UPDATED_AT = "2026-08-16 16:26"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -5125,13 +5125,13 @@ def connect_hardware():
         globals()['_hw_status_gen'] = int(globals().get('_hw_status_gen', 0)) + 1
         gen = globals()['_hw_status_gen']
         try:
-            if ser: ser.close()
-        except Exception:
-            pass
-        ser = None
-        try:
             _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
             if _hw in ("뚱박스", "KMBox"):
+                try:
+                    if ser: ser.close()
+                except Exception:
+                    pass
+                ser = None
                 if kmNet is None or not hasattr(kmNet, "lcd_picture"):
                     _set_hw_label("⬇ 뚱박스 드라이버 받는중", '#f9e2af', gen)
                     if not ensure_kmnet():
@@ -5149,17 +5149,33 @@ def connect_hardware():
                 found = auto_find_arduino()
                 if found:
                     globals()['SERIAL_PORT'] = found
-                open_err = None
-                for attempt in range(3):
+                # 이미 같은 포트로 열려 있으면 닫았다 다시 안 엶 (DTR 리셋·연결실패 방지)
+                if ser and getattr(ser, "is_open", False) and ser.__class__.__name__ != "KmBox":
                     try:
+                        if getattr(ser, "port", None) == SERIAL_PORT:
+                            _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)
+                            return True
+                    except Exception:
+                        pass
+                try:
+                    if ser: ser.close()
+                except Exception:
+                    pass
+                ser = None
+                open_err = None
+                for attempt in range(4):
+                    try:
+                        if attempt > 0:
+                            time.sleep(0.9)
+                            found = auto_find_arduino()
+                            if found:
+                                globals()['SERIAL_PORT'] = found
                         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
                         open_err = None
                         break
                     except Exception as e:
                         open_err = e
                         ser = None
-                        if attempt < 2:
-                            time.sleep(0.7)
                 if open_err:
                     raise open_err
                 _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)
@@ -6311,6 +6327,9 @@ def update_udp_hp_label():
             else:
                 udp_hp_lbl.configure(text=f"격수: {attacker_hp_udp:.0f}%", text_color="#ef4444")
                 lbl_ontop_status.configure(text="✅ 연결", text_color="#a6e3a1")
+    except: pass
+    try:
+        if root and root.winfo_exists():
             root.after(300, update_udp_hp_label)
     except: pass
 
@@ -6637,6 +6656,7 @@ def udp_listener():
             udp_last_from = addr[0] if addr else ""
             if len(data) == 1:
                 if data == b'V':
+                    last_udp_time = time.time()
                     Thread(target=start_stream_server, daemon=True).start()
                 elif data == b'v':
                     Thread(target=stop_stream_server, daemon=True).start()

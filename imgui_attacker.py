@@ -297,6 +297,7 @@ def run_main(g):
     drag = {"on": False, "mx": 0, "my": 0, "wx": 0, "wy": 0}
     ov_drag = {"on": False, "mx": 0, "my": 0, "wx": 0, "wy": 0}
     draw_err = [0]
+    link_last = [0.0]
 
     def _tick():
         global _win_w, _win_h
@@ -321,6 +322,18 @@ def run_main(g):
             except Exception:
                 pass
             content_h, title_hovered = _draw_main(g)
+
+            try:
+                import time as _time
+                now = _time.time()
+                if now - link_last[0] >= 0.35:
+                    link_last[0] = now
+                    send_fn = g.get("_send_to_healer")
+                    pkt = g.get("_HP_LINK_PKT")
+                    if send_fn and pkt:
+                        send_fn(pkt)
+            except Exception:
+                pass
 
             if title_hovered and imgui.is_mouse_clicked(0) and _left_down():
                 drag["on"] = True
