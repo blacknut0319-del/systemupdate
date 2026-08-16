@@ -3424,7 +3424,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-17 02:11"
+PATCH_UPDATED_AT = "2026-08-17 02:19"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -5089,13 +5089,22 @@ def on_manual_ide_flash():
         except Exception:
             sketch = None
 
-    # 3) Arduino IDE 실행 (스케치 같이 열림)
+    # 3) Arduino IDE 실행 (스케치 같이 열림) + 아두이노코드.txt 같이 열기
     if ide:
         try:
             subprocess.Popen([ide, sketch] if sketch else [ide], cwd=os.path.dirname(ide))
-            _ui_alert("수동 펌업", "Arduino IDE를 켰습니다.\n보드=Leonardo, 포트 선택 후 [업로드] 하세요.")
         except Exception as e:
             _ui_alert("수동 펌업", f"IDE 실행 실패: {e}", "error")
+            return
+        if sketch:
+            try:
+                import shutil
+                txt = os.path.join(os.path.dirname(sketch), "아두이노코드.txt")
+                shutil.copy2(sketch, txt)
+                os.startfile(txt)
+            except Exception:
+                pass
+        _ui_alert("수동 펌업", "Arduino IDE를 켰습니다.\n보드=Leonardo, 포트 선택 후 [업로드] 하세요.")
         return
     if sketch:
         try:
