@@ -3424,7 +3424,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-17 01:53"
+PATCH_UPDATED_AT = "2026-08-17 02:11"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -5036,8 +5036,10 @@ def on_fw_flash_click():
     )
 
 def on_manual_ide_flash():
-    """제어판 [IDE수동] — Arduino IDE로 수동 펌업 (COM 해제 + 스케치 열기)."""
+    """제어판 [뚱usb수동펌업] — Arduino IDE 켜고 스케치(cs_firmware.ino) 열기."""
     import os
+    import subprocess
+    import tempfile
     if _fw_flash_busy:
         log_event("⏳ 펌업 진행 중…")
         return
@@ -5048,34 +5050,61 @@ def on_manual_ide_flash():
         _release_com_for_flash()
     except Exception:
         pass
-    cands = []
-    dd = os.environ.get("DDONG_APP_DIR", "").strip()
-    if dd:
-        cands.append(os.path.join(dd, "firmware"))
-    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "firmware"))
-    try:
-        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware"))
-    except Exception:
-        pass
+
+    # 1) Arduino IDE 실행파일 찾기
+    ide = None
+    for c in (
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Arduino IDE", "Arduino IDE.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Arduino IDE", "Arduino IDE.exe"),
+        os.path.join(os.environ.get("LocalAppData", ""), "Programs", "Arduino IDE", "Arduino IDE.exe"),
+    ):
+        if c and os.path.isfile(c):
+            ide = c
+            break
+
+    # 2) 스케치 확보 — 로컬 우선, 없으면 GitHub에서 다운로드
     sketch = None
-    for d in cands:
-        if d and os.path.isdir(d):
-            s = os.path.join(d, "cs_firmware.ino")
-            if os.path.isfile(s):
-                sketch = s
-                break
+    for d in (
+        os.path.join(os.environ.get("DDONG_APP_DIR", ""), "firmware"),
+        os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "firmware"),
+    ):
+        s = os.path.join(d, "cs_firmware.ino") if d else ""
+        if s and os.path.isfile(s):
+            sketch = s
+            break
     if not sketch:
-        _ui_alert("수동 펌업", "firmware/cs_firmware.ino 를 찾지 못했습니다.", "error")
-        return
-    try:
-        os.startfile(sketch)
-        _ui_alert("수동 펌업", "Arduino IDE로 열었습니다.\n보드=Leonardo, 포트 선택 후 [업로드] 하세요.")
-    except Exception as e:
         try:
-            os.startfile(os.path.dirname(sketch))
-            _ui_alert("수동 펌업", "firmware 폴더를 열었습니다.\ncs_firmware.ino 를 Arduino IDE로 열어 업로드하세요.")
+            dst = os.path.join(tempfile.gettempdir(), "ddong_firmware", "cs_firmware.ino")
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            import ssl
+            import urllib.request
+            ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.Request(
+                "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/firmware/cs_firmware.ino",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as r, open(dst, "wb") as f:
+                f.write(r.read())
+            sketch = dst
         except Exception:
+            sketch = None
+
+    # 3) Arduino IDE 실행 (스케치 같이 열림)
+    if ide:
+        try:
+            subprocess.Popen([ide, sketch] if sketch else [ide], cwd=os.path.dirname(ide))
+            _ui_alert("수동 펌업", "Arduino IDE를 켰습니다.\n보드=Leonardo, 포트 선택 후 [업로드] 하세요.")
+        except Exception as e:
+            _ui_alert("수동 펌업", f"IDE 실행 실패: {e}", "error")
+        return
+    if sketch:
+        try:
+            os.startfile(sketch)
+            _ui_alert("수동 펌업", "스케치를 열었습니다. Arduino IDE에서 [업로드] 하세요.")
+        except Exception as e:
             _ui_alert("수동 펌업", f"열기 실패: {e}", "error")
+        return
+    _ui_alert("수동 펌업", "Arduino IDE와 스케치를 찾지 못했습니다.", "error")
 
 def _begin_fw_flash():
     global ser, running, SERIAL_PORT, _fw_flash_busy

@@ -1723,6 +1723,9 @@ def _draw_main(g):
         upd_fg, upd_hv, upd_tc = "#21262d", "#30363d", uc
     if _btn(upd, upd_fg, upd_hv, text_color=upd_tc):
         g["on_update_check_click"]()
+    imgui.same_line()
+    if _btn("뚱usb수동펌업", "#1f6feb", "#388bfd", text_color="#ffffff"):
+        g["on_manual_ide_flash"]()
     ard = _lbl_text(g["lbl_ard"], "확인중")
     imgui.same_line()
     imgui.set_cursor_pos_x(
@@ -1747,9 +1750,6 @@ def _draw_main(g):
         combo_w, combo_x, btn1_x, btn2_x, btn1_w, btn2_w,
         combo_cmd=g["_on_hw_mode_change"],
     )
-
-    if _btn("🛠 Arduino IDE 수동 펌업", "#1f6feb", "#388bfd", width=-1, height=24):
-        g["on_manual_ide_flash"]()
 
     if hw_var.get() in ("뚱박스", "KMBox"):
         imgui.align_text_to_frame_padding()
