@@ -191,7 +191,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 16:18"
+PATCH_UPDATED_AT = "2026-08-16 16:21"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -1568,37 +1568,41 @@ def hp_pct_from_bar(arr, w, h, petrified=False):
 
 def sender():
     global hp_pct
+    sct_t = mss.mss()
     while running:
-        try:
-            x,y,w,h = HP_ROI
-            target = _target_healer_ip()
-            if not target:
-                time.sleep(0.1)
-                continue
-            if w < 5 or h < 1:
-                sock.sendto(_HP_LINK_PKT, (target, TARGET_PORT))
-                time.sleep(0.5)
-                continue
-            img = sct.grab({"left":x,"top":y,"width":max(w,1),"height":max(h,1)})
-            arr = np.array(img, dtype=np.uint8)[:,:,:3][:,:,::-1]
-            red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
-            green = (arr[:,:,1]>15)&(arr[:,:,1]>arr[:,:,0]*1.03)&(arr[:,:,1]>arr[:,:,2]*1.03)
-            green_cnt = int(np.sum(green))
-            red_cnt = int(np.sum(red))
-            total_px = max(w * h, 1)
-            poisoned = _hp_bar_poisoned(red_cnt, green_cnt, total_px)
-            petrified = _is_petrified_bar(arr, red_cnt, total_px)
-            hp_pct = hp_pct_from_bar(arr, w, h, petrified=petrified)
-            sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (target, TARGET_PORT))
-            root.after(0, update_bar)
-            root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))
-            root.after(0, lambda p=poisoned, s=petrified: lbl_poison.config(
-                text="중독!" if p else ("석화!" if s else ""), fg="#ef4444" if p else ("#8b5cf6" if s else "#10b981")))
-            root.after(0, update_preview, arr.copy())
+        target = _target_healer_ip()
+        if not target:
             time.sleep(0.1)
-        except Exception as e:
-            import traceback; traceback.print_exc()
+            continue
+        pkt = _HP_LINK_PKT
+        try:
+            x, y, w, h = HP_ROI
+            if w >= 5 and h >= 1:
+                img = sct_t.grab({"left": x, "top": y, "width": max(w, 1), "height": max(h, 1)})
+                arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
+                red = (arr[:, :, 0] > 80) & (arr[:, :, 0] > arr[:, :, 1] * 1.2) & (arr[:, :, 0] > arr[:, :, 2] * 1.2)
+                green = (arr[:, :, 1] > 15) & (arr[:, :, 1] > arr[:, :, 0] * 1.03) & (arr[:, :, 1] > arr[:, :, 2] * 1.03)
+                green_cnt = int(np.sum(green))
+                red_cnt = int(np.sum(red))
+                total_px = max(w * h, 1)
+                poisoned = _hp_bar_poisoned(red_cnt, green_cnt, total_px)
+                petrified = _is_petrified_bar(arr, red_cnt, total_px)
+                hp_pct = hp_pct_from_bar(arr, w, h, petrified=petrified)
+                pkt = struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0)
+                root.after(0, update_bar)
+                root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))
+                root.after(0, lambda p=poisoned, s=petrified: lbl_poison.config(
+                    text="중독!" if p else ("석화!" if s else ""),
+                    fg="#ef4444" if p else ("#8b5cf6" if s else "#10b981")))
+                root.after(0, update_preview, arr.copy())
+        except Exception:
+            pass
+        try:
+            sock.sendto(pkt, (target, TARGET_PORT))
+        except Exception:
             time.sleep(0.5)
+            continue
+        time.sleep(0.1)
 
 threading.Thread(target=sender, daemon=True).start()
 
