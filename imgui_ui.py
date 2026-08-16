@@ -1723,17 +1723,12 @@ def _draw_main(g):
         upd_fg, upd_hv, upd_tc = "#21262d", "#30363d", uc
     if _btn(upd, upd_fg, upd_hv, text_color=upd_tc):
         g["on_update_check_click"]()
-    imgui.same_line()
-    if _btn("뚱usb수동펌업", "#1f6feb", "#388bfd", text_color="#ffffff"):
-        g["on_manual_ide_flash"]()
     ard = _lbl_text(g["lbl_ard"], "확인중")
     imgui.same_line()
     imgui.set_cursor_pos_x(
         imgui.get_cursor_pos_x() + max(0.0, imgui.get_content_region_available().x - imgui.calc_text_size(ard).x)
     )
     _text_c(ard, _lbl_color(g["lbl_ard"], "#a6adc8"))
-
-    _draw_status_chips(g)
 
     # 장치 / 프리셋 — 라벨·드롭다운·버튼 열 동일
     import imgui as _im
