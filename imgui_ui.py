@@ -30,6 +30,7 @@ _overlay = {
     "ow": 460,
     "oh": 400,
 }
+_pending_overlay = None
 _saved_geom = None
 
 
@@ -253,12 +254,54 @@ def _begin_overlay(kind, title, w, h, body="", yes_fn=None, no_fn=None):
     return _ensure_popup_window(title, w, h)
 
 
+def _schedule_overlay(kind, title, w, h, body="", yes_fn=None, no_fn=None, **extra):
+    """ImGui 프레임 도중 GLFW 창을 만들면 멈춤/크래시 → 다음 tick 에서 연다."""
+    global _pending_overlay
+    job = {
+        "kind": kind,
+        "title": title,
+        "w": int(w),
+        "h": int(h),
+        "body": body,
+        "yes_fn": yes_fn,
+        "no_fn": no_fn,
+    }
+    job.update(extra)
+    _pending_overlay = job
+    return True
+
+
+def _flush_pending_overlay():
+    global _pending_overlay
+    job = _pending_overlay
+    if not job:
+        return
+    _pending_overlay = None
+    try:
+        kind = job.get("kind")
+        if kind == "km_ip":
+            _overlay["box_ip"] = job.get("box_ip")
+            _overlay["pc_ip"] = job.get("pc_ip")
+        _begin_overlay(
+            kind,
+            job.get("title") or "",
+            job.get("w") or 460,
+            job.get("h") or 400,
+            body=job.get("body") or "",
+            yes_fn=job.get("yes_fn"),
+            no_fn=job.get("no_fn"),
+        )
+    except Exception:
+        import traceback
+        traceback.print_exc()
+
+
 def open_guide():
-    return _begin_overlay("guide", "📖 뚱힐러 가이드", 460, 680)
+    return _schedule_overlay("guide", "📖 뚱힐러 가이드", 460, 680)
 
 
 def open_patch():
-    return _begin_overlay("patch", "패치노트", 480, 580)
+    return _schedule_overlay("patch", "패치노트", 480, 580)
 
 
 _modal = {
@@ -312,7 +355,7 @@ def show_alert(title, body):
         _modal.update(open=True, kind="alert", title=title, body=body, yes_fn=None, no_fn=None)
         return True
     w, h = _fit_alert_wh(title, body, 160, 24)
-    return _begin_overlay("alert", title, w, h, body=body)
+    return _schedule_overlay("alert", title, w, h, body=body)
 
 
 def show_yesno(title, body, on_yes, on_no=None):
@@ -322,22 +365,22 @@ def show_yesno(title, body, on_yes, on_no=None):
         _modal.update(open=True, kind="yesno", title=title, body=body, yes_fn=on_yes, no_fn=on_no)
         return True
     w, h = _fit_alert_wh(title, body, 180, 28)
-    return _begin_overlay("yesno", title, w, h, body=body, yes_fn=on_yes, no_fn=on_no)
+    return _schedule_overlay("yesno", title, w, h, body=body, yes_fn=on_yes, no_fn=on_no)
 
 
 def open_admin():
     _admin["dirty"] = True
-    return _begin_overlay("admin", "실시간 제어판", 540, 640)
+    return _schedule_overlay("admin", "실시간 제어판", 540, 640)
 
 
 def open_km_trans():
-    return _begin_overlay("km_trans", "설정도구 한글 통역", 440, 560)
+    return _schedule_overlay("km_trans", "설정도구 한글 통역", 440, 560)
 
 
 def open_km_ip(box_ip, pc_ip):
-    _overlay["box_ip"] = box_ip
-    _overlay["pc_ip"] = pc_ip
-    return _begin_overlay("km_ip", "뚱박스 랜(IP) 설정", 420, 520)
+    return _schedule_overlay(
+        "km_ip", "뚱박스 랜(IP) 설정", 420, 520, box_ip=box_ip, pc_ip=pc_ip
+    )
 
 
 def _ctk_toplevel_open(root):
@@ -1530,7 +1573,7 @@ def _draw_overlay(g):
         imgui.push_style_color(imgui.COLOR_BORDER, *_hex("#c9a84c"))
         imgui.push_style_var(imgui.STYLE_WINDOW_BORDERSIZE, 1)
     else:
-        imgui.set_next_window_size(ow, imgui.get_io().display_size.y)
+        imgui.set_next_window_size(ow, oh)
     imgui.begin("##overlay", flags=flags)
     title = _overlay.get("title") or ""
     _center_text(title, "#f0d9a8")
@@ -2055,6 +2098,7 @@ def run_main(g):
             if _should_pause_glfw(g):
                 root.after(50, _tick)
                 return
+            _flush_pending_overlay()
             glfw.poll_events()
             if _gui_hidden:
                 root.after(50, _tick)

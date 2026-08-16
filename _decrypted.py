@@ -3421,7 +3421,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 17:31"
+PATCH_UPDATED_AT = "2026-08-16 17:37"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3952,11 +3952,12 @@ def stop_everything(reason="💤 대기 중"):
     # 예전 검증본처럼 정지는 R/U만 보내고 포트는 유지 — 종료(exit_app) 때만 close.
     if ser and getattr(ser, "is_open", False):
         try:
-            with _attack_ser_lock:
-                time.sleep(0.05)
-                ser.write(b'R')
-                ser.write(b'U')
-                time.sleep(0.08)
+            with _hw_lock:
+                with _attack_ser_lock:
+                    time.sleep(0.05)
+                    ser.write(b'R')
+                    ser.write(b'U')
+                    time.sleep(0.08)
         except Exception:
             pass
 
@@ -4187,7 +4188,7 @@ def _start_worker():
                 SERIAL_PORT = found
         except Exception:
             pass
-        if not ser or not getattr(ser, "is_open", False):
+        if not _hw_ser_ok():
             connect_hardware()
         if not ser or not getattr(ser, "is_open", False):
             _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
@@ -4814,35 +4815,36 @@ def _call_flash(mod, callback, port, ask_manual_reset=None):
 def probe_arduino_fw(ser_obj=None, timeout=2.5):
     """시리얼로 'V'를 보내 펌웨어 식별 문자열을 읽음.
     워치독 펌이면 'DDONG-WDT' 응답. 옛 펌/무응답이면 ''."""
-    s = ser_obj if ser_obj is not None else ser
-    if not s or not getattr(s, "is_open", False):
-        return ""
-    # 뚱박스는 시리얼 프로토콜 다름
-    if s.__class__.__name__ == "KmBox":
-        return ""
-    try:
+    with _hw_lock:
+        s = ser_obj if ser_obj is not None else ser
+        if not s or not getattr(s, "is_open", False):
+            return ""
+        # 뚱박스는 시리얼 프로토콜 다름
+        if s.__class__.__name__ == "KmBox":
+            return ""
         try:
-            s.reset_input_buffer()
+            try:
+                s.reset_input_buffer()
+            except Exception:
+                while getattr(s, "in_waiting", 0):
+                    s.read(s.in_waiting)
+            s.write(b"V")
+            try:
+                s.flush()
+            except Exception:
+                pass
+            buf = b""
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                n = getattr(s, "in_waiting", 0) or 0
+                if n:
+                    buf += s.read(n)
+                    if b"DDONG" in buf or b"\n" in buf:
+                        break
+                time.sleep(0.05)
+            return buf.decode("ascii", errors="ignore").strip()
         except Exception:
-            while getattr(s, "in_waiting", 0):
-                s.read(s.in_waiting)
-        s.write(b"V")
-        try:
-            s.flush()
-        except Exception:
-            pass
-        buf = b""
-        t0 = time.time()
-        while time.time() - t0 < timeout:
-            n = getattr(s, "in_waiting", 0) or 0
-            if n:
-                buf += s.read(n)
-                if b"DDONG" in buf or b"\n" in buf:
-                    break
-            time.sleep(0.05)
-        return buf.decode("ascii", errors="ignore").strip()
-    except Exception:
-        return ""
+            return ""
 
 def check_fw_wdt(ser_obj=None):
     """(ok, detail) — ok=True 이면 최신 펌(DDONG-V / DDONG-WDT) 확인."""
@@ -5199,6 +5201,25 @@ def refresh_device_status():
     else:
         _set_hw_label("○ USB없음", '#f85149', gen)
 
+def _hw_ser_ok():
+    """이미 열린 COM/뚱박스면 재오픈 생략 — CH340 PermissionError 방지."""
+    global ser, SERIAL_PORT
+    if not ser or not getattr(ser, "is_open", False):
+        return False
+    _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
+    if _hw in ("뚱박스", "KMBox"):
+        return ser.__class__.__name__ == "KmBox"
+    if ser.__class__.__name__ == "KmBox":
+        return False
+    try:
+        port = getattr(ser, "port", None) or SERIAL_PORT
+        if not port:
+            return False
+        alive = {p.device for p in serial.tools.list_ports.comports()}
+        return port in alive
+    except Exception:
+        return True
+
 def connect_hardware():
     """하드웨어 연결 (드롭다운 선택에 따라 아두이노/KMBox). 재연결에도 재사용.
     시작버튼과 워커가 동시에 부르면 COM포트 충돌로 한쪽만 실패→라벨만 실패로 남는
@@ -5210,7 +5231,7 @@ def connect_hardware():
     with _hw_lock:
         globals()['_hw_status_gen'] = int(globals().get('_hw_status_gen', 0)) + 1
         gen = globals()['_hw_status_gen']
-        if ser and getattr(ser, "is_open", False):
+        if _hw_ser_ok():
             return True
         try:
             if ser:
@@ -5219,7 +5240,7 @@ def connect_hardware():
                 except Exception:
                     pass
             ser = None
-            time.sleep(0.15)
+            time.sleep(0.25)
             _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
             if _hw in ("뚱박스", "KMBox"):
                 if kmNet is None or not hasattr(kmNet, "lcd_picture"):
