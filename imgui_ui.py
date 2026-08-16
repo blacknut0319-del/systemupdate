@@ -451,7 +451,7 @@ def _attacker_udp_ui(g):
         hp = 0.0
     if not listen_ok:
         return "격수: 오류", "#ef4444", "○ 대기", "#f38ba8"
-    if last_t <= 0 or (time.time() - last_t) > 2.0:
+    if last_t <= 0 or (time.time() - last_t) > 5.0:
         return "격수: 끊김", "#ef4444", "○ 대기", "#f9e2af"
     return "격수: %.0f%%" % hp, "#ef4444", "✅ 연결", "#a6e3a1"
 

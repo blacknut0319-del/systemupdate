@@ -194,7 +194,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 17:22"
+PATCH_UPDATED_AT = "2026-08-16 17:31"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -878,6 +878,17 @@ def _send_to_healer_tcp(payload):
             stream_ctrl_sock = None
         return False
 
+def _ctrl_tcp_send(conn, payload):
+    data = bytes(payload) if not isinstance(payload, (bytes, bytearray)) else payload
+    if not conn or not data:
+        return False
+    try:
+        with _ctrl_send_lock:
+            conn.sendall(len(data).to_bytes(4, "big") + data)
+        return True
+    except Exception:
+        return False
+
 def _ctrl_tcp_loop():
     """힐러 TCP 9101 — UDP 9999 막힌 PC에서 HP·원격명령."""
     global stream_ctrl_sock
@@ -895,6 +906,11 @@ def _ctrl_tcp_loop():
             with _ctrl_sock_lock:
                 stream_ctrl_sock = conn
             while running and _target_healer_ip() == target:
+                with _ctrl_sock_lock:
+                    if stream_ctrl_sock is not conn:
+                        break
+                if not _ctrl_tcp_send(conn, _HP_LINK_PING):
+                    break
                 time.sleep(0.35)
         except Exception:
             pass

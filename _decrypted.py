@@ -3421,7 +3421,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 17:22"
+PATCH_UPDATED_AT = "2026-08-16 17:31"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -6443,7 +6443,7 @@ def _attacker_link_ui():
     """격수 연결 표시 — UDP HP 또는 쫄화면(TCP) 둘 중 하나만 되어도 연결."""
     if not udp_listen_ok:
         return "격수: 오류", "#ef4444", "○ 대기", "#f38ba8"
-    udp_fresh = last_udp_time > 0 and (time.time() - last_udp_time) <= 2.0
+    udp_fresh = last_udp_time > 0 and (time.time() - last_udp_time) <= 5.0
     if udp_fresh:
         return "격수: %.0f%%" % attacker_hp_udp, "#ef4444", "✅ 연결", "#a6e3a1"
     if _attacker_ctrl_tcp_connected():
