@@ -1748,6 +1748,9 @@ def _draw_main(g):
         combo_cmd=g["_on_hw_mode_change"],
     )
 
+    if _btn("🛠 Arduino IDE 수동 펌업", "#1f6feb", "#388bfd", width=-1, height=24):
+        g["on_manual_ide_flash"]()
+
     if hw_var.get() in ("뚱박스", "KMBox"):
         imgui.align_text_to_frame_padding()
         imgui.text_disabled("IP")

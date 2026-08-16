@@ -3424,7 +3424,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-17 00:04"
+PATCH_UPDATED_AT = "2026-08-17 01:53"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -5034,6 +5034,48 @@ def on_fw_flash_click():
         "뚱USB(아두이노)에 최신 펌웨어를 구워 넣을까요?\n업로드 중엔 USB를 뽑지 마세요.",
         _begin_fw_flash,
     )
+
+def on_manual_ide_flash():
+    """제어판 [IDE수동] — Arduino IDE로 수동 펌업 (COM 해제 + 스케치 열기)."""
+    import os
+    if _fw_flash_busy:
+        log_event("⏳ 펌업 진행 중…")
+        return
+    if hw_var.get() in ("뚱박스", "KMBox"):
+        _ui_alert("수동 펌업", "뚱USB(아두이노) 전용입니다.")
+        return
+    try:
+        _release_com_for_flash()
+    except Exception:
+        pass
+    cands = []
+    dd = os.environ.get("DDONG_APP_DIR", "").strip()
+    if dd:
+        cands.append(os.path.join(dd, "firmware"))
+    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "firmware"))
+    try:
+        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware"))
+    except Exception:
+        pass
+    sketch = None
+    for d in cands:
+        if d and os.path.isdir(d):
+            s = os.path.join(d, "cs_firmware.ino")
+            if os.path.isfile(s):
+                sketch = s
+                break
+    if not sketch:
+        _ui_alert("수동 펌업", "firmware/cs_firmware.ino 를 찾지 못했습니다.", "error")
+        return
+    try:
+        os.startfile(sketch)
+        _ui_alert("수동 펌업", "Arduino IDE로 열었습니다.\n보드=Leonardo, 포트 선택 후 [업로드] 하세요.")
+    except Exception as e:
+        try:
+            os.startfile(os.path.dirname(sketch))
+            _ui_alert("수동 펌업", "firmware 폴더를 열었습니다.\ncs_firmware.ino 를 Arduino IDE로 열어 업로드하세요.")
+        except Exception:
+            _ui_alert("수동 펌업", f"열기 실패: {e}", "error")
 
 def _begin_fw_flash():
     global ser, running, SERIAL_PORT, _fw_flash_busy
