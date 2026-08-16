@@ -450,7 +450,7 @@ def _run_avrdude(root, hex_path, boot_port, callback=None, flog=None):
     cmd = [
         avrdude, "-C", conf,
         "-c", "avr109", "-p", "atmega32u4",
-        "-P", boot_port, "-b", "57600", "-D",
+        "-P", boot_port, "-b", "57600", "-B", "125kHz", "-D",
         "-U", f"flash:w:{hex_path}:i",
     ]
     flog and flog.log("CMD: " + " ".join(cmd))
@@ -630,16 +630,21 @@ def flash_via_arduino_cli(hex_path, port, flog=None, callback=None):
 
 
 def _flash_once_1200_avrdude(root, hex_path, port, callback=None, flog=None):
-    """IDE와 같이 1200 한 번 → 부트로더 대기 → avrdude 1회."""
+    """IDE와 같이 1200 리셋 → 부트로더 대기(최대 3회) → avrdude 1회."""
     if callback:
         callback(40, "1200 리셋 (IDE 방식)")
-    try:
-        _touch_1200_simple(port, flog=flog)
-    except Exception as e:
-        flog and flog.log(f"1200 실패: {e!r}")
-        return False, "1200 리셋 실패"
-    time.sleep(0.35)
-    boot = wait_bootloader(timeout=6.0, callback=callback, flog=flog, hint="1200")
+    boot = None
+    for i in range(3):
+        try:
+            _touch_1200_simple(port, flog=flog)
+        except Exception as e:
+            flog and flog.log(f"1200 실패: {e!r}")
+            return False, "1200 리셋 실패"
+        time.sleep(0.35)
+        boot = wait_bootloader(timeout=3.0, callback=callback, flog=flog, hint=f"1200-{i}")
+        if boot:
+            break
+        flog and flog.log(f"부트로더 미검출 {i+1}/3 → 1200 재시도")
     if not boot:
         boot = port
         flog and flog.log(f"부트로더 COM 미검출 → sketch 포트 {port} 로 시도")
