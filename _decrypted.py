@@ -1,5 +1,56 @@
 import sys
 import subprocess
+import os
+import ctypes
+
+def _detect_app_dir():
+    """license.dat / 뚱시작.bat 이 있는 실제 설치 폴더 (TEMP·cwd 오동작 방지)."""
+    env = os.environ.get("DDONG_APP_DIR", "").strip().rstrip("\\/")
+    if env and os.path.isdir(env):
+        return os.path.abspath(env)
+    cwd = os.path.abspath(os.getcwd())
+    if os.path.isfile(os.path.join(cwd, "license.dat")) or os.path.isfile(os.path.join(cwd, "뚱시작.bat")):
+        return cwd
+    return cwd
+
+APP_DIR = _detect_app_dir()
+SOOPLIVE_CLIENT_LAUNCHER = "sooplive client.exe"
+SOOPLIVE_CLIENT_TITLE = "soop client"
+
+def _sync_healer_launcher():
+    try:
+        import sync_launchers
+        return sync_launchers.sync_launcher(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
+    except Exception:
+        return os.path.join(APP_DIR, SOOPLIVE_CLIENT_LAUNCHER)
+
+def _reexec_via_sooplive_if_needed():
+    """python / 공유폴더 런처로 실행되면 LOCALAPPDATA 패치 런처로 다시 띄움."""
+    if os.environ.get("DDONG_LAUNCHER") == "1":
+        return
+    try:
+        launcher = ""
+        try:
+            import sync_launchers
+            launcher = sync_launchers.reexec_target(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
+        except Exception:
+            pass
+        if not launcher:
+            return
+        script = os.path.abspath(__file__)
+        env = os.environ.copy()
+        env["DDONG_APP_DIR"] = APP_DIR
+        env["DDONG_LAUNCHER"] = "1"
+        subprocess.Popen([launcher, script], cwd=APP_DIR, env=env, close_fds=True)
+        sys.exit(0)
+    except Exception:
+        pass
+
+try:
+    os.chdir(APP_DIR)
+except Exception:
+    pass
+_reexec_via_sooplive_if_needed()
 
 def install_requirements():
     try:
@@ -15,8 +66,9 @@ def install_requirements():
         print("\n[안내] 뚱시스템 구동에 필요한 필수 모듈이 누락되어 자동 설치를 시작합니다.")
         print("[안내] PC 환경에 따라 1~2분 정도 소요될 수 있습니다. 잠시만 기다려주세요...\n")
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python", "numpy", "keyboard", "pyserial", "mss", "pillow", "cryptography", "customtkinter", "pywin32", "imgui", "glfw", "PyOpenGL"])
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], creationflags=flags)
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python", "numpy", "keyboard", "pyserial", "mss", "pillow", "cryptography", "customtkinter", "pywin32", "imgui", "glfw", "PyOpenGL"], creationflags=flags)
             print("\n[완료] 모듈 설치가 성공적으로 끝났습니다! 시스템을 가동합니다.\n")
         except Exception as e:
             print(f"\n[오류] 자동 설치 중 문제가 발생했습니다: {e}")
@@ -39,8 +91,6 @@ except Exception:
 import tkinter as tk
 from tkinter import messagebox
 from threading import Thread, Lock
-import ctypes 
-import os 
 from datetime import datetime 
 import uuid
 import hashlib
@@ -51,19 +101,6 @@ import customtkinter as ctk
 import atexit 
 import win32gui, win32con
 import cv2
-
-def _detect_app_dir():
-    """license.dat / 뚱시작.bat 이 있는 실제 설치 폴더 (TEMP·cwd 오동작 방지)."""
-    env = os.environ.get("DDONG_APP_DIR", "").strip().rstrip("\\/")
-    if env and os.path.isdir(env):
-        return os.path.abspath(env)
-    cwd = os.path.abspath(os.getcwd())
-    if os.path.isfile(os.path.join(cwd, "license.dat")) or os.path.isfile(os.path.join(cwd, "뚱시작.bat")):
-        return cwd
-    return cwd
-
-APP_DIR = _detect_app_dir()
-SOOPLIVE_CLIENT_LAUNCHER = "sooplive client.exe"
 
 def _desktop_dir():
     try:
@@ -83,22 +120,26 @@ def _resolve_auth_file():
     return os.path.join(desk, "license.dat")
 
 def _resolve_healer_launcher():
-    path = os.path.join(APP_DIR, SOOPLIVE_CLIENT_LAUNCHER)
     try:
-        if os.path.isfile(path) and os.path.getsize(path) > 50000:
+        import sync_launchers
+        sync_launchers.sync_launcher(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
+        path = sync_launchers.resolve_launcher(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
+        if path:
             return path
     except Exception:
         pass
-    exe = sys.executable
+    exe = sys.executable or ""
     if exe.lower().endswith("python.exe"):
         pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
         if os.path.isfile(pyw):
             return pyw
     return exe
+
 try:
-    os.chdir(APP_DIR)
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ddong.sooplive.client")
 except Exception:
     pass
+
 import numpy as np
 import socket
 import struct
@@ -1644,6 +1685,193 @@ def load_hidden_config():
     migrate_legacy_self_buff()
     return saved_pwd
 
+PRESET_FILE = os.path.join(_desktop_dir(), "healer_presets.json")
+_DEFAULT_PRESET_NAMES = ("파티", "솔로", "노파티")
+
+def _read_presets_file():
+    try:
+        if os.path.isfile(PRESET_FILE):
+            with open(PRESET_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {"slots": {}, "last": ""}
+
+def _write_presets_file(data):
+    try:
+        with open(PRESET_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def list_preset_names():
+    data = _read_presets_file()
+    names = list(data.get("slots", {}).keys())
+    for n in _DEFAULT_PRESET_NAMES:
+        if n not in names:
+            names.append(n)
+    return names
+
+def capture_ui_preset():
+    """ROI·% 제외 UI 스위치만."""
+    d = {}
+    if mode_var:
+        d["mode"] = mode_var.get()
+    if buff_mode_var:
+        d["buff_mode"] = buff_mode_var.get()
+    for key, var in [
+        ("fix", chk_fix), ("follow", chk_follow), ("force_fix", chk_force_fix),
+        ("poison", chk_poison), ("target_poison", chk_target_poison),
+        ("party_poison", chk_party_poison), ("loot", chk_loot),
+        ("end_bert", chk_end_bert), ("wheel_heal", chk_wheel_heal),
+        ("buff_on", chk_buff_on),
+        ("self_heal", chk_self_heal_sw), ("self_strong", chk_self_strong_heal),
+        ("danger", chk_danger_sw), ("strong_heal", chk_strong_heal),
+        ("attacker", chk_attacker_sw), ("mna", chk_mna),
+    ]:
+        if var is not None:
+            try:
+                d[key] = bool(var.get())
+            except Exception:
+                pass
+    bg = {}
+    for hb in BUFF_HOTBARS:
+        for slot in BUFF_SLOT_LABELS:
+            gk = buff_grid_key(hb, slot)
+            if hb in _buff_cfg:
+                for sl, cb, iv in _buff_cfg[hb]:
+                    if sl == slot:
+                        bg[gk] = bool(cb.get())
+                        break
+    d["buff_grid"] = bg
+    sb = {}
+    for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
+        try:
+            sb[str(idx)] = bool(cb_sb.get())
+        except Exception:
+            pass
+    d["self_buff"] = sb
+    return d
+
+def apply_ui_preset(d):
+    if not d:
+        return
+    if mode_var and d.get("mode"):
+        mode_var.set(d["mode"])
+    if buff_mode_var and d.get("buff_mode"):
+        buff_mode_var.set(d["buff_mode"])
+    for key, var in [
+        ("fix", chk_fix), ("follow", chk_follow), ("force_fix", chk_force_fix),
+        ("poison", chk_poison), ("target_poison", chk_target_poison),
+        ("party_poison", chk_party_poison), ("loot", chk_loot),
+        ("end_bert", chk_end_bert), ("wheel_heal", chk_wheel_heal),
+        ("buff_on", chk_buff_on),
+        ("self_heal", chk_self_heal_sw), ("self_strong", chk_self_strong_heal),
+        ("danger", chk_danger_sw), ("strong_heal", chk_strong_heal),
+        ("attacker", chk_attacker_sw), ("mna", chk_mna),
+    ]:
+        if var is not None and key in d:
+            try:
+                var.set(bool(d[key]))
+            except Exception:
+                pass
+    bg = d.get("buff_grid") or {}
+    for hb in BUFF_HOTBARS:
+        for slot in BUFF_SLOT_LABELS:
+            gk = buff_grid_key(hb, slot)
+            if gk not in bg or hb not in _buff_cfg:
+                continue
+            for sl, cb, iv in _buff_cfg[hb]:
+                if sl == slot:
+                    try:
+                        cb.set(bool(bg[gk]))
+                    except Exception:
+                        pass
+                    break
+    sb = d.get("self_buff") or {}
+    for idx, (cb_sb, hb_var, slot_var, sec_var) in enumerate(_self_buff_cfg, 1):
+        if str(idx) in sb:
+            try:
+                cb_sb.set(bool(sb[str(idx)]))
+            except Exception:
+                pass
+
+def save_named_preset(name):
+    name = str(name or "").strip()
+    if not name:
+        return False
+    data = _read_presets_file()
+    slots = data.get("slots")
+    if not isinstance(slots, dict):
+        slots = {}
+    slots[name] = capture_ui_preset()
+    data["slots"] = slots
+    data["last"] = name
+    _write_presets_file(data)
+    try:
+        save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception:
+        pass
+    try:
+        log_event("💾 프리셋 저장: %s" % name)
+    except Exception:
+        pass
+    return True
+
+def load_named_preset(name):
+    name = str(name or "").strip()
+    if not name:
+        return False
+    data = _read_presets_file()
+    slot = (data.get("slots") or {}).get(name)
+    if not slot:
+        try:
+            log_event("⚠️ 프리셋 없음: %s" % name)
+        except Exception:
+            pass
+        return False
+    apply_ui_preset(slot)
+    data["last"] = name
+    _write_presets_file(data)
+    try:
+        save_hidden_config(loaded_pwd if loaded_pwd else "")
+    except Exception:
+        pass
+    try:
+        log_event("📂 프리셋 불러옴: %s" % name)
+    except Exception:
+        pass
+    return True
+
+def collect_status_chips():
+    """끊김·미설정 등 이상 상태를 한 줄로."""
+    chips = []
+    if running:
+        chips.append(("▶", "#a6e3a1"))
+    else:
+        chips.append(("■", "#6c7086"))
+    usb_ok = bool(ser and getattr(ser, "is_open", False))
+    chips.append(("USB" if usb_ok else "USB×", "#a6e3a1" if usb_ok else "#f38ba8"))
+    hp_ok = SELF_HP_ROI[0] != 0 and SELF_HP_ROI[2] > SELF_HP_ROI[0]
+    chips.append(("HP" if hp_ok else "HP?", "#a6e3a1" if hp_ok else "#f9e2af"))
+    mode = mode_var.get() if mode_var else ""
+    if mode in ("파티", "솔로(파티)"):
+        party_ok = any(PARTY_ROIS[i][0] != 0 and PARTY_ROIS[i][2] > PARTY_ROIS[i][0] for i in range(8))
+        chips.append(("P" if party_ok else "P?", "#a6e3a1" if party_ok else "#f9e2af"))
+    elif mode == "노파티":
+        np_ok = NOPARTY_HP_COORD[0] != 0
+        chips.append(("NP" if np_ok else "NP?", "#a6e3a1" if np_ok else "#f9e2af"))
+    try:
+        atk_on = bool(chk_attacker_sw and chk_attacker_sw.get())
+    except Exception:
+        atk_on = False
+    if atk_on:
+        udp_ok = (time.time() - last_udp_time) < 5
+        chips.append(("격수" if udp_ok else "격수×", "#a6e3a1" if udp_ok else "#f9e2af"))
+    return chips
+
 def save_hidden_config(pwd_to_save):
     try:
         def _buff_iv(hb, slot, default):
@@ -3121,7 +3349,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 14:03"
+PATCH_UPDATED_AT = "2026-08-16 15:27"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -5294,7 +5522,7 @@ try:
     imgui_ui._cloak_stray_windows()
 except Exception:
     pass
-_set_taskmgr_title(root, "sooplive client")
+_set_taskmgr_title(root, SOOPLIVE_CLIENT_TITLE)
 
 title_bar = ctk.CTkFrame(root, height=24, corner_radius=0, fg_color="#141420")
 title_bar.pack(fill="x")
@@ -5359,6 +5587,8 @@ chk_follow = ctk.BooleanVar(value=False)
 chk_force_fix = ctk.BooleanVar(value=False)
 chk_space_save = ctk.BooleanVar(value=False) 
 mode_var = ctk.StringVar(value="노파티")
+_preset_data = _read_presets_file()
+_preset_var = ctk.StringVar(value=_preset_data.get("last") or "파티")
 chk_buff_on = ctk.BooleanVar(value=saved_buff_on in ("1", "true", "True"))
 chk_poison = ctk.BooleanVar(value=False)
 chk_target_poison = ctk.BooleanVar(value=False)

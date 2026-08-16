@@ -8,6 +8,30 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 UPDATE_LOG_FILE = os.path.join(SCRIPT_DIR, "attacker_update.log")
 _BOOT_FLAG = os.path.join(SCRIPT_DIR, "attacker_boot.flag")
+SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
+
+def _reexec_via_service_if_needed():
+    if os.environ.get("DDONG_LAUNCHER") == "1":
+        return
+    launcher = ""
+    try:
+        import sync_launchers
+        launcher = sync_launchers.reexec_target(SOOPLIVE_SERVICE_LAUNCHER, SCRIPT_DIR)
+    except Exception:
+        pass
+    if not launcher:
+        return
+    env = os.environ.copy()
+    env["DDONG_LAUNCHER"] = "1"
+    subprocess.Popen([launcher, os.path.abspath(__file__)], cwd=SCRIPT_DIR, env=env, close_fds=True)
+    sys.exit(0)
+
+_reexec_via_service_if_needed()
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ddong.sooplive.service")
+except Exception:
+    pass
 try:
     with open(UPDATE_LOG_FILE, "a", encoding="utf-8") as _bf:
         _bf.write("boot %s exe=%s file=%s\n" % (
@@ -127,10 +151,9 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 14:03"
-SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
+PATCH_UPDATED_AT = "2026-08-16 15:27"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
-SOOPLIVE_SERVICE_TITLE = "sooplive service"
+SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
 
 def _read_patch_ver(source):
@@ -500,11 +523,14 @@ def _ensure_service_launcher():
     try:
         import sync_launchers
         sync_launchers.sync_launcher(SOOPLIVE_SERVICE_LAUNCHER, SCRIPT_DIR)
+        path = sync_launchers.resolve_launcher(SOOPLIVE_SERVICE_LAUNCHER, SCRIPT_DIR)
+        if path:
+            return path
     except Exception:
         pass
     path = os.path.join(SCRIPT_DIR, SOOPLIVE_SERVICE_LAUNCHER)
     if _valid_launcher(path):
-        return
+        return path
     try:
         data = _github_download("sooplive service.exe")
         if len(data) > 50000:
@@ -512,11 +538,15 @@ def _ensure_service_launcher():
                 f.write(data)
     except Exception:
         pass
+    try:
+        import sync_launchers
+        return sync_launchers.resolve_launcher(SOOPLIVE_SERVICE_LAUNCHER, SCRIPT_DIR)
+    except Exception:
+        return path if _valid_launcher(path) else ""
 
 def _resolve_launcher_exe():
-    _ensure_service_launcher()
-    path = os.path.join(SCRIPT_DIR, SOOPLIVE_SERVICE_LAUNCHER)
-    if _valid_launcher(path):
+    path = _ensure_service_launcher()
+    if path and _valid_launcher(path):
         return path
     return _resolve_pythonw()
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """격수 메인 UI — Dear ImGui. 로직·변수는 attacker_hp.pyw 를 그대로 쓴다.
-창 제목: sooplive service / 쫄화면은 Tk 그대로 sooplive-미리보기."""
+창 제목: soop service / 쫄화면은 Tk 그대로 sooplive-미리보기."""
 import ctypes
 import tkinter as tk
 
@@ -288,7 +288,7 @@ def run_main(g):
     except Exception:
         _win_h = 0
 
-    window, impl = _ui._init_glfw_window("sooplive service", _win_w, 520, 80, 80)
+    window, impl = _ui._init_glfw_window(g.get("SOOPLIVE_SERVICE_TITLE") or "soop service", _win_w, 520, 80, 80)
     _glfw_window = window
     _ui._glfw_window = window
     _impl = impl

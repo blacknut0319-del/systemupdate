@@ -154,6 +154,24 @@ def _center_glfw(win, w, h):
         pass
 
 
+def _present_glfw_window(win, w, h, title=None):
+    """작업표시줄만 보이고 폼이 안 뜨는 경우 방지."""
+    import glfw
+    try:
+        _center_glfw(win, int(w), int(h))
+        glfw.show_window(win)
+        glfw.focus_window(win)
+        hwnd = glfw.get_win32_window(win)
+        if hwnd:
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(int(hwnd), 9)
+            user32.SetForegroundWindow(int(hwnd))
+        if title:
+            _set_hwnd_title(win, title)
+    except Exception:
+        pass
+
+
 def _ensure_popup_window(title, w, h):
     """메인과 별도 glfw 창. 확인/제어판/패치/가이드 전부 여기."""
     global _ov_win, _ov_impl, _ov_ctx
@@ -862,6 +880,7 @@ def run_auth(g):
 
     aw = 220
     window, impl = _init_glfw_window("뚱시스템 VIP 인증", aw, 160, 200, 160)
+    _present_glfw_window(window, aw, 160)
     drag = {"on": False, "mx": 0, "my": 0, "wx": 0, "wy": 0}
     try:
         while not glfw.window_should_close(window) and not ok["v"]:
@@ -1552,6 +1571,56 @@ def _draw_overlay(g):
     return title_hovered
 
 
+def _draw_status_chips(g):
+    """끊김·미설정 등 이상 상태 한눈에."""
+    import imgui
+
+    fn = g.get("collect_status_chips")
+    if not fn:
+        return
+    try:
+        chips = fn()
+    except Exception:
+        return
+    if not chips:
+        return
+    imgui.push_style_var(imgui.STYLE_ITEM_SPACING, (4, 2))
+    x0 = imgui.get_cursor_pos_x()
+    total_w = imgui.get_content_region_available().x
+    used = 0.0
+    for i, (txt, col) in enumerate(chips):
+        tw = imgui.calc_text_size(txt).x + 6
+        if used + tw > total_w and i > 0:
+            break
+        if i > 0:
+            imgui.same_line(spacing=4)
+        imgui.push_style_color(imgui.COLOR_TEXT, *_hex(col))
+        imgui.text(txt)
+        imgui.pop_style_color(1)
+        used += tw + 4
+    imgui.pop_style_var(1)
+
+
+def _draw_labeled_row(label, label_color, combo_id, items, var, btn1, btn1_fg, btn1_hv, btn1_fn, btn2, btn2_fg, btn2_hv, btn2_fn, combo_w, combo_x, btn1_x, btn2_x, btn1_w, btn2_w, combo_cmd=None, label_x=6):
+    """장치/프리셋 — 라벨·드롭다운·버튼2개 열 맞춤."""
+    import imgui
+    row_y = imgui.get_cursor_pos_y()
+    imgui.set_cursor_pos((label_x, row_y))
+    imgui.align_text_to_frame_padding()
+    _text_c(label, label_color)
+    imgui.set_cursor_pos((combo_x, row_y))
+    _gold_combo(combo_id, items, var, cmd=combo_cmd, width=combo_w, height=20)
+    imgui.set_cursor_pos((btn1_x, row_y))
+    if _btn(btn1, btn1_fg, btn1_hv, width=btn1_w, height=20):
+        if btn1_fn:
+            btn1_fn()
+    imgui.set_cursor_pos((btn2_x, row_y))
+    if _btn(btn2, btn2_fg, btn2_hv, width=btn2_w, height=20):
+        if btn2_fn:
+            btn2_fn()
+    imgui.set_cursor_pos_y(row_y + 22)
+
+
 def _draw_main(g):
     import imgui
     import glfw
@@ -1597,19 +1666,23 @@ def _draw_main(g):
     )
     _text_c(ard, _lbl_color(g["lbl_ard"], "#a6adc8"))
 
-    # 장치 — 초록 확인이 오른쪽 끝. 아래 칸도 이 폭에 맞춤
-    imgui.align_text_to_frame_padding()
-    _text_c("장치", "#f9e2af")
-    imgui.same_line()
-    fw_w, ck_w, gap = 36, 32, 3
-    combo_w = max(52, imgui.get_content_region_available().x - fw_w - ck_w - gap * 2)
-    _gold_combo("##hw", ["뚱USB", "뚱박스"], hw_var, cmd=g["_on_hw_mode_change"], width=combo_w)
-    imgui.same_line()
-    if _btn("펌업", "#1f6feb", "#388bfd", width=fw_w, height=20):
-        g["on_fw_flash_click"]()
-    imgui.same_line()
-    if _btn("확인", "#238636", "#2ea043", width=ck_w, height=20):
-        g["on_fw_check_click"]()
+    _draw_status_chips(g)
+
+    # 장치 / 프리셋 — 라벨·드롭다운·버튼 열 동일
+    import imgui as _im
+    combo_x = int(max(_im.calc_text_size("프리셋").x, _im.calc_text_size("장  치").x)) + 14
+    btn1_w, btn2_w, gap = 36, 36, 4
+    combo_w = max(48, int(_win_w) - combo_x - btn1_w - btn2_w - gap * 2 - 8)
+    btn1_x = combo_x + combo_w + gap
+    btn2_x = btn1_x + btn1_w + gap
+
+    _draw_labeled_row(
+        "장  치", "#f9e2af", "##hw", ["뚱USB", "뚱박스"], hw_var,
+        "펌업", "#1f6feb", "#388bfd", g["on_fw_flash_click"],
+        "확인", "#238636", "#2ea043", g["on_fw_check_click"],
+        combo_w, combo_x, btn1_x, btn2_x, btn1_w, btn2_w,
+        combo_cmd=g["_on_hw_mode_change"],
+    )
 
     if hw_var.get() in ("뚱박스", "KMBox"):
         imgui.align_text_to_frame_padding()
@@ -1634,8 +1707,25 @@ def _draw_main(g):
         if _btn("설정도구", "#21262d", "#30363d", width=bw):
             g["on_kmbox_net_setup_click"]()
 
-    _center_width(136)
-    _gold_combo("##mode", ["파티", "솔로(파티)", "노파티"], g["mode_var"], width=136, height=20)
+    preset_names = []
+    try:
+        preset_names = g.get("list_preset_names", lambda: [])() or []
+    except Exception:
+        preset_names = ["파티", "솔로", "노파티"]
+    if not preset_names:
+        preset_names = ["파티", "솔로", "노파티"]
+    pvar = g.get("_preset_var")
+    if pvar is not None:
+        _draw_labeled_row(
+            "프리셋", "#cba6f7", "##preset", preset_names, pvar,
+            "저장", "#1f6feb", "#388bfd", lambda: g["save_named_preset"](pvar.get()),
+            "적용", "#238636", "#2ea043", lambda: g["load_named_preset"](pvar.get()),
+            combo_w, combo_x, btn1_x, btn2_x, btn1_w, btn2_w,
+        )
+
+    mode_w = max(158, int(_win_w) - 8)
+    _center_width(mode_w)
+    _gold_combo("##mode", ["파티", "솔로(파티)", "노파티"], g["mode_var"], width=mode_w, height=20)
 
     # 옵션 (기본 접힘)
     if _collapsible("옵션", "opt"):
@@ -1901,6 +1991,11 @@ def run_main(g):
 
     root = g["root"]
     _cloak_tk_root(root)
+    try:
+        import sync_launchers
+        sync_launchers.sync_launcher("sooplive client.exe", g.get("APP_DIR") or os.getcwd())
+    except Exception:
+        pass
 
     _win_w = 220
     try:
@@ -1911,7 +2006,9 @@ def run_main(g):
             _win_w = 220
     except Exception:
         _win_w = 220
-    window, impl = _init_glfw_window("sooplive client", _win_w, 520, 0, 0)
+    _win_title = g.get("SOOPLIVE_CLIENT_TITLE") or "soop client"
+    window, impl = _init_glfw_window(_win_title, _win_w, 520, 0, 0)
+    _present_glfw_window(window, _win_w, 520, _win_title)
     _glfw_window = window
     _impl = impl
     _gui_hidden = False
