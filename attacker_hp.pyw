@@ -49,7 +49,15 @@ def _pip_python_exe():
             return p
     return exe
 
-for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","keyboard")]:
+for mod, pkg in [
+    ("numpy", "numpy"),
+    ("PIL", "pillow"),
+    ("mss", "mss"),
+    ("keyboard", "keyboard"),
+    ("imgui", "imgui"),
+    ("glfw", "glfw"),
+    ("OpenGL", "PyOpenGL"),
+]:
     try:
         __import__(mod)
     except Exception:
@@ -62,6 +70,37 @@ for mod, pkg in [("numpy","numpy"),("PIL","pillow"),("mss","mss"),("keyboard","k
             __import__(mod)
         except Exception as e:
             _startup_fatal("필수 패키지(%s) 설치/로드 실패.\nhp_start.bat 으로 다시 실행해 주세요.\n\n%s" % (pkg, e))
+
+def _ensure_imgui_sidecars():
+    """bat 안 바꿔도 imgui_*.py 를 GitHub에서 받아 둔다."""
+    import ssl
+    import urllib.request
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    base = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+    for name in ("imgui_attacker.py", "imgui_ui.py", "sync_launchers.py"):
+        dest = os.path.join(SCRIPT_DIR, name)
+        try:
+            req = urllib.request.Request(
+                base + name + "?t=%d" % int(__import__("time").time()),
+                headers={
+                    "User-Agent": "ddong-attacker",
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
+                data = r.read()
+            if data and len(data) > 500:
+                with open(dest, "wb") as f:
+                    f.write(data)
+        except Exception as e:
+            if not os.path.isfile(dest):
+                _startup_fatal("UI 파일 다운로드 실패 (%s).\n인터넷 확인 후 다시 실행해 주세요.\n\n%s" % (name, e))
+
+_ensure_imgui_sidecars()
 
 import numpy as np
 import socket, struct, json, threading, time, re
@@ -88,7 +127,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 13:56"
+PATCH_UPDATED_AT = "2026-08-16 14:03"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -549,6 +588,14 @@ def restart_with_update():
             f.write(data)
         if not _read_patch_ver(data):
             raise RuntimeError("다운로드한 파일 버전을 읽을 수 없습니다.")
+        for side in ("imgui_attacker.py", "imgui_ui.py", "sync_launchers.py"):
+            try:
+                blob = _github_download(side)
+                if blob and len(blob) > 500:
+                    with open(os.path.join(SCRIPT_DIR, side), "wb") as f:
+                        f.write(blob)
+            except Exception:
+                pass
         _spawn_attacker(new_path)
         time.sleep(0.4)
     except Exception as e:

@@ -3121,7 +3121,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 13:56"
+PATCH_UPDATED_AT = "2026-08-16 14:03"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3301,6 +3301,14 @@ def restart_with_update():
             raise RuntimeError("다운로드한 로더가 올바르지 않습니다.")
         with open(dest, "wb") as f:
             f.write(data)
+        for side in ("imgui_ui.py",):
+            try:
+                blob = _github_download(side)
+                if blob and len(blob) > 500:
+                    with open(os.path.join(APP_DIR, side), "wb") as f:
+                        f.write(blob)
+            except Exception:
+                pass
         _ensure_healer_launcher()
         exe = _resolve_healer_launcher()
         env = os.environ.copy()
