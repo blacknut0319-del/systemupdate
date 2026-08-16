@@ -191,7 +191,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 16:14"
+PATCH_UPDATED_AT = "2026-08-16 16:18"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -788,12 +788,8 @@ def my_ip():
 MY_IP = my_ip()
 sct = mss.MSS()
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-try:
-    if MY_IP and MY_IP not in ("???", "..."):
-        sock.bind((MY_IP, 0))
-except Exception:
-    pass
 running = True; hp_pct = 0.0
+_HP_LINK_PKT = struct.pack('fBB', 100.0, 0, 0)
 
 def _target_healer_ip():
     try:
@@ -832,7 +828,12 @@ def _ensure_udp_firewall(port, rule_name):
 _ensure_udp_firewall(DISCOVER_PORT, "DDONG Attacker UDP 9998")
 
 def _ping_healer():
-    return _send_to_healer(struct.pack('fBB', 0.0, 0, 0))
+    ok = False
+    for _ in range(3):
+        if _send_to_healer(_HP_LINK_PKT):
+            ok = True
+        time.sleep(0.05)
+    return ok
 
 def _send_to_healer(payload):
     target = _target_healer_ip()
@@ -1569,10 +1570,15 @@ def sender():
     global hp_pct
     while running:
         try:
-            # 리니지 창이 맨 위에 있는지 확인
-            # Alt+Tab 감지 제거됨
             x,y,w,h = HP_ROI
-            if w < 5 or h < 1: time.sleep(0.1); continue
+            target = _target_healer_ip()
+            if not target:
+                time.sleep(0.1)
+                continue
+            if w < 5 or h < 1:
+                sock.sendto(_HP_LINK_PKT, (target, TARGET_PORT))
+                time.sleep(0.5)
+                continue
             img = sct.grab({"left":x,"top":y,"width":max(w,1),"height":max(h,1)})
             arr = np.array(img, dtype=np.uint8)[:,:,:3][:,:,::-1]
             red = (arr[:,:,0]>80)&(arr[:,:,0]>arr[:,:,1]*1.2)&(arr[:,:,0]>arr[:,:,2]*1.2)
@@ -1583,10 +1589,6 @@ def sender():
             poisoned = _hp_bar_poisoned(red_cnt, green_cnt, total_px)
             petrified = _is_petrified_bar(arr, red_cnt, total_px)
             hp_pct = hp_pct_from_bar(arr, w, h, petrified=petrified)
-            target = _target_healer_ip()
-            if not target:
-                time.sleep(0.1)
-                continue
             sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (target, TARGET_PORT))
             root.after(0, update_bar)
             root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))

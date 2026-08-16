@@ -1002,6 +1002,25 @@ def _ensure_udp_firewall(port, rule_name):
             timeout=10,
             creationflags=flags,
         )
+        subprocess.run(
+            [
+                "netsh", "advfirewall", "firewall", "delete", "rule",
+                "name=%s (port)" % rule_name,
+            ],
+            capture_output=True, timeout=5, creationflags=flags,
+        )
+        subprocess.run(
+            [
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=%s (port)" % rule_name,
+                "dir=in", "action=allow", "protocol=UDP",
+                "localport=%d" % int(port),
+                "enable=yes",
+            ],
+            capture_output=True,
+            timeout=10,
+            creationflags=flags,
+        )
     except Exception:
         pass
 _stream_active = False
@@ -3375,7 +3394,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:14"
+PATCH_UPDATED_AT = "2026-08-16 16:18"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
