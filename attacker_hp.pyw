@@ -191,7 +191,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 15:54"
+PATCH_UPDATED_AT = "2026-08-16 16:03"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -788,7 +788,41 @@ def my_ip():
 MY_IP = my_ip()
 sct = mss.MSS()
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    if MY_IP and MY_IP not in ("???", "..."):
+        sock.bind((MY_IP, 0))
+except Exception:
+    pass
 running = True; hp_pct = 0.0
+
+def _target_healer_ip():
+    try:
+        ip = (ip_var.get() or "").strip()
+        return ip if ip else None
+    except Exception:
+        return None
+
+def _ensure_udp_firewall(port, rule_name):
+    try:
+        exe = os.path.abspath(sys.executable)
+        if not exe.lower().endswith(".exe"):
+            return
+        import subprocess
+        subprocess.run(
+            [
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=%s" % rule_name,
+                "dir=in", "action=allow", "protocol=UDP",
+                "localport=%d" % int(port),
+                "program=%s" % exe,
+                "enable=yes",
+            ],
+            capture_output=True,
+            timeout=10,
+            creationflags=0x08000000,
+        )
+    except Exception:
+        pass
 
 # ============================================================
 # 원격 제어 (UDP 1byte)
@@ -799,7 +833,10 @@ CMD_NAMES = {b'I':'시작', b'H':'따라가기', b'P':'고정', b'L':'줍기', b
 
 def send_remote_cmd(cmd_byte):
     try:
-        sock.sendto(cmd_byte, (ip_var.get(), TARGET_PORT))
+        target = _target_healer_ip()
+        if not target:
+            raise ValueError("no target ip")
+        sock.sendto(cmd_byte, (target, TARGET_PORT))
         lbl_status.config(text="%s 전송됨" % CMD_NAMES.get(cmd_byte,'?'), fg="#10b981")
     except:
         lbl_status.config(text="전송 실패", fg="#ef4444")
@@ -1009,7 +1046,7 @@ def save_cfg():
             with open(CONFIG_FILE, "r", encoding="utf-8") as f: cfg = json.load(f)
         except: pass
         ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 2)
-    cfg["target_ip"] = ip_var.get()
+    cfg["target_ip"] = (ip_var.get() or "").strip()
     cfg["hp_roi"] = tuple(int(v) for v in HP_ROI)
     cfg["win_w"] = WIN_W
     cfg["win_h"] = WIN_H
@@ -1517,7 +1554,11 @@ def sender():
             poisoned = _hp_bar_poisoned(red_cnt, green_cnt, total_px)
             petrified = _is_petrified_bar(arr, red_cnt, total_px)
             hp_pct = hp_pct_from_bar(arr, w, h, petrified=petrified)
-            sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (ip_var.get(), TARGET_PORT))
+            target = _target_healer_ip()
+            if not target:
+                time.sleep(0.1)
+                continue
+            sock.sendto(struct.pack('fBB', hp_pct, 1 if poisoned else 0, 1 if petrified else 0), (target, TARGET_PORT))
             root.after(0, update_bar)
             root.after(0, lambda v=hp_pct: lbl_status.config(text="HP:%.0f%%" % v, fg="#10b981"))
             root.after(0, lambda p=poisoned, s=petrified: lbl_poison.config(
@@ -1559,6 +1600,7 @@ def discover_listener():
             sock_d.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock_d.bind(("0.0.0.0", DISCOVER_PORT))
             sock_d.settimeout(1.0)
+            _ensure_udp_firewall(DISCOVER_PORT, "뚱격수 자동연결(UDP9998)")
             while running:
                 try:
                     data, _addr = sock_d.recvfrom(1024)

@@ -976,6 +976,29 @@ NOPARTY_RGB = [162, 146, 150]
 attacker_hp_threshold = 85.0
 UDP_ATTACKER_PORT = 9999
 STREAM_TCP_PORT = 9100
+
+def _ensure_udp_firewall(port, rule_name):
+    """reexec(sooplive client.exe) 후 예전 pythonw 방화벽 허용과 별개로 UDP 수신 허용."""
+    try:
+        exe = os.path.abspath(sys.executable)
+        if not exe.lower().endswith(".exe"):
+            return
+        import subprocess
+        subprocess.run(
+            [
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=%s" % rule_name,
+                "dir=in", "action=allow", "protocol=UDP",
+                "localport=%d" % int(port),
+                "program=%s" % exe,
+                "enable=yes",
+            ],
+            capture_output=True,
+            timeout=10,
+            creationflags=0x08000000,
+        )
+    except Exception:
+        pass
 _stream_active = False
 _stream_client = None
 _stream_client_lock = Lock()
@@ -3347,7 +3370,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 15:54"
+PATCH_UPDATED_AT = "2026-08-16 16:03"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -6175,6 +6198,13 @@ def broadcast_healer_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            s.bind((ip, 0))
+        except Exception:
+            try:
+                s.bind(("", 0))
+            except Exception:
+                pass
         s.settimeout(0.5)
         for _ in range(3):
             for t in targets:
@@ -6548,6 +6578,7 @@ def udp_listener():
                 sock.bind(("0.0.0.0", UDP_ATTACKER_PORT))
                 sock.settimeout(1.0)
                 udp_listen_ok = True
+                _ensure_udp_firewall(UDP_ATTACKER_PORT, "뚱힐러 격수HP(UDP9999)")
             data, addr = sock.recvfrom(1024)
             udp_last_from = addr[0] if addr else ""
             if len(data) == 1:

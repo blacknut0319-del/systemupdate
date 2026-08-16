@@ -164,7 +164,7 @@ def _draw_main(g):
     imgui.set_next_item_width(-44)
     changed, ip = imgui.input_text("##ip", g["ip_var"].get(), 64)
     if changed:
-        g["ip_var"].set(ip)
+        g["ip_var"].set((ip or "").strip())
     imgui.same_line()
     if _btn("저장", "#800020", "#9e1a3a", width=36):
         g["save_cfg"]()
