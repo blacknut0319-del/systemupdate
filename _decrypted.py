@@ -2445,18 +2445,21 @@ class HybridCamera:
         self._fail_streak = 0
         self._last_retry = 0.0
         self._lock = Lock()
+        self._init_busy = False
         self._init_dxcam()
     def _init_dxcam(self):
         if dxcam is None:
             self._dx_ok = False
             return
         try:
+            # dxcam.create/start는 블록될 수 있어 락 밖에서 호출(호출 스레드 얼지 않게)
+            new_dx = dxcam.create(output_color="RGB")
+            new_dx.start(target_fps=60)
             with self._lock:
                 if self._dx is not None:
                     try: self._dx.release()
                     except Exception: pass
-                self._dx = dxcam.create(output_color="RGB")
-                self._dx.start(target_fps=60)
+                self._dx = new_dx
                 self._dx_ok = True
                 self._fail_streak = 0
         except Exception:
@@ -2475,23 +2478,31 @@ class HybridCamera:
             pass
         self._mss.release()
     def get_latest_frame(self):
-        if self._dx_ok and self._dx is not None:
-            try:
-                f = self._dx.get_latest_frame()
-                if f is not None:
-                    self._fail_streak = 0
-                    return f
-                self._fail_streak += 1
-            except Exception:
-                self._fail_streak += 1
-            if self._fail_streak >= 5:
-                # dxcam이 계속 실패/불안정하면 즉시 mss로 전환해서 끊김 없이 계속 동작
-                self._dx_ok = False
-                now_t = time.time()
-                self._last_retry = now_t
-        elif not self._dx_ok and dxcam is not None and (time.time() - self._last_retry >= 10.0):
-            self._last_retry = time.time()
-            self._init_dxcam()   # 10초마다 dxcam 복구 재시도(드라이버 일시오류 등 회복 가능성)
+        with self._lock:
+            if self._dx_ok and self._dx is not None:
+                try:
+                    f = self._dx.get_latest_frame()
+                    if f is not None:
+                        self._fail_streak = 0
+                        return f
+                    self._fail_streak += 1
+                except Exception:
+                    self._fail_streak += 1
+                if self._fail_streak >= 5:
+                    self._dx_ok = False
+                    self._last_retry = time.time()
+            elif not self._dx_ok and dxcam is not None and (time.time() - self._last_retry >= 10.0) and not self._init_busy:
+                self._last_retry = time.time()
+                self._init_busy = True
+                def _do():
+                    try:
+                        self._init_dxcam()
+                    finally:
+                        self._init_busy = False
+                try:
+                    Thread(target=_do, daemon=True).start()
+                except Exception:
+                    self._init_busy = False
         return self._mss.get_latest_frame()
     def grab_roi(self, roi):
         """dxcam이 살아있으면 dxcam의 풀프레임에서 잘라씀(실제 게임 렌더링을 정확히 보기 위해),
@@ -3424,7 +3435,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-17 02:19"
+PATCH_UPDATED_AT = "2026-08-17 02:59"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
