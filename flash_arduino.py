@@ -36,6 +36,45 @@ TMP_ROOT = os.path.join(tempfile.gettempdir(), "ddong_firmware")
 CLI_DIR = os.path.join(TMP_ROOT, "arduino-cli")
 CLI_ZIP_URL = "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Windows_64bit.zip"
 FQBN = "arduino:avr:leonardo"
+ARDUINO15 = os.path.join(os.path.expanduser("~"), "AppData", "Local", "Arduino15")
+IDE_CLI_CANDIDATES = [
+    os.path.join(
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        "Arduino IDE",
+        "resources",
+        "app",
+        "lib",
+        "backend",
+        "resources",
+        "arduino-cli.exe",
+    ),
+    os.path.join(
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        "Arduino IDE",
+        "resources",
+        "app",
+        "lib",
+        "backend",
+        "resources",
+        "arduino-cli.exe",
+    ),
+    os.path.join(
+        os.environ.get("LocalAppData", ""),
+        "Programs",
+        "Arduino IDE",
+        "resources",
+        "app",
+        "lib",
+        "backend",
+        "resources",
+        "arduino-cli.exe",
+    ),
+    os.path.join(
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        "Arduino CLI",
+        "arduino-cli.exe",
+    ),
+]
 LEONARDO_BOOT_PID = "0036"
 LEONARDO_SKETCH_PID = "8036"
 LEONARDO_VID = "2341"
@@ -449,11 +488,83 @@ def _run_avrdude(root, hex_path, boot_port, callback=None, flog=None):
     return proc.returncode == 0, (lines[-1] if lines else f"code {proc.returncode}")
 
 
+def _find_ide_arduino_cli(flog=None):
+    for cand in IDE_CLI_CANDIDATES:
+        if cand and os.path.isfile(cand):
+            flog and flog.log(f"arduino-cli (IDE): {cand}")
+            return cand
+    return None
+
+
+def _cli_cmd(cli, *args):
+    cmd = [cli]
+    if os.path.isdir(ARDUINO15):
+        cmd.extend(["--config-dir", ARDUINO15])
+    cmd.extend(args)
+    return cmd
+
+
+def _avr_core_ready(cli, flog=None):
+    try:
+        proc = subprocess.run(
+            _cli_cmd(cli, "core", "list"),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+        out = (proc.stdout or "") + (proc.stderr or "")
+        flog and flog.log(f"core list: {out.strip()[:240]}")
+        if "arduino:avr" not in out:
+            return False
+        for line in out.splitlines():
+            if "arduino:avr" in line and any(c.isdigit() for c in line):
+                return True
+        return False
+    except Exception as e:
+        flog and flog.log(f"core list 실패: {e!r}")
+        return False
+
+
+def _ensure_avr_core(cli, flog=None, callback=None):
+    if _avr_core_ready(cli, flog=flog):
+        return True
+    if callback:
+        callback(15, "arduino:avr core 설치…")
+    flog and flog.log("arduino:avr core 설치 시도")
+    try:
+        proc = subprocess.run(
+            _cli_cmd(cli, "core", "install", "arduino:avr"),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+        out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        flog and flog.log(f"core install rc={proc.returncode} {out[:240]}")
+        return proc.returncode == 0 or _avr_core_ready(cli, flog=flog)
+    except Exception as e:
+        flog and flog.log(f"core install 실패: {e!r}")
+        return False
+
+
 def ensure_arduino_cli(flog=None, callback=None):
+    exe = _find_ide_arduino_cli(flog=flog)
+    if exe:
+        if callback:
+            callback(12, "Arduino IDE arduino-cli")
+        return exe
+
     exe = os.path.join(CLI_DIR, "arduino-cli.exe")
     if os.path.isfile(exe):
+        flog and flog.log(f"arduino-cli (TEMP): {exe}")
         return exe
     os.makedirs(CLI_DIR, exist_ok=True)
+    flog and flog.log("IDE arduino-cli 없음 → TEMP 다운로드")
     zip_path = os.path.join(TMP_ROOT, "arduino-cli.zip")
     if callback:
         callback(12, "arduino-cli 다운로드...")
@@ -481,16 +592,9 @@ def flash_via_arduino_cli(hex_path, port, flog=None, callback=None):
     cli = ensure_arduino_cli(flog=flog, callback=callback)
     if not cli:
         return False, "arduino-cli 없음"
-    try:
-        subprocess.run(
-            [cli, "core", "install", "arduino:avr"],
-            capture_output=True,
-            timeout=300,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-        )
-    except Exception:
-        pass
-    cmd = [cli, "upload", "-p", port, "--fqbn", FQBN, "--input-file", hex_path, "-v"]
+    if not _ensure_avr_core(cli, flog=flog, callback=callback):
+        return False, "arduino:avr core 없음 (Arduino IDE에서 Leonardo 보드 1회 설치)"
+    cmd = _cli_cmd(cli, "upload", "-p", port, "--fqbn", FQBN, "--input-file", hex_path, "-v")
     flog and flog.log("CMD: " + " ".join(cmd))
     try:
         proc = subprocess.Popen(

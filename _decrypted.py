@@ -3424,7 +3424,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 20:06"
+PATCH_UPDATED_AT = "2026-08-17 00:04"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -4763,6 +4763,22 @@ def _load_flash_module():
         return None
 
     tmp = os.path.join(tempfile.gettempdir(), "ddong_firmware", "flash_arduino.py")
+    cands = []
+    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py"))
+    dd = os.environ.get("DDONG_APP_DIR", "").strip()
+    if dd:
+        cands.append(os.path.join(dd, "flash_arduino.py"))
+    try:
+        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py"))
+    except Exception:
+        pass
+    cands.append(tmp)
+    for path in cands:
+        if path and os.path.isfile(path):
+            mod = _load_path(path)
+            if mod:
+                return mod
+
     try:
         import ssl
         ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
@@ -4782,16 +4798,7 @@ def _load_flash_module():
     except Exception:
         pass
 
-    cands = []
-    dd = os.environ.get("DDONG_APP_DIR", "").strip()
-    if dd:
-        cands.append(os.path.join(dd, "flash_arduino.py"))
-    try:
-        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_arduino.py"))
-    except Exception:
-        pass
-    cands.append(os.path.join(os.path.expanduser("~"), "Desktop", "뚱힐러_github", "flash_arduino.py"))
-    cands.append(tmp)
+    cands = [tmp]
     for path in cands:
         if path and os.path.isfile(path):
             mod = _load_path(path)
@@ -4815,9 +4822,25 @@ def _call_flash(mod, callback, port, ask_manual_reset=None):
         kwargs["ask_manual_reset"] = ask_manual_reset
     return mod.flash(**kwargs)
 
+def _release_com_for_flash():
+    """펌업 전 COM 완전 해제 — 백그라운드 펌확인(V)과 포트 충돌 방지."""
+    global ser
+    globals()['_fw_cancel_gen'] = int(globals().get('_fw_cancel_gen', 0)) + 1
+    time.sleep(0.35)
+    with _hw_lock:
+        try:
+            if ser:
+                ser.close()
+        except Exception:
+            pass
+        ser = None
+    time.sleep(0.5)
+
 def probe_arduino_fw(ser_obj=None, timeout=2.5):
     """시리얼로 'V'를 보내 펌웨어 식별 문자열을 읽음.
     워치독 펌이면 'DDONG-WDT' 응답. 옛 펌/무응답이면 ''."""
+    if globals().get('_fw_flash_busy'):
+        return ""
     s = ser_obj if ser_obj is not None else ser
     if not s or not getattr(s, "is_open", False):
         return ""
@@ -4840,6 +4863,8 @@ def probe_arduino_fw(ser_obj=None, timeout=2.5):
         t0 = time.time()
         while time.time() - t0 < timeout:
             if cancel != int(globals().get('_fw_cancel_gen', 0)):
+                return ""
+            if globals().get('_fw_flash_busy'):
                 return ""
             n = getattr(s, "in_waiting", 0) or 0
             if n:
@@ -4870,11 +4895,15 @@ def refresh_fw_version(ser_obj=None, log=False, retries=6):
     """연결·펌확인·펌업 후 펌 버전 캐시 갱신.
     옛 펌은 setup()에 delay(3초) 있어서 첫 V 조회가 빈칸일 수 있음 → 재시도."""
     global _fw_version_str, _fw_wdt4
+    if globals().get('_fw_flash_busy'):
+        return ""
     s = ser_obj if ser_obj is not None else ser
     ver = ""
     cancel = int(globals().get('_fw_cancel_gen', 0))
     for i in range(max(1, retries)):
         if cancel != int(globals().get('_fw_cancel_gen', 0)):
+            break
+        if globals().get('_fw_flash_busy'):
             break
         if ser_obj is None and s is not ser:
             break
@@ -4946,6 +4975,9 @@ def run_target_heal(hotbar, slot, end_delay=0.08, use_wheel=None):
 
 def on_fw_check_click():
     """제어판 [확인] — 연결된 뚱USB 펌 버전 조회 (V 명령)."""
+    if globals().get('_fw_flash_busy'):
+        log_event("⏳ 펌업 진행 중 — 완료 후 [확인]")
+        return
     if hw_var.get() in ("뚱박스", "KMBox"):
         log_event("⚠️ 펌 확인은 뚱USB 전용")
         _ui_alert("펌 확인", "뚱USB(아두이노) 연결 상태에서만 확인할 수 있습니다.")
@@ -5010,6 +5042,7 @@ def _begin_fw_flash():
         return
 
     globals()['_fw_flash_busy'] = True
+    globals()['_fw_cancel_gen'] = int(globals().get('_fw_cancel_gen', 0)) + 1
     try:
         lbl_ard.configure(text="⏳ 펌업 준비…", text_color="#f9e2af")
     except Exception:
@@ -5035,15 +5068,9 @@ def _begin_fw_flash():
         try:
             # 연결에 이미 쓰던 COM을 펌업에도 그대로 사용 (검색 조건 불일치 방지)
             preferred = SERIAL_PORT
-            with _hw_lock:
-                try:
-                    if ser:
-                        ser.close()
-                except Exception:
-                    pass
-                ser = None
+            _release_com_for_flash()
             # Windows 시리얼 핸들 완전 해제 + 좀비 avrdude 정리 시간
-            time.sleep(2.0)
+            time.sleep(1.5)
             alive = {p.device for p in serial.tools.list_ports.comports()}
             found = auto_find_arduino()
             use_port = preferred if preferred in alive else (found or preferred)
@@ -5110,6 +5137,7 @@ def _begin_fw_flash():
                 found = auto_find_arduino()
                 if found:
                     SERIAL_PORT = found
+                globals()['_fw_flash_busy'] = False
                 try:
                     connect_hardware()
                 except Exception:

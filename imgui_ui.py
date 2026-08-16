@@ -2086,10 +2086,10 @@ def run_main(g):
             if glfw.window_should_close(window):
                 g["exit_app"]()
                 return
+            _flush_pending_overlay()
             if _should_pause_glfw(g):
                 root.after(50, _tick)
                 return
-            _flush_pending_overlay()
             glfw.poll_events()
             if _gui_hidden:
                 root.after(50, _tick)
