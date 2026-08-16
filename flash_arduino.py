@@ -784,6 +784,37 @@ def flash(callback=None, port=None, ask_manual_reset=None):
         return False, str(e), flog.save(False, str(e))
 
 
+def flash_manual(callback=None, port=None, ask_manual_reset=None):
+    """수동 펌업 — 자동 1200 리셋이 안 먹는 보드용.
+    리셋 버튼 2번 안내 → 부트로더 대기(최대 25초) → avrdude 직접 구움."""
+    flog = FlashLogger()
+    flog.section("수동 펌업 시작 (리셋버튼 2번 → 부트로더 → avrdude)")
+    try:
+        if serial is None:
+            return False, "pyserial 없음", flog.save(False, "pyserial 없음")
+        _kill_stray_avrdude(flog)
+        time.sleep(0.3)
+        root = ensure_firmware(flog=flog, callback=callback)
+        if not root:
+            return False, "펌웨어 확보 실패", flog.save(False, "펌웨어 확보 실패")
+        hex_path = os.path.join(root, HEX_NAME)
+        if callback:
+            callback(10, "리셋 버튼을 빠르게 두 번 누르세요")
+        boot = wait_bootloader(timeout=25.0, callback=callback, flog=flog, hint="수동리셋")
+        if not boot:
+            boot = find_arduino(preferred=port)
+        if not boot:
+            msg = "부트로더 COM 미검출 — 리셋 버튼을 두 번 누른 뒤 다시 시도하세요."
+            return False, msg, flog.save(False, msg)
+        ok, detail = _run_avrdude(root, hex_path, boot, callback=callback, flog=flog)
+        if ok:
+            return True, f"완료(수동/{boot})", flog.save(True, f"완료(수동/{boot})")
+        return False, detail, flog.save(False, detail)
+    except Exception as e:
+        flog.log(traceback.format_exc())
+        return False, str(e), flog.save(False, str(e))
+
+
 if __name__ == "__main__":
     ok, msg, path = flash(lambda p, m: print(f"{p}% {m}"))
     print(("OK" if ok else "FAIL"), msg)

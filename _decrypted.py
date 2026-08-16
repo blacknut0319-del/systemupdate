@@ -3435,7 +3435,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-17 03:04"
+PATCH_UPDATED_AT = "2026-08-17 03:08"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -4817,12 +4817,15 @@ def _load_flash_module():
                 return mod
     return None
 
-def _call_flash(mod, callback, port, ask_manual_reset=None):
-    """flash() 시그니처에 맞게 인자 전달 — 구버전 모듈이어도 TypeError 안 나게."""
+def _call_flash(mod, callback, port, ask_manual_reset=None, manual=False):
+    """flash()/flash_manual() 시그니처에 맞게 인자 전달 — 구버전 모듈이어도 TypeError 안 나게."""
     import inspect
+    fn = getattr(mod, "flash_manual", None) if manual else mod.flash
+    if fn is None:
+        fn = mod.flash
     kwargs = {}
     try:
-        params = inspect.signature(mod.flash).parameters
+        params = inspect.signature(fn).parameters
     except Exception:
         params = {}
     if "callback" in params:
@@ -4831,7 +4834,7 @@ def _call_flash(mod, callback, port, ask_manual_reset=None):
         kwargs["port"] = port
     if "ask_manual_reset" in params and ask_manual_reset is not None:
         kwargs["ask_manual_reset"] = ask_manual_reset
-    return mod.flash(**kwargs)
+    return fn(**kwargs)
 
 def _release_com_for_flash():
     """펌업 전 COM 완전 해제 — 백그라운드 펌확인(V)과 포트 충돌 방지."""
@@ -5047,10 +5050,27 @@ def on_fw_flash_click():
     )
 
 def on_manual_ide_flash():
-    """제어판 [뚱usb수동펌업] — Arduino IDE 없이 arduino-cli(인터넷 자동 다운로드)로 펌업."""
-    on_fw_flash_click()
+    """제어판 [뚱usb수동펌업] — 자동(1200리셋)이 안 될 때 물리 리셋(버튼 2번) 기반 수동 펌업."""
+    if _fw_flash_busy:
+        log_event("⏳ 펌업 진행 중…")
+        return
+    if hw_var.get() in ("뚱박스", "KMBox"):
+        _ui_alert("수동 펌업", "뚱USB(아두이노) 전용입니다.")
+        return
+    if running:
+        def _go():
+            stop_everything("펌업 전 정지")
+            _begin_fw_flash(manual=True)
+        _ui_yesno("수동 펌업", "사냥 중입니다.\n정지한 뒤 수동 펌업을 진행할까요?", _go)
+        return
+    _ui_yesno(
+        "수동 펌업",
+        "자동 펌업(1200리셋)이 안 되는 보드용입니다.\n"
+        "업로드 시작 후 리셋 버튼을 빠르게 두 번 누르세요.\n계속할까요?",
+        lambda: _begin_fw_flash(manual=True),
+    )
 
-def _begin_fw_flash():
+def _begin_fw_flash(manual=False):
     global ser, running, SERIAL_PORT, _fw_flash_busy
     if _fw_flash_busy:
         log_event("⏳ 펌업 진행 중…")
@@ -5141,6 +5161,7 @@ def _begin_fw_flash():
                     callback=_progress,
                     port=use_port or None,
                     ask_manual_reset=_ask_manual_reset,
+                    manual=manual,
                 )
                 if isinstance(ret, tuple) and len(ret) >= 2:
                     ok, msg = ret[0], ret[1]
