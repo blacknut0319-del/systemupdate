@@ -2059,11 +2059,6 @@ def run_main(g):
 
     root = g["root"]
     _cloak_tk_root(root)
-    try:
-        import sync_launchers
-        sync_launchers.sync_launcher("sooplive client.exe", g.get("APP_DIR") or os.getcwd())
-    except Exception:
-        pass
 
     _win_w = 220
     try:

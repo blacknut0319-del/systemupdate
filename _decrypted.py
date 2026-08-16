@@ -32,6 +32,7 @@ def _reexec_via_sooplive_if_needed():
         launcher = ""
         try:
             import sync_launchers
+            sync_launchers.sync_launcher(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
             launcher = sync_launchers.reexec_target(SOOPLIVE_CLIENT_LAUNCHER, APP_DIR)
         except Exception:
             pass
@@ -240,6 +241,7 @@ _reconnect_req = False       # Insert 시작 등에서만 True. 드롭다운 변
 _hw_ui_ready = False         # UI 초기화 끝나기 전엔 재연결 요청 무시(콤보박스 생성시 command 오발동 방지)
 _hw_lock = Lock()            # connect_hardware 동시호출(시작버튼+워커) 직렬화
 _hw_status_gen = 0           # 장치 라벨 갱신 세대번호 — 예전 after 콜백이 최신 상태를 덮어쓰지 않게
+_fw_cancel_gen = 0           # Insert 정지 시 펌확인 스레드 중단용
 _fw_flash_busy = False       # 아두이노 펌업 진행 중 (연타 방지)
 _fw_version_str = ""         # probe_arduino_fw 응답 (DDONG-WDT3 / DDONG-WDT4 등)
 _fw_wdt4 = False             # WDT4만 휠힐(M) 지원
@@ -3421,7 +3423,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 17:37"
+PATCH_UPDATED_AT = "2026-08-16 17:44"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3950,14 +3952,14 @@ def stop_everything(reason="💤 대기 중"):
             root.after(0, lambda: lbl_status.configure(text=reason, text_color="#f38ba8"))
     # Insert 정지 때 COM을 닫으면 CH340이 포트를 바로 안 풀어 2번째 시작에서 PermissionError(13).
     # 예전 검증본처럼 정지는 R/U만 보내고 포트는 유지 — 종료(exit_app) 때만 close.
+    globals()['_fw_cancel_gen'] = int(globals().get('_fw_cancel_gen', 0)) + 1
     if ser and getattr(ser, "is_open", False):
         try:
-            with _hw_lock:
-                with _attack_ser_lock:
-                    time.sleep(0.05)
-                    ser.write(b'R')
-                    ser.write(b'U')
-                    time.sleep(0.08)
+            with _attack_ser_lock:
+                time.sleep(0.05)
+                ser.write(b'R')
+                ser.write(b'U')
+                time.sleep(0.08)
         except Exception:
             pass
 
@@ -4815,36 +4817,38 @@ def _call_flash(mod, callback, port, ask_manual_reset=None):
 def probe_arduino_fw(ser_obj=None, timeout=2.5):
     """시리얼로 'V'를 보내 펌웨어 식별 문자열을 읽음.
     워치독 펌이면 'DDONG-WDT' 응답. 옛 펌/무응답이면 ''."""
-    with _hw_lock:
-        s = ser_obj if ser_obj is not None else ser
-        if not s or not getattr(s, "is_open", False):
-            return ""
-        # 뚱박스는 시리얼 프로토콜 다름
-        if s.__class__.__name__ == "KmBox":
-            return ""
+    s = ser_obj if ser_obj is not None else ser
+    if not s or not getattr(s, "is_open", False):
+        return ""
+    # 뚱박스는 시리얼 프로토콜 다름
+    if s.__class__.__name__ == "KmBox":
+        return ""
+    cancel = int(globals().get('_fw_cancel_gen', 0))
+    try:
         try:
-            try:
-                s.reset_input_buffer()
-            except Exception:
-                while getattr(s, "in_waiting", 0):
-                    s.read(s.in_waiting)
-            s.write(b"V")
-            try:
-                s.flush()
-            except Exception:
-                pass
-            buf = b""
-            t0 = time.time()
-            while time.time() - t0 < timeout:
-                n = getattr(s, "in_waiting", 0) or 0
-                if n:
-                    buf += s.read(n)
-                    if b"DDONG" in buf or b"\n" in buf:
-                        break
-                time.sleep(0.05)
-            return buf.decode("ascii", errors="ignore").strip()
+            s.reset_input_buffer()
         except Exception:
-            return ""
+            while getattr(s, "in_waiting", 0):
+                s.read(s.in_waiting)
+        s.write(b"V")
+        try:
+            s.flush()
+        except Exception:
+            pass
+        buf = b""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if cancel != int(globals().get('_fw_cancel_gen', 0)):
+                return ""
+            n = getattr(s, "in_waiting", 0) or 0
+            if n:
+                buf += s.read(n)
+                if b"DDONG" in buf or b"\n" in buf:
+                    break
+            time.sleep(0.05)
+        return buf.decode("ascii", errors="ignore").strip()
+    except Exception:
+        return ""
 
 def check_fw_wdt(ser_obj=None):
     """(ok, detail) — ok=True 이면 최신 펌(DDONG-V / DDONG-WDT) 확인."""
@@ -4867,7 +4871,10 @@ def refresh_fw_version(ser_obj=None, log=False, retries=6):
     global _fw_version_str, _fw_wdt4
     s = ser_obj if ser_obj is not None else ser
     ver = ""
+    cancel = int(globals().get('_fw_cancel_gen', 0))
     for i in range(max(1, retries)):
+        if cancel != int(globals().get('_fw_cancel_gen', 0)):
+            break
         if ser_obj is None and s is not ser:
             break
         if i > 0:
@@ -5259,20 +5266,25 @@ def connect_hardware():
             else:
                 open_err = None
                 for port in _arduino_port_candidates():
-                    try:
-                        ser = serial.Serial(port, BAUD_RATE, timeout=0)
-                        globals()['SERIAL_PORT'] = port
-                        SERIAL_PORT = port
-                        open_err = None
-                        break
-                    except Exception as e:
-                        open_err = e
+                    for attempt in range(3):
                         try:
-                            if ser:
-                                ser.close()
-                        except Exception:
-                            pass
-                        ser = None
+                            ser = serial.Serial(port, BAUD_RATE, timeout=0)
+                            globals()['SERIAL_PORT'] = port
+                            SERIAL_PORT = port
+                            open_err = None
+                            break
+                        except Exception as e:
+                            open_err = e
+                            try:
+                                if ser:
+                                    ser.close()
+                            except Exception:
+                                pass
+                            ser = None
+                            if attempt < 2:
+                                time.sleep(0.2 * (attempt + 1))
+                    if ser and getattr(ser, "is_open", False):
+                        break
                 if open_err:
                     raise open_err
                 _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)

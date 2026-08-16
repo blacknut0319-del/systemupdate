@@ -353,17 +353,26 @@ def _ensure_local_launcher(name, is_client):
 
 
 def reexec_target(name, app_dir=None):
-    """지금 exe 표시명이 아니면 패치 런처 경로 반환."""
+    """지금 exe 표시명이 soop client/service 가 아니면 패치 런처 경로 반환."""
     app_dir = app_dir or os.getcwd()
     is_client = "client" in name.lower()
     expect = _expected_display_name(is_client)
     sync_launcher(name, app_dir)
     pref = resolve_launcher(name, app_dir)
-    if not _valid_launcher(pref) or _launcher_display_name(pref) != expect:
+    if not _valid_launcher(pref):
         return ""
-    cur = os.path.normcase(os.path.abspath(sys.executable or ""))
-    if cur == os.path.normcase(os.path.abspath(pref)):
-        return ""
+    if _launcher_display_name(pref) != expect:
+        _patch_app_display_name(pref, is_client=is_client)
+    if _launcher_display_name(pref) != expect:
+        gh = _fetch_github_launcher(name)
+        if _valid_launcher(gh) and _launcher_display_name(gh) == expect:
+            pref = gh
+            try:
+                shutil.copy2(gh, os.path.join(app_dir, name))
+            except Exception:
+                pass
+        else:
+            return ""
     if _launcher_display_name(sys.executable or "") == expect:
         return ""
     return pref
@@ -378,6 +387,7 @@ def sync_launcher(name, app_dir=None):
         local_dst = os.path.join(local_launcher_dir(), name)
         if _valid_launcher(local_dst):
             shutil.copy2(local_dst, app_dst)
+            _patch_app_display_name(app_dst, is_client=is_client)
     except Exception:
         pass
     return resolve_launcher(name, app_dir) or os.path.join(app_dir, name)
