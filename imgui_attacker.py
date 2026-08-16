@@ -331,9 +331,9 @@ def run_main(g):
                 if now - link_last[0] >= 0.35:
                     link_last[0] = now
                     send_fn = g.get("_send_to_healer")
-                    pkt = g.get("_HP_LINK_PKT")
-                    if send_fn and pkt:
-                        send_fn(pkt)
+                    ping = g.get("_HP_LINK_PING")
+                    if send_fn and ping:
+                        send_fn(ping)
             except Exception:
                 pass
 

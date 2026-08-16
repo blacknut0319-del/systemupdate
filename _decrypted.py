@@ -3421,7 +3421,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 17:11"
+PATCH_UPDATED_AT = "2026-08-16 17:22"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3948,24 +3948,17 @@ def stop_everything(reason="💤 대기 중"):
             root.after(0, lambda: chk_force_fix.set(False))
         if lbl_status:
             root.after(0, lambda: lbl_status.configure(text=reason, text_color="#f38ba8"))
-    with _hw_lock:
+    # Insert 정지 때 COM을 닫으면 CH340이 포트를 바로 안 풀어 2번째 시작에서 PermissionError(13).
+    # 예전 검증본처럼 정지는 R/U만 보내고 포트는 유지 — 종료(exit_app) 때만 close.
+    if ser and getattr(ser, "is_open", False):
         try:
-            if ser and getattr(ser, "is_open", False):
-                try:
-                    time.sleep(0.05)
-                    ser.write(b'R')
-                    ser.write(b'U')
-                    time.sleep(0.08)
-                except Exception:
-                    pass
-                try:
-                    ser.close()
-                except Exception:
-                    pass
+            with _attack_ser_lock:
+                time.sleep(0.05)
+                ser.write(b'R')
+                ser.write(b'U')
+                time.sleep(0.08)
         except Exception:
             pass
-        ser = None
-    time.sleep(0.2)
 
 def force_auth_exit(reason="인증 만료"):
     """인증 실패/만료 시 사냥만 멈추지 말고 프로그램 자체를 종료.
@@ -4194,7 +4187,8 @@ def _start_worker():
                 SERIAL_PORT = found
         except Exception:
             pass
-        connect_hardware()
+        if not ser or not getattr(ser, "is_open", False):
+            connect_hardware()
         if not ser or not getattr(ser, "is_open", False):
             _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
             msg = "○ 뚱박스 연결실패" if _hw in ("뚱박스", "KMBox") else "○ 장치 연결실패"
@@ -4872,6 +4866,8 @@ def refresh_fw_version(ser_obj=None, log=False, retries=6):
     s = ser_obj if ser_obj is not None else ser
     ver = ""
     for i in range(max(1, retries)):
+        if ser_obj is None and s is not ser:
+            break
         if i > 0:
             time.sleep(0.55)
         if not s or not getattr(s, "is_open", False):
@@ -5214,6 +5210,8 @@ def connect_hardware():
     with _hw_lock:
         globals()['_hw_status_gen'] = int(globals().get('_hw_status_gen', 0)) + 1
         gen = globals()['_hw_status_gen']
+        if ser and getattr(ser, "is_open", False):
+            return True
         try:
             if ser:
                 try:
@@ -6792,7 +6790,9 @@ def _ingest_attacker_packet(data):
     if data != b'v':
         last_udp_time = time.time()
     if len(data) == 1:
-        if data == b'V':
+        if data == b'p':
+            pass  # 연결 핑 — last_udp_time 만 갱신, HP 는 그대로
+        elif data == b'V':
             Thread(target=start_stream_server, daemon=True).start()
         elif data == b'v':
             Thread(target=stop_stream_server, daemon=True).start()

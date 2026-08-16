@@ -194,7 +194,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 17:11"
+PATCH_UPDATED_AT = "2026-08-16 17:22"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -794,6 +794,7 @@ sct = mss.MSS()
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 running = True; hp_pct = 0.0
 _HP_LINK_PKT = struct.pack('fBB', 100.0, 0, 0)
+_HP_LINK_PING = b'p'  # 연결 확인만 — HP 갱신 안 함 (100% 패킷이랑 섞이면 표시가 튐)
 
 def _target_healer_ip():
     try:
@@ -912,7 +913,7 @@ def _ctrl_tcp_loop():
 def _ping_healer():
     ok = False
     for _ in range(3):
-        if _send_to_healer(_HP_LINK_PKT):
+        if _send_to_healer(_HP_LINK_PING):
             ok = True
         time.sleep(0.05)
     return ok
@@ -1695,7 +1696,7 @@ threading.Thread(target=_ctrl_tcp_loop, daemon=True).start()
 def _hp_link_loop():
     while running:
         try:
-            _send_to_healer(_HP_LINK_PKT)
+            _send_to_healer(_HP_LINK_PING)
         except Exception:
             pass
         time.sleep(0.35)
@@ -1708,7 +1709,7 @@ def _probe_healer_ip(ip):
         return False
     ok = False
     try:
-        sock.sendto(_HP_LINK_PKT, (ip, TARGET_PORT))
+        sock.sendto(_HP_LINK_PING, (ip, TARGET_PORT))
         ok = True
     except Exception:
         pass
@@ -1717,7 +1718,7 @@ def _probe_healer_ip(ip):
         conn.settimeout(2.0)
         conn.connect((ip, STREAM_CTRL_TCP_PORT))
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        raw = _HP_LINK_PKT
+        raw = _HP_LINK_PING
         conn.sendall(len(raw).to_bytes(4, "big") + raw)
         conn.close()
         ok = True
