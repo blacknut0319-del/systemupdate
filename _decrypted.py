@@ -978,6 +978,7 @@ NOPARTY_RGB = [162, 146, 150]
 attacker_hp_threshold = 85.0
 UDP_ATTACKER_PORT = 9999
 STREAM_TCP_PORT = 9100
+STREAM_CTRL_TCP_PORT = 9101
 
 def _ensure_udp_firewall(port, rule_name):
     """UDP 수신 허용 — 포트 규칙은 항상, exe 규칙은 sooplive/pythonw일 때만."""
@@ -1023,6 +1024,32 @@ def _ensure_udp_firewall(port, rule_name):
         )
     except Exception:
         pass
+
+def _ensure_tcp_firewall(port, rule_name):
+    """TCP 수신 허용 — 쫄화면(9100)·격수제어(9101)."""
+    try:
+        import subprocess
+        flags = 0x08000000
+        port_rule = "%s (port)" % rule_name
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", "name=%s" % port_rule],
+            capture_output=True, timeout=5, creationflags=flags,
+        )
+        subprocess.run(
+            [
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=%s" % port_rule,
+                "dir=in", "action=allow", "protocol=TCP",
+                "localport=%d" % int(port),
+                "enable=yes",
+            ],
+            capture_output=True,
+            timeout=10,
+            creationflags=flags,
+        )
+    except Exception:
+        pass
+
 _stream_active = False
 _stream_client = None
 _stream_client_lock = Lock()
@@ -3394,7 +3421,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:58"
+PATCH_UPDATED_AT = "2026-08-16 17:11"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3893,27 +3920,52 @@ def on_end_bert(e=None):
 
 def stop_everything(reason="💤 대기 중"):
     global running, ser, root, chk_follow, chk_fix, chk_force_fix, lbl_status, _attack_follow, _attack_fix, _force_fix
-    running = False; time.sleep(0.05)
+    running = False
+    time.sleep(0.05)
     _attack_follow = False
     _attack_fix = False
     _force_fix = False
     if root:
         if chk_follow and chk_follow.get():
-            if ser and ser.is_open:
-                try: time.sleep(0.02); ser.write(b'U')
-                except: pass
+            if ser and getattr(ser, "is_open", False):
+                try:
+                    time.sleep(0.02)
+                    ser.write(b'U')
+                except Exception:
+                    pass
             root.after(0, lambda: chk_follow.set(False))
         if chk_fix and chk_fix.get():
-            if ser and ser.is_open:
-                try: time.sleep(0.05); ser.write(b'R'); ser.write(b'U'); time.sleep(0.1)
-                except: pass
+            if ser and getattr(ser, "is_open", False):
+                try:
+                    time.sleep(0.05)
+                    ser.write(b'R')
+                    ser.write(b'U')
+                    time.sleep(0.1)
+                except Exception:
+                    pass
             root.after(0, lambda: chk_fix.set(False))
         if chk_force_fix and chk_force_fix.get():
             root.after(0, lambda: chk_force_fix.set(False))
-        if lbl_status: root.after(0, lambda: lbl_status.configure(text=reason, text_color="#f38ba8"))
-    if ser and ser.is_open:
-        try: time.sleep(0.05); ser.write(b'R'); ser.write(b'U'); time.sleep(0.1)
-        except: pass
+        if lbl_status:
+            root.after(0, lambda: lbl_status.configure(text=reason, text_color="#f38ba8"))
+    with _hw_lock:
+        try:
+            if ser and getattr(ser, "is_open", False):
+                try:
+                    time.sleep(0.05)
+                    ser.write(b'R')
+                    ser.write(b'U')
+                    time.sleep(0.08)
+                except Exception:
+                    pass
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        ser = None
+    time.sleep(0.2)
 
 def force_auth_exit(reason="인증 만료"):
     """인증 실패/만료 시 사냥만 멈추지 말고 프로그램 자체를 종료.
@@ -5163,11 +5215,13 @@ def connect_hardware():
         globals()['_hw_status_gen'] = int(globals().get('_hw_status_gen', 0)) + 1
         gen = globals()['_hw_status_gen']
         try:
-            if ser: ser.close()
-        except Exception:
-            pass
-        ser = None
-        try:
+            if ser:
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+            ser = None
+            time.sleep(0.15)
             _hw = hw_var.get() if ('hw_var' in globals() and hw_var) else HW_MODE
             if _hw in ("뚱박스", "KMBox"):
                 if kmNet is None or not hasattr(kmNet, "lcd_picture"):
@@ -6394,6 +6448,8 @@ def _attacker_link_ui():
     udp_fresh = last_udp_time > 0 and (time.time() - last_udp_time) <= 2.0
     if udp_fresh:
         return "격수: %.0f%%" % attacker_hp_udp, "#ef4444", "✅ 연결", "#a6e3a1"
+    if _attacker_ctrl_tcp_connected():
+        return "격수: %.0f%%" % attacker_hp_udp, "#ef4444", "✅ 연결", "#a6e3a1"
     if _attacker_stream_connected():
         return "격수: 연결", "#a6e3a1", "✅ 연결", "#a6e3a1"
     return "격수: 끊김", "#ef4444", "○ 대기", "#f9e2af"
@@ -6718,6 +6774,130 @@ def udp_macro_slot(n):
         ser.write(b'K'); time.sleep(0.10)
         ser.write(b'1'); time.sleep(random.uniform(0.25, 0.40))
     except: pass
+_ctrl_client_count = 0
+_ctrl_client_lock = Lock()
+
+def _attacker_ctrl_tcp_connected():
+    try:
+        with _ctrl_client_lock:
+            return _ctrl_client_count > 0
+    except Exception:
+        return False
+
+def _ingest_attacker_packet(data):
+    """격수→힐러 패킷 (UDP 9999 또는 TCP 9101 동일 포맷)."""
+    global attacker_hp_udp, attacker_poisoned, attacker_petrified, last_udp_time
+    if not data:
+        return
+    if data != b'v':
+        last_udp_time = time.time()
+    if len(data) == 1:
+        if data == b'V':
+            Thread(target=start_stream_server, daemon=True).start()
+        elif data == b'v':
+            Thread(target=stop_stream_server, daemon=True).start()
+        elif data in UDP_CMD_MAP:
+            func_name = UDP_CMD_MAP[data]
+            f = globals().get(func_name)
+            if f:
+                try:
+                    f()
+                except Exception:
+                    pass
+        elif data in (b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8'):
+            n = int(data.decode())
+            Thread(target=lambda s=n: udp_macro_slot(s), daemon=True).start()
+        elif data == b'C':
+            Thread(target=do_manual_bert, daemon=True).start()
+    elif len(data) >= 2 and data[0:1] == b'{':
+        try:
+            msg = json.loads(data.decode("utf-8"))
+            _enqueue_remote_udp_json(msg)
+        except Exception:
+            pass
+    elif len(data) == 4:
+        attacker_hp_udp = struct.unpack('f', data)[0]
+        last_udp_time = time.time()
+    elif len(data) == 5:
+        attacker_hp_udp, poison_byte = struct.unpack('fB', data)
+        attacker_poisoned = bool(poison_byte)
+        last_udp_time = time.time()
+    elif len(data) == 6:
+        attacker_hp_udp, poison_byte, petrify_byte = struct.unpack('fBB', data)
+        attacker_poisoned = bool(poison_byte)
+        attacker_petrified = bool(petrify_byte)
+        last_udp_time = time.time()
+
+def _tcp_recv_exact(conn, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = conn.recv(n - len(buf))
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+def _ctrl_read_loop(conn, addr):
+    global _ctrl_client_count, udp_last_from, last_udp_time
+    try:
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        with _ctrl_client_lock:
+            _ctrl_client_count += 1
+        last_udp_time = time.time()
+        while timer_thread_active:
+            hdr = _tcp_recv_exact(conn, 4)
+            if not hdr:
+                break
+            n = int.from_bytes(hdr, "big")
+            if n <= 0 or n > 4096:
+                break
+            data = _tcp_recv_exact(conn, n)
+            if not data:
+                break
+            udp_last_from = addr[0] if addr else ""
+            _ingest_attacker_packet(data)
+    except Exception:
+        pass
+    finally:
+        with _ctrl_client_lock:
+            _ctrl_client_count = max(0, _ctrl_client_count - 1)
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+def _ctrl_server_loop():
+    """격수 HP·원격명령 TCP 수신 (UDP 9999 막힌 PC용)."""
+    srv = None
+    while timer_thread_active:
+        try:
+            if srv is None:
+                srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                srv.bind(("0.0.0.0", STREAM_CTRL_TCP_PORT))
+                srv.listen(4)
+                srv.settimeout(1.0)
+                _ensure_tcp_firewall(STREAM_CTRL_TCP_PORT, "DDONG Healer TCP 9101")
+            conn, addr = srv.accept()
+            Thread(target=_ctrl_read_loop, args=(conn, addr), daemon=True).start()
+        except socket.timeout:
+            continue
+        except OSError:
+            try:
+                if srv:
+                    srv.close()
+            except Exception:
+                pass
+            srv = None
+            time.sleep(2.0)
+        except Exception:
+            time.sleep(0.5)
+    try:
+        if srv:
+            srv.close()
+    except Exception:
+        pass
+
 def udp_listener():
     """격수모니터 → 뚱힐러 UDP 수신 (포트 9999).
     예전엔 bind 실패/예외 1번에 스레드가 바로 죽어서 영원히 '수신안됨'만 떴음."""
@@ -6735,43 +6915,7 @@ def udp_listener():
                 _ensure_udp_firewall(UDP_ATTACKER_PORT, "DDONG Healer UDP 9999")
             data, addr = sock.recvfrom(1024)
             udp_last_from = addr[0] if addr else ""
-            if data and data != b'v':
-                last_udp_time = time.time()
-            if len(data) == 1:
-                if data == b'V':
-                    Thread(target=start_stream_server, daemon=True).start()
-                elif data == b'v':
-                    Thread(target=stop_stream_server, daemon=True).start()
-                elif data in UDP_CMD_MAP:
-                    # UI after 대기 없이 수신 스레드에서 즉시 처리.
-                    # (힐 중 ser 사용 중에도 after 큐에 안 쌓이게 — 따라/고정/시작 반응 개선)
-                    # 체크박스 갱신은 각 핸들러가 이미 root.after 로 넘김.
-                    func_name = UDP_CMD_MAP[data]
-                    f = globals().get(func_name)
-                    if f:
-                        try:
-                            f()
-                        except Exception:
-                            pass
-                elif data in (b'1',b'2',b'3',b'4',b'5',b'6',b'7',b'8'):
-                    n = int(data.decode())
-                    Thread(target=lambda s=n: udp_macro_slot(s), daemon=True).start()
-                elif data == b'C':
-                    Thread(target=do_manual_bert, daemon=True).start()
-            elif len(data) >= 2 and data[0:1] == b'{':
-                try:
-                    msg = json.loads(data.decode("utf-8"))
-                    _enqueue_remote_udp_json(msg)
-                except Exception:
-                    pass
-            elif len(data) == 4:
-                attacker_hp_udp = struct.unpack('f', data)[0]; last_udp_time = time.time()
-            elif len(data) == 5:
-                attacker_hp_udp, poison_byte = struct.unpack('fB', data)
-                attacker_poisoned = bool(poison_byte); last_udp_time = time.time()
-            elif len(data) == 6:
-                attacker_hp_udp, poison_byte, petrify_byte = struct.unpack('fBB', data)
-                attacker_poisoned = bool(poison_byte); attacker_petrified = bool(petrify_byte); last_udp_time = time.time()
+            _ingest_attacker_packet(data)
         except socket.timeout:
             continue
         except OSError as e:
@@ -6830,6 +6974,8 @@ Thread(target=expert_logic, daemon=True).start()
 Thread(target=lcd_logo_worker, daemon=True).start()
 Thread(target=update_ui_timer, daemon=True).start()
 Thread(target=udp_listener, daemon=True).start()
+Thread(target=_ctrl_server_loop, daemon=True).start()
+_ensure_tcp_firewall(STREAM_TCP_PORT, "DDONG Healer TCP 9100")
 Thread(target=_remote_mouse_worker, daemon=True).start()
 Thread(target=_typing_poll_worker, daemon=True).start()
 Thread(target=_user_keys_passthrough_worker, daemon=True).start()

@@ -240,10 +240,12 @@ def _draw_main(g):
         if (n - 1) % 2 == 1:
             imgui.same_line()
         if _btn("Alt+%d F3>F%d" % (n, n + 4), "#313244", "#45475a", width=bw, height=22):
-            try:
-                sock.sendto(bytes([n + 48]), (g["ip_var"].get(), port))
-            except Exception:
-                pass
+            fn = g.get("_send_to_healer")
+            if fn:
+                try:
+                    fn(bytes([n + 48]))
+                except Exception:
+                    pass
 
     content_h = imgui.get_cursor_pos_y() + 24
     avail = imgui.get_content_region_available()

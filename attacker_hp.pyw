@@ -194,7 +194,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 16:54"
+PATCH_UPDATED_AT = "2026-08-16 17:11"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -257,6 +257,7 @@ def _sync_attacker_from_new():
 TARGET_IP = "192.168.0.100"
 TARGET_PORT = 9999
 DISCOVER_PORT = 9998
+STREAM_CTRL_TCP_PORT = 9101
 HP_ROI = (558, 878, 304, 5)
 HP_100_REF = None
 WIN_W = 340
@@ -847,6 +848,67 @@ def _ensure_udp_firewall(port, rule_name):
 
 _ensure_udp_firewall(DISCOVER_PORT, "DDONG Attacker UDP 9998")
 
+STREAM_TCP_PORT = 9100
+STREAM_CTRL_TCP_PORT = 9101
+stream_ctrl_sock = None
+_ctrl_sock_lock = threading.Lock()
+_ctrl_send_lock = threading.Lock()
+
+def _send_to_healer_tcp(payload):
+    global stream_ctrl_sock
+    data = bytes(payload) if not isinstance(payload, (bytes, bytearray)) else payload
+    if not data:
+        return False
+    try:
+        with _ctrl_sock_lock:
+            conn = stream_ctrl_sock
+        if not conn:
+            return False
+        with _ctrl_send_lock:
+            conn.sendall(len(data).to_bytes(4, "big") + data)
+        return True
+    except Exception:
+        with _ctrl_sock_lock:
+            try:
+                if stream_ctrl_sock:
+                    stream_ctrl_sock.close()
+            except Exception:
+                pass
+            stream_ctrl_sock = None
+        return False
+
+def _ctrl_tcp_loop():
+    """힐러 TCP 9101 — UDP 9999 막힌 PC에서 HP·원격명령."""
+    global stream_ctrl_sock
+    while running:
+        target = _target_healer_ip()
+        if not target:
+            time.sleep(0.5)
+            continue
+        conn = None
+        try:
+            conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            conn.settimeout(5.0)
+            conn.connect((target, STREAM_CTRL_TCP_PORT))
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            with _ctrl_sock_lock:
+                stream_ctrl_sock = conn
+            while running and _target_healer_ip() == target:
+                time.sleep(0.35)
+        except Exception:
+            pass
+        finally:
+            with _ctrl_sock_lock:
+                if stream_ctrl_sock is conn:
+                    stream_ctrl_sock = None
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+        if running:
+            time.sleep(0.5)
+
 def _ping_healer():
     ok = False
     for _ in range(3):
@@ -859,11 +921,15 @@ def _send_to_healer(payload):
     target = _target_healer_ip()
     if not target:
         return False
+    ok = False
     try:
         sock.sendto(payload, (target, TARGET_PORT))
-        return True
+        ok = True
     except Exception:
-        return False
+        pass
+    if _send_to_healer_tcp(payload):
+        ok = True
+    return ok
 
 # ============================================================
 # 원격 제어 (UDP 1byte)
@@ -874,12 +940,10 @@ CMD_NAMES = {b'I':'시작', b'H':'따라가기', b'P':'고정', b'L':'줍기', b
 
 def send_remote_cmd(cmd_byte):
     try:
-        target = _target_healer_ip()
-        if not target:
-            raise ValueError("no target ip")
-        sock.sendto(cmd_byte, (target, TARGET_PORT))
+        if not _send_to_healer(cmd_byte):
+            raise ValueError("send failed")
         lbl_status.config(text="%s 전송됨" % CMD_NAMES.get(cmd_byte,'?'), fg="#10b981")
-    except:
+    except Exception:
         lbl_status.config(text="전송 실패", fg="#ef4444")
 
 def on_remote_key(name):
@@ -899,12 +963,10 @@ def on_slot_hotkey(n):
         if now - DEBOUNCE.get('slot',0) < 0.5: return
         DEBOUNCE['slot'] = now
         try:
-            target = _target_healer_ip()
-            if not target:
-                raise ValueError("no target ip")
-            sock.sendto(bytes([n+48]), (target, TARGET_PORT))
+            if not _send_to_healer(bytes([n+48])):
+                raise ValueError("send failed")
             lbl_status.config(text="슬롯%d F3>%s>F1" % (n, SLOT_NAMES[n]), fg="#10b981")
-        except:
+        except Exception:
             lbl_status.config(text="전송 실패", fg="#ef4444")
     return handler
 
@@ -916,10 +978,8 @@ def on_end_bert_key(e=None):
         return
     DEBOUNCE['end'] = now
     try:
-        target = _target_healer_ip()
-        if not target:
-            raise ValueError("no target ip")
-        sock.sendto(b'C', (target, TARGET_PORT))
+        if not _send_to_healer(b'C'):
+            raise ValueError("send failed")
         lbl_status.config(text="베르 전송", fg="#f9e2af")
     except Exception:
         lbl_status.config(text="베르 실패", fg="#ef4444")
@@ -1623,13 +1683,14 @@ def sender():
         except Exception:
             pass
         try:
-            sock.sendto(pkt, (target, TARGET_PORT))
+            _send_to_healer(pkt)
         except Exception:
             time.sleep(0.5)
             continue
         time.sleep(0.1)
 
 threading.Thread(target=sender, daemon=True).start()
+threading.Thread(target=_ctrl_tcp_loop, daemon=True).start()
 
 def _hp_link_loop():
     while running:
@@ -1645,11 +1706,24 @@ def _probe_healer_ip(ip):
     ip = (ip or "").strip()
     if not ip:
         return False
+    ok = False
     try:
         sock.sendto(_HP_LINK_PKT, (ip, TARGET_PORT))
-        return True
+        ok = True
     except Exception:
-        return False
+        pass
+    try:
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.settimeout(2.0)
+        conn.connect((ip, STREAM_CTRL_TCP_PORT))
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        raw = _HP_LINK_PKT
+        conn.sendall(len(raw).to_bytes(4, "big") + raw)
+        conn.close()
+        ok = True
+    except Exception:
+        pass
+    return ok
 
 def _healer_ip_candidates(msg):
     out = []
