@@ -194,7 +194,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 17:31"
+PATCH_UPDATED_AT = "2026-08-16 19:39"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -935,18 +935,8 @@ def _ping_healer():
     return ok
 
 def _send_to_healer(payload):
-    target = _target_healer_ip()
-    if not target:
-        return False
-    ok = False
-    try:
-        sock.sendto(payload, (target, TARGET_PORT))
-        ok = True
-    except Exception:
-        pass
-    if _send_to_healer_tcp(payload):
-        ok = True
-    return ok
+    # TCP 단일 전송 — UDP+TCP 이중 전송으로 같은 명령이 2번 가서 F키가 두번 눌리던 버그 수정
+    return _send_to_healer_tcp(payload)
 
 # ============================================================
 # 원격 제어 (UDP 1byte)
