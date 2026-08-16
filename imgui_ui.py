@@ -1635,36 +1635,6 @@ def _draw_overlay(g):
     return title_hovered
 
 
-def _draw_status_chips(g):
-    """끊김·미설정 등 이상 상태 한눈에."""
-    import imgui
-
-    fn = g.get("collect_status_chips")
-    if not fn:
-        return
-    try:
-        chips = fn()
-    except Exception:
-        return
-    if not chips:
-        return
-    imgui.push_style_var(imgui.STYLE_ITEM_SPACING, (4, 2))
-    x0 = imgui.get_cursor_pos_x()
-    total_w = imgui.get_content_region_available().x
-    used = 0.0
-    for i, (txt, col) in enumerate(chips):
-        tw = imgui.calc_text_size(txt).x + 6
-        if used + tw > total_w and i > 0:
-            break
-        if i > 0:
-            imgui.same_line(spacing=4)
-        imgui.push_style_color(imgui.COLOR_TEXT, *_hex(col))
-        imgui.text(txt)
-        imgui.pop_style_color(1)
-        used += tw + 4
-    imgui.pop_style_var(1)
-
-
 def _draw_labeled_row(label, label_color, combo_id, items, var, btn1, btn1_fg, btn1_hv, btn1_fn, btn2, btn2_fg, btn2_hv, btn2_fn, combo_w, combo_x, btn1_x, btn2_x, btn1_w, btn2_w, combo_cmd=None, label_x=6):
     """장치/프리셋 — 라벨·드롭다운·버튼2개 열 맞춤."""
     import imgui
