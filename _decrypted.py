@@ -3394,7 +3394,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:51"
+PATCH_UPDATED_AT = "2026-08-16 16:54"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -6770,7 +6770,7 @@ lbl_log = ctk.CTkTextbox(root, height=55, fg_color="#0d1117", text_color="#a6e3a
                           font=("Consolas", 9), border_width=1, border_color="#262a33",
                           corner_radius=6, activate_scrollbars=False)
 lbl_log.pack(fill="x", padx=6, pady=(4,2))
-lbl_log.insert("1.0", "🟢 시스템 시작")
+lbl_log.insert("1.0", "🟢 시스템 시작 (%s)" % PATCH_UPDATED_AT)
 lbl_log.configure(state="disabled")
 resize_grip = ctk.CTkLabel(root, text="◢", width=16, height=16, fg_color="#313244", text_color="#6c7086",
                            font=("Malgun Gothic", 10, "bold"), corner_radius=0)

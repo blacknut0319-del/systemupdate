@@ -163,8 +163,9 @@ def _ensure_imgui_sidecars():
                 with open(dest, "wb") as f:
                     f.write(data)
         except Exception as e:
-            if not os.path.isfile(dest):
-                _startup_fatal("UI 파일 다운로드 실패 (%s).\n인터넷 확인 후 다시 실행해 주세요.\n\n%s" % (name, e))
+            _startup_fatal(
+                "UI 파일 다운로드 실패 (%s).\nhp_start.bat 으로 다시 실행해 주세요.\n\n%s" % (name, e)
+            )
 
 _ensure_imgui_sidecars()
 
@@ -193,7 +194,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 16:51"
+PATCH_UPDATED_AT = "2026-08-16 16:54"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
