@@ -3394,7 +3394,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:33"
+PATCH_UPDATED_AT = "2026-08-16 16:43"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -6288,18 +6288,33 @@ lbl_ontop_status.pack(side="right", padx=2)
 udp_listen_ok = False          # 포트 9999 바인드 성공 여부
 udp_last_from = ""             # 마지막 송신측 IP (진단용)
 
+def _attacker_stream_connected():
+    global _stream_active, _stream_client
+    if not _stream_active:
+        return False
+    try:
+        with _stream_client_lock:
+            return _stream_client is not None
+    except Exception:
+        return False
+
+def _attacker_link_ui():
+    """격수 연결 표시 — UDP HP 또는 쫄화면(TCP) 둘 중 하나만 되어도 연결."""
+    if not udp_listen_ok:
+        return "격수: 오류", "#ef4444", "○ 대기", "#f38ba8"
+    udp_fresh = last_udp_time > 0 and (time.time() - last_udp_time) <= 2.0
+    if udp_fresh:
+        return "격수: %.0f%%" % attacker_hp_udp, "#ef4444", "✅ 연결", "#a6e3a1"
+    if _attacker_stream_connected():
+        return "격수: 연결", "#a6e3a1", "✅ 연결", "#a6e3a1"
+    return "격수: 끊김", "#ef4444", "○ 대기", "#f9e2af"
+
 def update_udp_hp_label():
     try:
         if root and root.winfo_exists():
-            if not udp_listen_ok:
-                udp_hp_lbl.configure(text="격수: 오류", text_color="#ef4444")
-                lbl_ontop_status.configure(text="○ 대기", text_color="#f38ba8")
-            elif last_udp_time == 0 or time.time() - last_udp_time > 2.0:
-                udp_hp_lbl.configure(text="격수: 끊김", text_color="#ef4444")
-                lbl_ontop_status.configure(text="○ 대기", text_color="#f9e2af")
-            else:
-                udp_hp_lbl.configure(text=f"격수: {attacker_hp_udp:.0f}%", text_color="#ef4444")
-                lbl_ontop_status.configure(text="✅ 연결", text_color="#a6e3a1")
+            atk, atk_c, ontop, ontop_c = _attacker_link_ui()
+            udp_hp_lbl.configure(text=atk, text_color=atk_c)
+            lbl_ontop_status.configure(text=ontop, text_color=ontop_c)
     except: pass
     try:
         if root and root.winfo_exists():
@@ -6520,6 +6535,8 @@ def _stream_send_loop():
                 continue
             raw = buf.tobytes()
             conn.sendall(len(raw).to_bytes(4, "big") + raw)
+            global last_udp_time
+            last_udp_time = time.time()
         except Exception:
             with _stream_client_lock:
                 try:
@@ -6548,6 +6565,8 @@ def _stream_accept_loop():
         try:
             conn, _addr = srv.accept()
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            global last_udp_time
+            last_udp_time = time.time()
             with _stream_client_lock:
                 old = _stream_client
                 _stream_client = conn

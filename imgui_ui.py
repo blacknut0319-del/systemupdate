@@ -433,6 +433,12 @@ def _lbl_color(w, default="#cdd6f4"):
 
 def _attacker_udp_ui(g):
     """ImGui는 숨긴 CTkLabel 갱신을 못 읽는 경우가 있어 전역값을 직접 본다."""
+    fn = g.get("_attacker_link_ui")
+    if callable(fn):
+        try:
+            return fn()
+        except Exception:
+            pass
     import time
     listen_ok = bool(g.get("udp_listen_ok"))
     try:

@@ -191,7 +191,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 16:33"
+PATCH_UPDATED_AT = "2026-08-16 16:43"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -1249,6 +1249,11 @@ def _stream_tcp_loop():
             conn.connect((ip, STREAM_TCP_PORT))
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             stream_view_sock = conn
+            try:
+                _send_to_healer(b'V')
+                _ping_healer()
+            except Exception:
+                pass
             if stream_view_label and stream_view_label.winfo_exists() and not stream_view_photo:
                 root.after(0, lambda: stream_view_label.config(text="연결됨", fg="#10b981"))
             while stream_view_active:
