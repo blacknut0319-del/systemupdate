@@ -1392,10 +1392,7 @@ def _draw_admin_body(g):
     rois = g["PARTY_ROIS"]
     nrois = g["PARTY_NAME_ROIS"]
     ths = g["PARTY_HP_THRESHOLDS"]
-    imgui.columns(2, "partycols", False)
     for i in range(8):
-        if i == 4:
-            imgui.next_column()
         imgui.push_id("p%d" % i)
         imgui.begin_child("##pc%d" % i, 0, 158, True)
         cur = bool(flags[i])
@@ -1485,7 +1482,6 @@ def _draw_admin_body(g):
         imgui.end_group()
         imgui.end_child()
         imgui.pop_id()
-    imgui.columns(1)
     imgui.end_child()
     if _btn("💾 실시간 저장 및 닫기", "#800020", "#9e1a3a", width=-1, height=32, text_color="#ffffff"):
         try:
