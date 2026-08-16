@@ -191,7 +191,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 16:03"
+PATCH_UPDATED_AT = "2026-08-16 16:14"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -808,6 +808,11 @@ def _ensure_udp_firewall(port, rule_name):
         if not exe.lower().endswith(".exe"):
             return
         import subprocess
+        flags = 0x08000000
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", "name=%s" % rule_name],
+            capture_output=True, timeout=5, creationflags=flags,
+        )
         subprocess.run(
             [
                 "netsh", "advfirewall", "firewall", "add", "rule",
@@ -819,10 +824,25 @@ def _ensure_udp_firewall(port, rule_name):
             ],
             capture_output=True,
             timeout=10,
-            creationflags=0x08000000,
+            creationflags=flags,
         )
     except Exception:
         pass
+
+_ensure_udp_firewall(DISCOVER_PORT, "DDONG Attacker UDP 9998")
+
+def _ping_healer():
+    return _send_to_healer(struct.pack('fBB', 0.0, 0, 0))
+
+def _send_to_healer(payload):
+    target = _target_healer_ip()
+    if not target:
+        return False
+    try:
+        sock.sendto(payload, (target, TARGET_PORT))
+        return True
+    except Exception:
+        return False
 
 # ============================================================
 # 원격 제어 (UDP 1byte)
@@ -858,7 +878,10 @@ def on_slot_hotkey(n):
         if now - DEBOUNCE.get('slot',0) < 0.5: return
         DEBOUNCE['slot'] = now
         try:
-            sock.sendto(bytes([n+48]), (ip_var.get(), TARGET_PORT))
+            target = _target_healer_ip()
+            if not target:
+                raise ValueError("no target ip")
+            sock.sendto(bytes([n+48]), (target, TARGET_PORT))
             lbl_status.config(text="슬롯%d F3>%s>F1" % (n, SLOT_NAMES[n]), fg="#10b981")
         except:
             lbl_status.config(text="전송 실패", fg="#ef4444")
@@ -872,7 +895,10 @@ def on_end_bert_key(e=None):
         return
     DEBOUNCE['end'] = now
     try:
-        sock.sendto(b'C', (ip_var.get(), TARGET_PORT))
+        target = _target_healer_ip()
+        if not target:
+            raise ValueError("no target ip")
+        sock.sendto(b'C', (target, TARGET_PORT))
         lbl_status.config(text="베르 전송", fg="#f9e2af")
     except Exception:
         lbl_status.config(text="베르 실패", fg="#ef4444")
@@ -1061,6 +1087,8 @@ def save_cfg():
     os.replace(tmp, CONFIG_FILE)
     ctypes.windll.kernel32.SetFileAttributesW(CONFIG_FILE, 2)
     lbl_status.config(text="저장됨", fg="#10b981")
+    if _ping_healer():
+        lbl_status.config(text="힐러연결됨", fg="#10b981")
 
 def set_100ref():
     global HP_100_REF
@@ -1149,7 +1177,7 @@ def _alt_held():
 
 def send_mouse_json(obj):
     try:
-        sock.sendto(json.dumps(obj).encode("utf-8"), (ip_var.get(), TARGET_PORT))
+        _send_to_healer(json.dumps(obj).encode("utf-8"))
     except Exception:
         pass
 
@@ -1278,7 +1306,8 @@ def toggle_stream_send():
     global stream_send_on
     stream_send_on = not stream_send_on
     try:
-        sock.sendto(b'V' if stream_send_on else b'v', (ip_var.get(), TARGET_PORT))
+        if not _send_to_healer(b'V' if stream_send_on else b'v'):
+            raise ValueError("no target ip")
         btn_stream_send.config(
             text="📡 전송 ON" if stream_send_on else "📡 전송 OFF",
             bg="#10b981" if stream_send_on else "#374151",
@@ -1387,7 +1416,7 @@ for n in range(1,9):
     slot_frame.grid_columnconfigure(col, weight=1)
     tk.Button(f, text="Alt+%d F3>F%d" % (n, n+4), bg=slot_colors[n],
               fg="#fff", font=('',7,'bold'), relief='flat', padx=1, cursor="hand2",
-              command=lambda s=n: sock.sendto(bytes([s+48]), (ip_var.get(), TARGET_PORT))
+              command=lambda s=n: _send_to_healer(bytes([s+48]))
               ).pack(fill='x')
 
 # ============================================================
@@ -1576,16 +1605,18 @@ def _apply_healer_ip(ip):
     if not ip:
         return
     try:
-        if ip_var.get().strip() == ip:
+        same = ip_var.get().strip() == ip
+        if not same:
+            ip_var.set(ip)
+            save_cfg()
             try:
-                lbl_status.config(text="힐러연결됨", fg="#10b981")
+                lbl_status.config(text="힐러자동연결", fg="#10b981")
             except Exception:
                 pass
             return
-        ip_var.set(ip)
-        save_cfg()
+        _ping_healer()
         try:
-            lbl_status.config(text="힐러자동연결", fg="#10b981")
+            lbl_status.config(text="힐러연결됨", fg="#10b981")
         except Exception:
             pass
     except Exception:
@@ -1600,7 +1631,7 @@ def discover_listener():
             sock_d.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock_d.bind(("0.0.0.0", DISCOVER_PORT))
             sock_d.settimeout(1.0)
-            _ensure_udp_firewall(DISCOVER_PORT, "뚱격수 자동연결(UDP9998)")
+            _ensure_udp_firewall(DISCOVER_PORT, "DDONG Attacker UDP 9998")
             while running:
                 try:
                     data, _addr = sock_d.recvfrom(1024)

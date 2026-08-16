@@ -984,6 +984,11 @@ def _ensure_udp_firewall(port, rule_name):
         if not exe.lower().endswith(".exe"):
             return
         import subprocess
+        flags = 0x08000000
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", "name=%s" % rule_name],
+            capture_output=True, timeout=5, creationflags=flags,
+        )
         subprocess.run(
             [
                 "netsh", "advfirewall", "firewall", "add", "rule",
@@ -995,7 +1000,7 @@ def _ensure_udp_firewall(port, rule_name):
             ],
             capture_output=True,
             timeout=10,
-            creationflags=0x08000000,
+            creationflags=flags,
         )
     except Exception:
         pass
@@ -3370,7 +3375,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:03"
+PATCH_UPDATED_AT = "2026-08-16 16:14"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3562,8 +3567,15 @@ def restart_with_update():
         exe = _resolve_healer_launcher()
         env = os.environ.copy()
         env["DDONG_APP_DIR"] = APP_DIR
+        try:
+            if ser:
+                ser.close()
+                ser = None
+        except Exception:
+            pass
+        time.sleep(0.8)
         subprocess.Popen([exe, dest], close_fds=True, cwd=APP_DIR, env=env)
-        time.sleep(0.4)
+        time.sleep(1.0)
     except Exception as e:
         try:
             _ui_alert(
@@ -5118,7 +5130,19 @@ def connect_hardware():
                 found = auto_find_arduino()
                 if found:
                     globals()['SERIAL_PORT'] = found
-                ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
+                open_err = None
+                for attempt in range(3):
+                    try:
+                        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
+                        open_err = None
+                        break
+                    except Exception as e:
+                        open_err = e
+                        ser = None
+                        if attempt < 2:
+                            time.sleep(0.7)
+                if open_err:
+                    raise open_err
                 _set_hw_label(f"● {SERIAL_PORT}", '#3fb950', gen)
             connected = bool(ser and getattr(ser, "is_open", False))
             if connected:
@@ -5557,7 +5581,7 @@ except: title_lbl = ctk.CTkLabel(title_bar, text="❖ 뚱힐러 ❖", font=("Mal
 title_lbl.place(relx=0.5, rely=0.5, anchor="center") 
 
 def exit_app():
-    global timer_thread_active, loaded_pwd
+    global timer_thread_active, loaded_pwd, ser
     timer_thread_active = False
     try: save_hidden_config(loaded_pwd if loaded_pwd else "")
     except: pass
@@ -5568,7 +5592,18 @@ def exit_app():
     try:
         if camera: camera.stop(); camera.release()
     except: pass
-    keyboard.unhook_all(); os._exit(0)
+    try:
+        if ser:
+            ser.close()
+            ser = None
+    except Exception:
+        pass
+    try:
+        keyboard.unhook_all()
+    except Exception:
+        pass
+    time.sleep(0.5)
+    os._exit(0)
 
 exit_btn = ctk.CTkButton(title_bar, text="✖", width=24, height=20, fg_color="#800020", hover_color="#9e1a3a", border_width=1, border_color="#4a0010", command=exit_app)
 exit_btn.pack(side="right", padx=5, pady=2)
@@ -6578,7 +6613,7 @@ def udp_listener():
                 sock.bind(("0.0.0.0", UDP_ATTACKER_PORT))
                 sock.settimeout(1.0)
                 udp_listen_ok = True
-                _ensure_udp_firewall(UDP_ATTACKER_PORT, "뚱힐러 격수HP(UDP9999)")
+                _ensure_udp_firewall(UDP_ATTACKER_PORT, "DDONG Healer UDP 9999")
             data, addr = sock.recvfrom(1024)
             udp_last_from = addr[0] if addr else ""
             if len(data) == 1:
@@ -6668,6 +6703,7 @@ def _install_hotkeys():
     _hook('f4', on_f4_toggle)
 
 timer_thread_active = True
+_ensure_udp_firewall(UDP_ATTACKER_PORT, "DDONG Healer UDP 9999")
 Thread(target=reserve_shutdown_worker, daemon=True).start()
 Thread(target=expert_logic, daemon=True).start()
 Thread(target=lcd_logo_worker, daemon=True).start()
