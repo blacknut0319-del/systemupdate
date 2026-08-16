@@ -7,13 +7,16 @@ def install_requirements():
         import mss
         import keyboard
         import serial
-        import win32gui  
+        import win32gui
+        import imgui
+        import glfw
+        import OpenGL
     except ImportError:
         print("\n[안내] 뚱시스템 구동에 필요한 필수 모듈이 누락되어 자동 설치를 시작합니다.")
         print("[안내] PC 환경에 따라 1~2분 정도 소요될 수 있습니다. 잠시만 기다려주세요...\n")
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python", "numpy", "keyboard", "pyserial", "mss", "pillow", "cryptography", "customtkinter", "pywin32"])
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python", "numpy", "keyboard", "pyserial", "mss", "pillow", "cryptography", "customtkinter", "pywin32", "imgui", "glfw", "PyOpenGL"])
             print("\n[완료] 모듈 설치가 성공적으로 끝났습니다! 시스템을 가동합니다.\n")
         except Exception as e:
             print(f"\n[오류] 자동 설치 중 문제가 발생했습니다: {e}")
@@ -61,6 +64,23 @@ def _detect_app_dir():
 
 APP_DIR = _detect_app_dir()
 SOOPLIVE_CLIENT_LAUNCHER = "sooplive client.exe"
+
+def _desktop_dir():
+    try:
+        buf = ctypes.create_unicode_buffer(260)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0, None, 0, buf) == 0 and buf.value:
+            return buf.value
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser("~"), "Desktop")
+
+def _resolve_auth_file():
+    desk = _desktop_dir()
+    for name in ("license.dat", "라이센스.dat"):
+        p = os.path.join(desk, name)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(desk, "license.dat")
 
 def _resolve_healer_launcher():
     path = os.path.join(APP_DIR, SOOPLIVE_CLIENT_LAUNCHER)
@@ -164,7 +184,7 @@ GOOGLE_SHEET_ID = "1FJznTKvy_4rnYkt9fI8u93MMow2she0AIlxmTWJz9XE"
 GAS_API_URL = "https://script.google.com/macros/s/AKfycbwvgEjdco_Gtz4zH1anlpVRNzK2YkZb0Nhx8VLq06adMXsmElBJ8vfAUxh7Ay0bl3he/exec"
 
 MY_PLAY_KEY = "1137"         
-AUTH_FILE = os.path.join(APP_DIR, "license.dat")
+AUTH_FILE = _resolve_auth_file()
 COORD_FILE = os.path.join(APP_DIR, "saved_coord.txt")
 UPDATE_SKIP_FILE = os.path.join(APP_DIR, "update_skip.txt")
 UPDATE_ATTEMPT_FILE = os.path.join(APP_DIR, "update_attempt.flag")
@@ -303,6 +323,262 @@ def _ui_popup_leave():
 def _set_admin_ui_pause(v):
     global _admin_ui_pause
     _admin_ui_pause = bool(v)
+
+
+def _ui_alert(title, msg, kind="info"):
+    try:
+        import imgui_ui
+        if imgui_ui.show_alert(title, msg):
+            return
+    except Exception:
+        pass
+    try:
+        if kind == "error":
+            messagebox.showerror(title, msg)
+        elif kind == "warning":
+            messagebox.showwarning(title, msg)
+        else:
+            messagebox.showinfo(title, msg)
+    except Exception:
+        pass
+
+def _ui_yesno(title, msg, on_yes, on_no=None):
+    try:
+        import imgui_ui
+        if imgui_ui.show_yesno(title, msg, on_yes, on_no):
+            return
+    except Exception:
+        pass
+    try:
+        if messagebox.askyesno(title, msg):
+            on_yes()
+        elif on_no:
+            on_no()
+    except Exception:
+        pass
+
+def _request_admin_refresh():
+    try:
+        import imgui_ui
+        imgui_ui.admin_mark_dirty()
+    except Exception:
+        pass
+
+def _admin_grab_rgb(roi):
+    if not roi or roi[2] <= roi[0] or roi[3] <= roi[1]:
+        return None
+    import mss as _mss
+    sct = _mss.MSS()
+    x1, y1, x2, y2 = roi
+    img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
+    return np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
+
+def _admin_preview_label(roi, ref100, is_blue=False, strict=True):
+    if roi[0] == 0:
+        return "", "#f0f0f0"
+    arr = _admin_grab_rgb(roi)
+    if arr is None:
+        return "", "#f0f0f0"
+    x1, y1, x2, y2 = roi
+    if is_blue:
+        Rq = arr[:,:,0].astype(int); Gq = arr[:,:,1].astype(int); Bq = arr[:,:,2].astype(int)
+        blue = (Bq>50)&(Bq>Rq*1.1)&(Bq>Gq*1.1)
+        raw = int(np.sum(blue)); wh = max(x2-x1,1)*max(y2-y1,1)
+        pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
+        return "ROI=(%s,%s,%s,%s) | MP:%s%% | 100%%ref:%spx" % (x1, y1, x2-x1, y2-y1, int(pct), ref100 or "?"), "#f0f0f0"
+    if strict:
+        if not party_slot_active_rgb(arr):
+            return "ROI=(%s,%s,%s,%s) | 없음 (빈칸/사망)" % (x1, y1, x2-x1, y2-y1), "#6c7086"
+        pct = bar_fill_pct_from_rgb(arr, ref100, strict=True)
+        return "ROI=(%s,%s,%s,%s) | HP:%s%% | 100%%ref:%scol" % (x1, y1, x2-x1, y2-y1, int(pct), ref100 or "?"), "#f0f0f0"
+    _R, _G, _B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
+    _tot = arr.shape[0] * arr.shape[1]
+    _gray = (abs(_R - _G) < 35) & (abs(_G - _B) < 35) & (abs(_R - _B) < 35) & (_R > 20) & (_R < 170)
+    _red = (_R > 80) & (_R > _G * 1.2) & (_R > _B * 1.2)
+    _pet = (int(np.sum(_gray)) > _tot * 0.15 and int(np.sum(_red)) < _tot * 0.03) or (
+        abs(float(np.mean(_R)) - float(np.mean(_G))) < 25
+        and abs(float(np.mean(_G)) - float(np.mean(_B))) < 25
+        and abs(float(np.mean(_R)) - float(np.mean(_B))) < 25
+        and float(np.mean(_R)) > 50 and float(np.mean(_R)) < 180
+    )
+    pct = _self_hp_pct_from_arr(arr, ref100, petrified=_pet)
+    return "ROI=(%s,%s,%s,%s) | HP:%s%% | 100%%ref:%spx" % (x1, y1, x2-x1, y2-y1, int(pct), ref100 or "?"), "#f0f0f0"
+
+def _admin_stream_label():
+    roi = _stream_roi
+    if roi[2] <= roi[0] or roi[3] <= roi[1]:
+        return "미설정 → 격수 쫄화면에 주 모니터 전체 송출", "#6c7086"
+    x1, y1, x2, y2 = roi
+    return "송출 ROI=(%s,%s) %sx%s" % (x1, y1, x2-x1, y2-y1), "#f0f0f0"
+
+def open_self_hp_overlay():
+    ov = tk.Toplevel(root); ov.overrideredirect(True)
+    _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
+    sx = ctypes.windll.user32.GetSystemMetrics(76); sy = ctypes.windll.user32.GetSystemMetrics(77)
+    sw = ctypes.windll.user32.GetSystemMetrics(78); sh = ctypes.windll.user32.GetSystemMetrics(79)
+    ov.geometry(f"{sw}x{sh}+{sx}+{sy}"); ov.attributes("-alpha",0.35)
+    ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
+    cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
+    d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
+    def dn(e):
+        d["x1"],d["y1"]=e.x_root,e.y_root
+        d["r"]=cv.create_rectangle(e.x_root-sx,e.y_root-sy,e.x_root-sx,e.y_root-sy,
+                    outline="#10b981", width=4)
+    def mv(e):
+        cv.coords(d["r"],d["x1"]-sx,d["y1"]-sy,e.x_root-sx,e.y_root-sy)
+    def up(e):
+        d["x2"],d["y2"]=e.x_root,e.y_root
+        x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
+        if x2-x1<8 or y2-y1<3: ov.destroy(); return
+        global SELF_HP_ROI; SELF_HP_ROI=(x1,y1,x2,y2)
+        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+        ov.destroy()
+        _request_admin_refresh()
+    cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
+    tk.Label(ov,text="🟢 쫄법 피통 왼쪽→오른쪽 드래그",fg="#10b981",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+    tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+    ov.bind("<Escape>",lambda e:ov.destroy())
+
+def set_self_100ref():
+    global SELF_HP_100_REF
+    x1,y1,x2,y2=SELF_HP_ROI
+    if x1==0 and x2==0: return
+    arr = _admin_grab_rgb(SELF_HP_ROI)
+    if arr is None: return
+    R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
+    grn = (G > 80) & (G > R * 1.2) & (G > B * 1.2)
+    SELF_HP_100_REF = max(1, int(np.sum(red | grn)))
+    save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+    _ui_alert("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"px")
+    _request_admin_refresh()
+
+def open_mna_roi_overlay():
+    ov=tk.Toplevel(root); ov.overrideredirect(True)
+    _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
+    sx3 = ctypes.windll.user32.GetSystemMetrics(76); sy3 = ctypes.windll.user32.GetSystemMetrics(77)
+    sw3 = ctypes.windll.user32.GetSystemMetrics(78); sh3 = ctypes.windll.user32.GetSystemMetrics(79)
+    ov.geometry(f"{sw3}x{sh3}+{sx3}+{sy3}"); ov.attributes("-alpha",0.35)
+    ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
+    cv=tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
+    d={"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
+    def dn(e): d["x1"],d["y1"]=e.x_root,e.y_root; d["r"]=cv.create_rectangle(e.x,e.y,e.x,e.y,outline="#89b4fa",width=4)
+    def mv(e):
+        if d["r"]: cv.coords(d["r"],d["x1"]-ov.winfo_rootx(),d["y1"]-ov.winfo_rooty(),e.x,e.y)
+    def up(e):
+        d["x2"],d["y2"]=e.x_root,e.y_root
+        x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
+        if x2-x1<8 or y2-y1<3: ov.destroy(); return
+        global MNA_ROI; MNA_ROI=(x1,y1,x2,y2)
+        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+        ov.destroy()
+        _request_admin_refresh()
+    cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
+    tk.Label(ov,text="💙 마나바 왼쪽→오른쪽 드래그",fg="#89b4fa",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+    tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+    ov.bind("<Escape>",lambda e:ov.destroy())
+
+def set_mna_100ref():
+    global MNA_100_REF
+    x1,y1,x2,y2=MNA_ROI
+    if x1==0 and x2==0: return
+    arr = _admin_grab_rgb(MNA_ROI)
+    if arr is None: return
+    blue = (arr[:,:,2]>50)&(arr[:,:,2]>arr[:,:,0]*1.1)&(arr[:,:,2]>arr[:,:,1]*1.1)
+    MNA_100_REF = int(np.sum(blue))
+    save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+    _ui_alert("100% 기준","[마나] 저장됨: "+str(MNA_100_REF)+"px")
+    _request_admin_refresh()
+
+def set_party_100ref(pi):
+    x1,y1,x2,y2=PARTY_ROIS[pi]
+    if x1==0: return
+    arr = _admin_grab_rgb(PARTY_ROIS[pi])
+    if arr is None: return
+    PARTY_HP_100_REF[pi]=max(1, _hp_bar_band_cols(arr)[0])
+    save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+    _request_admin_refresh()
+
+def open_party_roi_overlay(pi):
+    ov = tk.Toplevel(root); ov.attributes("-fullscreen",True); ov.attributes("-alpha",0.35)
+    _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
+    ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
+    cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
+    d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
+    def dn(e): d["x1"],d["y1"]=e.x_root,e.y_root; d["r"]=cv.create_rectangle(e.x,e.y,e.x,e.y,outline="#10b981",width=4)
+    def mv(e):
+        if d["r"]: cv.coords(d["r"],d["x1"]-ov.winfo_rootx(),d["y1"]-ov.winfo_rooty(),e.x,e.y)
+    def up(e):
+        d["x2"],d["y2"]=e.x_root,e.y_root
+        x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
+        if x2-x1<8 or y2-y1<3: ov.destroy(); return
+        x1, y1, x2, y2 = _tighten_party_roi_from_drag(x1, y1, x2, y2)
+        PARTY_ROIS[pi]=(x1,y1,x2,y2)
+        PARTY_COORDS[pi]=[(x1+x2)//2,(y1+y2)//2]
+        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+        ov.destroy()
+        _request_admin_refresh()
+    cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
+    tk.Label(ov,text=f"🔴 P{pi+1} 빨간 막대 드래그 (넓게 잡아도 막대만 자동 맞춤)",fg="#ef4444",bg="black",font=("Malgun Gothic",12,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+    tk.Label(ov,text="ESC=취소 · 놓으면 빨간 HP막대만 ROI 저장",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+    ov.bind("<Escape>",lambda e:ov.destroy())
+
+def open_party_name_roi_overlay(pi):
+    ov = tk.Toplevel(root); ov.attributes("-fullscreen",True); ov.attributes("-alpha",0.35)
+    _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
+    ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
+    cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
+    d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
+    def dn(e): d["x1"],d["y1"]=e.x_root,e.y_root; d["r"]=cv.create_rectangle(e.x,e.y,e.x,e.y,outline="#f9e2af",width=4)
+    def mv(e):
+        if d["r"]: cv.coords(d["r"],d["x1"]-ov.winfo_rootx(),d["y1"]-ov.winfo_rooty(),e.x,e.y)
+    def up(e):
+        d["x2"],d["y2"]=e.x_root,e.y_root
+        x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
+        if x2-x1<8 or y2-y1<3: ov.destroy(); return
+        PARTY_NAME_ROIS[pi]=(x1,y1,x2,y2)
+        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+        ov.destroy()
+        _request_admin_refresh()
+    cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
+    tk.Label(ov,text=f"🖼️ P{pi+1} 아이콘(초상화) 드래그 — HP바 옆 캐릭터 아이콘만",fg="#f9e2af",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+    tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+    ov.bind("<Escape>",lambda e:ov.destroy())
+
+def open_stream_roi_overlay():
+    ov = tk.Toplevel(root); ov.overrideredirect(True)
+    _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
+    sx = ctypes.windll.user32.GetSystemMetrics(76); sy = ctypes.windll.user32.GetSystemMetrics(77)
+    sw = ctypes.windll.user32.GetSystemMetrics(78); sh = ctypes.windll.user32.GetSystemMetrics(79)
+    ov.geometry(f"{sw}x{sh}+{sx}+{sy}"); ov.attributes("-alpha",0.35)
+    ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
+    cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
+    d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
+    def dn(e):
+        d["x1"],d["y1"]=e.x_root,e.y_root
+        d["r"]=cv.create_rectangle(e.x_root-sx,e.y_root-sy,e.x_root-sx,e.y_root-sy,outline="#a6e3a1",width=4)
+    def mv(e):
+        if d["r"]: cv.coords(d["r"],d["x1"]-sx,d["y1"]-sy,e.x_root-sx,e.y_root-sy)
+    def up(e):
+        d["x2"],d["y2"]=e.x_root,e.y_root
+        x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
+        if x2-x1<20 or y2-y1<20: ov.destroy(); return
+        global _stream_roi
+        _stream_roi = (x1, y1, x2, y2)
+        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+        ov.destroy()
+        _request_admin_refresh()
+    cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
+    tk.Label(ov,text="📡 격수 쫄화면 송출 영역 드래그 (게임창)",fg="#a6e3a1",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
+    tk.Label(ov,text="ESC=취소 · 격수 PC에서 📡전송 ON 후 쫄화면으로 확인",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
+    ov.bind("<Escape>",lambda e:ov.destroy())
+
+def clear_stream_roi():
+    global _stream_roi
+    _stream_roi = (0, 0, 0, 0)
+    save_hidden_config(loaded_pwd if (loaded_pwd) else "")
+    _request_admin_refresh()
+
 
 def open_scroll_pick(anchor, values, on_pick, width=None, max_h=220, current=None):
     """CTk 기본 드롭다운 대신 스크롤 픽 팝업."""
@@ -1550,461 +1826,27 @@ def open_admin_panel():
         ctypes.windll.user32.MessageBoxW(0, f"제어판 오류:\n{e}", "오류", 0x10)
 
 def _open_admin_panel_impl():
-    admin = ctk.CTkToplevel(root)
-    admin.title("실시간 제어판")
-    w, h = 520, 550
-    sw = admin.winfo_screenwidth(); sh = admin.winfo_screenheight()
-    admin.geometry(f"{w}x{h}+{int((sw-w)/2)}+{int((sh-h)/2)}")
-    admin.attributes("-topmost", True)
-    admin.focus_force() 
-    admin.configure(fg_color="#181825")
-
-    cap_data = {"x": 0, "y": 0, "r": 0, "g": 0, "b": 0}
-    entries = {}
-
-    def update_admin_live():
-        if not admin.winfo_exists(): return
-        if _admin_ui_pause:
-            admin.after(2000, update_admin_live); return
-        if camera:
-            try:
-                if not admin.winfo_exists(): return
-                frame = camera.get_latest_frame()
-                if frame is not None:
-                    for pi in range(8):
-                        if PARTY_ROIS[pi][0] > 0:
-                            hp_pct = scan_party_hp(frame, pi)
-                            bar = entries[f"P{pi+1}_BAR"]
-                            if hp_pct is None:
-                                bar.set(0)
-                                entries[f"P{pi+1}_PCT"].configure(text="없음", text_color="#6c7086")
-                            else:
-                                bar.set(hp_pct / 100.0)
-                                bar.configure(progress_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
-                                entries[f"P{pi+1}_PCT"].configure(text=f"{int(hp_pct)}%", text_color="#ef4444" if hp_pct < PARTY_HP_THRESHOLDS[pi] else "#10b981")
-                        name_status = entries.get(f"P{pi+1}_NAME_STATUS")
-                        name_diag = entries.get(f"P{pi+1}_NAME_DIAG")
-                        if name_status is not None and PARTY_NAME_ROIS[pi][0] > 0:
-                            stats = _party_name_tag_stats(frame, PARTY_NAME_ROIS[pi])
-                            if stats is not None:
-                                black, t, ar, ag, ab = stats
-                                black_pct = (black / t * 100) if t else 0
-                                present = t > 0 and (black / t) >= ICON_BLACK_PCT_THRESHOLD
-                                name_status.configure(text=f"🖼️{'있음' if present else '없음'}", text_color="#a6e3a1" if present else "#6c7086")
-                                if name_diag is not None:
-                                    name_diag.configure(text=f"검정{black_pct:.0f}% B{black}/T{t} RGB{ar},{ag},{ab}")
-            except: pass
-        admin.after(2000, update_admin_live)
-
-
-
-    scrollable_frame = ctk.CTkScrollableFrame(admin, width=500, height=450, fg_color="#1e1e2e", corner_radius=8)
-
-    def add_row(parent, label_text, prefix, vx, vy, vr=None, vg=None, vb=None, has_rgb=False, show_apply=True):
-        row = ctk.CTkFrame(parent, fg_color="transparent"); row.pack(fill="x", pady=2)
-        ctk.CTkLabel(row, text=label_text, width=95, anchor="w", text_color="#cba6f7", font=("Malgun Gothic", 11, "bold")).pack(side="left")
-        ex = ctk.CTkEntry(row, width=38, height=22, fg_color="#313244", text_color="#cdd6f4", justify="center", font=("Malgun Gothic", 10))
-        ex.insert(0, str(vx)); ex.pack(side="left", padx=1); entries[f"{prefix}_X"] = ex
-        ey = ctk.CTkEntry(row, width=38, height=22, fg_color="#313244", text_color="#cdd6f4", justify="center", font=("Malgun Gothic", 10))
-        ey.insert(0, str(vy)); ey.pack(side="left", padx=1); entries[f"{prefix}_Y"] = ey
-        if has_rgb:
-            ctk.CTkLabel(row, text="R:", text_color="#f38ba8", font=("Malgun Gothic", 9)).pack(side="left", padx=(3,1))
-            er = ctk.CTkEntry(row, width=32, height=22, fg_color="#313244", text_color="#cdd6f4", justify="center", font=("Malgun Gothic", 10))
-            er.insert(0, str(vr)); er.pack(side="left"); entries[f"{prefix}_R"] = er
-            ctk.CTkLabel(row, text="G:", text_color="#a6e3a1", font=("Malgun Gothic", 9)).pack(side="left", padx=(3,1))
-            eg = ctk.CTkEntry(row, width=32, height=22, fg_color="#313244", text_color="#cdd6f4", justify="center", font=("Malgun Gothic", 10))
-            eg.insert(0, str(vg)); eg.pack(side="left"); entries[f"{prefix}_G"] = eg
-            ctk.CTkLabel(row, text="B:", text_color="#89b4fa", font=("Malgun Gothic", 9)).pack(side="left", padx=(3,1))
-            eb = ctk.CTkEntry(row, width=32, height=22, fg_color="#313244", text_color="#cdd6f4", justify="center", font=("Malgun Gothic", 10))
-            eb.insert(0, str(vb)); eb.pack(side="left"); entries[f"{prefix}_B"] = eb
-        if show_apply:
-            ctk.CTkButton(row, text="적용", width=35, height=22, fg_color="#800020", hover_color="#9e1a3a", text_color="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(side="right", padx=2)
-
-    # --- ROI 미리보기 유틸 ---
-    def refresh_preview(preview_label, roi_lbl, roi, ref100, is_blue=False, strict=True):
-        if roi[0] == 0: return
-        import mss as _mss
-        sct = _mss.MSS()
-        x1, y1, x2, y2 = roi
-        img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
-        arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        try:
-            h, w = arr.shape[:2]; pw = min(w*2, 180); ph = max(h, 3)
-            pil_img = Image.fromarray(arr).resize((pw, ph), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(pil_img); preview_label.config(image=photo); preview_label.image = photo
-        except: pass
-        if roi_lbl:
-            if is_blue:
-                Rq = arr[:,:,0].astype(int); Gq = arr[:,:,1].astype(int); Bq = arr[:,:,2].astype(int)
-                blue = (Bq>50)&(Bq>Rq*1.1)&(Bq>Gq*1.1)
-                raw = int(np.sum(blue)); wh = max(x2-x1,1)*max(y2-y1,1)
-                pct = round(raw/ref100*100,1) if (ref100 and ref100>0) else round(raw/max(wh,1)*100,1)
-                roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | MP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
-            else:
-                if strict:
-                    if not party_slot_active_rgb(arr):
-                        roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | 없음 (빈칸/사망)", text_color="#6c7086")
-                    else:
-                        pct = bar_fill_pct_from_rgb(arr, ref100, strict=True)
-                        roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}col", text_color="#f0f0f0")
-                else:
-                    # 쫄법 미리보기 — is_gray_bar와 동일 판정 후 석화%/일반%
-                    _R, _G, _B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
-                    _tot = arr.shape[0] * arr.shape[1]
-                    _gray = (abs(_R - _G) < 35) & (abs(_G - _B) < 35) & (abs(_R - _B) < 35) & (_R > 20) & (_R < 170)
-                    _red = (_R > 80) & (_R > _G * 1.2) & (_R > _B * 1.2)
-                    _pet = (int(np.sum(_gray)) > _tot * 0.15 and int(np.sum(_red)) < _tot * 0.03) or (
-                        abs(float(np.mean(_R)) - float(np.mean(_G))) < 25
-                        and abs(float(np.mean(_G)) - float(np.mean(_B))) < 25
-                        and abs(float(np.mean(_R)) - float(np.mean(_B))) < 25
-                        and float(np.mean(_R)) > 50 and float(np.mean(_R)) < 180
-                    )
-                    pct = _self_hp_pct_from_arr(arr, ref100, petrified=_pet)
-                    roi_lbl.configure(text=f"ROI=({x1},{y1},{x2-x1},{y2-y1}) | HP:{pct:.0f}% | 100%ref:{ref100 or '?'}px", text_color="#f0f0f0")
-
-    def open_self_hp_overlay():
-        ov = tk.Toplevel(admin); ov.overrideredirect(True)
-        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
-        sx = ctypes.windll.user32.GetSystemMetrics(76); sy = ctypes.windll.user32.GetSystemMetrics(77)
-        sw = ctypes.windll.user32.GetSystemMetrics(78); sh = ctypes.windll.user32.GetSystemMetrics(79)
-        ov.geometry(f"{sw}x{sh}+{sx}+{sy}"); ov.attributes("-alpha",0.35)
-        ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
-        cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
-        d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
-        def dn(e):
-            d["x1"],d["y1"]=e.x_root,e.y_root
-            d["r"]=cv.create_rectangle(e.x_root-sx,e.y_root-sy,e.x_root-sx,e.y_root-sy,
-                        outline="#10b981", width=4)
-        def mv(e):
-            cv.coords(d["r"],d["x1"]-sx,d["y1"]-sy,e.x_root-sx,e.y_root-sy)
-        def up(e):
-            d["x2"],d["y2"]=e.x_root,e.y_root
-            x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
-            if x2-x1<8 or y2-y1<3: ov.destroy(); return
-            global SELF_HP_ROI; SELF_HP_ROI=(x1,y1,x2,y2)
-            save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-            ov.destroy()
-            admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
-        cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
-        tk.Label(ov,text="🟢 쫄법 피통 왼쪽→오른쪽 드래그",fg="#10b981",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
-        tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
-        ov.bind("<Escape>",lambda e:ov.destroy())
-
-    def set_self_100ref():
-        global SELF_HP_100_REF
-        x1,y1,x2,y2=SELF_HP_ROI
-        if x1==0 and x2==0: return
-        import mss as _mss; sct = _mss.MSS()
-        img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
-        arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-        red = (R > 80) & (R > G * 1.2) & (R > B * 1.2)
-        grn = (G > 80) & (G > R * 1.2) & (G > B * 1.2)
-        SELF_HP_100_REF = max(1, int(np.sum(red | grn)))
-        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-        messagebox.showinfo("100% 기준","[내피통] 저장됨: "+str(SELF_HP_100_REF)+"px")
-        admin.after(300, lambda: refresh_preview(self_roi_preview,self_roi_lbl,SELF_HP_ROI,SELF_HP_100_REF,strict=False))
-
-    def open_mna_roi_overlay():
-        ov=tk.Toplevel(admin); ov.overrideredirect(True)
-        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
-        sx3 = ctypes.windll.user32.GetSystemMetrics(76); sy3 = ctypes.windll.user32.GetSystemMetrics(77)
-        sw3 = ctypes.windll.user32.GetSystemMetrics(78); sh3 = ctypes.windll.user32.GetSystemMetrics(79)
-        ov.geometry(f"{sw3}x{sh3}+{sx3}+{sy3}"); ov.attributes("-alpha",0.35)
-        ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
-        cv=tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
-        d={"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
-        def dn(e): d["x1"],d["y1"]=e.x_root,e.y_root; d["r"]=cv.create_rectangle(e.x,e.y,e.x,e.y,outline="#89b4fa",width=4)
-        def mv(e):
-            if d["r"]: cv.coords(d["r"],d["x1"]-ov.winfo_rootx(),d["y1"]-ov.winfo_rooty(),e.x,e.y)
-        def up(e):
-            d["x2"],d["y2"]=e.x_root,e.y_root
-            x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
-            if x2-x1<8 or y2-y1<3: ov.destroy(); return
-            global MNA_ROI; MNA_ROI=(x1,y1,x2,y2)
-            save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-            ov.destroy()
-            admin.after(300, lambda: refresh_preview(mna_roi_preview,mna_roi_lbl,MNA_ROI,MNA_100_REF,True))
-        cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
-        tk.Label(ov,text="💙 마나바 왼쪽→오른쪽 드래그",fg="#89b4fa",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
-        tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
-        ov.bind("<Escape>",lambda e:ov.destroy())
-
-    def set_mna_100ref():
-        global MNA_100_REF
-        x1,y1,x2,y2=MNA_ROI
-        if x1==0 and x2==0: return
-        import mss as _mss; sct = _mss.MSS()
-        img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
-        arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        blue = (arr[:,:,2]>50)&(arr[:,:,2]>arr[:,:,0]*1.1)&(arr[:,:,2]>arr[:,:,1]*1.1)
-        MNA_100_REF = int(np.sum(blue))
-        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-        messagebox.showinfo("100% 기준","[마나] 저장됨: "+str(MNA_100_REF)+"px")
-        admin.after(300, lambda: refresh_preview(mna_roi_preview,mna_roi_lbl,MNA_ROI,MNA_100_REF,True))
-
-    def set_party_100ref(pi):
-        x1,y1,x2,y2=PARTY_ROIS[pi]
-        if x1==0: return
-        import mss as _mss; sct=_mss.MSS()
-        img=sct.grab({"left":x1,"top":y1,"width":max(x2-x1,1),"height":max(y2-y1,1)})
-        arr=np.array(img,dtype=np.uint8)[:,:,:3][:,:,::-1]
-        PARTY_HP_100_REF[pi]=max(1, _hp_bar_band_cols(arr)[0])
-        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-        pv=entries.get(f"P{pi+1}_PREVIEW")
-        if pv: refresh_preview(pv, None, PARTY_ROIS[pi], PARTY_HP_100_REF[pi])
-
-    def _set_thr(i, v, l):
-        PARTY_HP_THRESHOLDS[i] = v.get()
-        l.configure(text=f"{v.get()}%")
-        try: save_hidden_config(loaded_pwd)
-        except: pass
-
-    def open_party_roi_overlay(pi):
-        ov = tk.Toplevel(admin); ov.attributes("-fullscreen",True); ov.attributes("-alpha",0.35)
-        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
-        ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
-        cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
-        d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
-        def dn(e): d["x1"],d["y1"]=e.x_root,e.y_root; d["r"]=cv.create_rectangle(e.x,e.y,e.x,e.y,outline="#10b981",width=4)
-        def mv(e):
-            if d["r"]: cv.coords(d["r"],d["x1"]-ov.winfo_rootx(),d["y1"]-ov.winfo_rooty(),e.x,e.y)
-        def up(e):
-            d["x2"],d["y2"]=e.x_root,e.y_root
-            x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
-            if x2-x1<8 or y2-y1<3: ov.destroy(); return
-            x1, y1, x2, y2 = _tighten_party_roi_from_drag(x1, y1, x2, y2)
-            PARTY_ROIS[pi]=(x1,y1,x2,y2)
-            PARTY_COORDS[pi]=[(x1+x2)//2,(y1+y2)//2]
-            if f"P{pi+1}_BAR" in entries: entries[f"P{pi+1}_BAR"].set(1.0)
-            if f"P{pi+1}_ROI_LBL" in entries:
-                entries[f"P{pi+1}_ROI_LBL"].configure(text=f"({x1},{y1}) {x2-x1}x{y2-y1}")
-            save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-            ov.destroy()
-            pv = entries.get(f"P{pi+1}_PREVIEW")
-            if pv:
-                admin.after(300, lambda p=pi, w=pv: refresh_preview(w, None, PARTY_ROIS[p], PARTY_HP_100_REF[p]))
-        cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
-        tk.Label(ov,text=f"🔴 P{pi+1} 빨간 막대 드래그 (넓게 잡아도 막대만 자동 맞춤)",fg="#ef4444",bg="black",font=("Malgun Gothic",12,"bold")).place(relx=0.5,rely=0.02,anchor="n")
-        tk.Label(ov,text="ESC=취소 · 놓으면 빨간 HP막대만 ROI 저장",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
-        ov.bind("<Escape>",lambda e:ov.destroy())
-
-    def open_party_name_roi_overlay(pi):
-        """아이콘(초상화) ROI 지정 — HP바 옆 캐릭터 초상화 아이콘 부분만 드래그.
-        아이콘은 실제 그림이라 반투명 이름글자와 달리 배경(나무 패널)과 뚜렷이 구분됨.
-        배경이 우연히 HP바 모양으로 오탐되는 걸 이중으로 막는 용도."""
-        ov = tk.Toplevel(admin); ov.attributes("-fullscreen",True); ov.attributes("-alpha",0.35)
-        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
-        ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
-        cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
-        d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
-        def dn(e): d["x1"],d["y1"]=e.x_root,e.y_root; d["r"]=cv.create_rectangle(e.x,e.y,e.x,e.y,outline="#f9e2af",width=4)
-        def mv(e):
-            if d["r"]: cv.coords(d["r"],d["x1"]-ov.winfo_rootx(),d["y1"]-ov.winfo_rooty(),e.x,e.y)
-        def up(e):
-            d["x2"],d["y2"]=e.x_root,e.y_root
-            x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
-            if x2-x1<8 or y2-y1<3: ov.destroy(); return
-            PARTY_NAME_ROIS[pi]=(x1,y1,x2,y2)
-            if f"P{pi+1}_NAME_ROI_LBL" in entries:
-                entries[f"P{pi+1}_NAME_ROI_LBL"].configure(text=f"아이콘:({x1},{y1}) {x2-x1}x{y2-y1}")
-            save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-            ov.destroy()
-        cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
-        tk.Label(ov,text=f"🖼️ P{pi+1} 아이콘(초상화) 드래그 — HP바 옆 캐릭터 아이콘만",fg="#f9e2af",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
-        tk.Label(ov,text="ESC=취소",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
-        ov.bind("<Escape>",lambda e:ov.destroy())
-
-    def refresh_stream_roi_preview(preview_label, roi_lbl):
-        roi = _stream_roi
-        if roi[2] <= roi[0] or roi[3] <= roi[1]:
-            if roi_lbl:
-                roi_lbl.configure(text="미설정 → 격수 쫄화면에 주 모니터 전체 송출", text_color="#6c7086")
+    try:
+        import imgui_ui
+        if imgui_ui.open_admin():
             return
-        import mss as _mss
-        sct = _mss.MSS()
-        x1, y1, x2, y2 = roi
-        img = sct.grab({"left": x1, "top": y1, "width": max(x2-x1,1), "height": max(y2-y1,1)})
-        arr = np.array(img, dtype=np.uint8)[:, :, :3][:, :, ::-1]
-        try:
-            h, w = arr.shape[:2]; pw = min(w*2, 180); ph = max(int(h * pw / max(w, 1)), 3)
-            pil_img = Image.fromarray(arr).resize((pw, ph), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(pil_img); preview_label.config(image=photo); preview_label.image = photo
-        except Exception:
-            pass
-        if roi_lbl:
-            roi_lbl.configure(text=f"송출 ROI=({x1},{y1}) {x2-x1}x{y2-y1}", text_color="#f0f0f0")
-
-    def open_stream_roi_overlay():
-        ov = tk.Toplevel(admin); ov.overrideredirect(True)
-        _set_admin_ui_pause(True); ov.bind("<Destroy>", lambda e: _set_admin_ui_pause(False))
-        sx = ctypes.windll.user32.GetSystemMetrics(76); sy = ctypes.windll.user32.GetSystemMetrics(77)
-        sw = ctypes.windll.user32.GetSystemMetrics(78); sh = ctypes.windll.user32.GetSystemMetrics(79)
-        ov.geometry(f"{sw}x{sh}+{sx}+{sy}"); ov.attributes("-alpha",0.35)
-        ov.configure(bg="black"); ov.attributes("-topmost",True); ov.focus_force()
-        cv = tk.Canvas(ov,bg="black",highlightthickness=0); cv.pack(fill="both",expand=True)
-        d = {"x1":0,"y1":0,"x2":0,"y2":0,"r":None}
-        def dn(e):
-            d["x1"],d["y1"]=e.x_root,e.y_root
-            d["r"]=cv.create_rectangle(e.x_root-sx,e.y_root-sy,e.x_root-sx,e.y_root-sy,outline="#a6e3a1",width=4)
-        def mv(e):
-            if d["r"]: cv.coords(d["r"],d["x1"]-sx,d["y1"]-sy,e.x_root-sx,e.y_root-sy)
-        def up(e):
-            d["x2"],d["y2"]=e.x_root,e.y_root
-            x1=min(d["x1"],d["x2"]); y1=min(d["y1"],d["y2"]); x2=max(d["x1"],d["x2"]); y2=max(d["y1"],d["y2"])
-            if x2-x1<20 or y2-y1<20: ov.destroy(); return
-            global _stream_roi
-            _stream_roi = (x1, y1, x2, y2)
-            save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-            ov.destroy()
-            admin.after(300, lambda: refresh_stream_roi_preview(stream_roi_preview, stream_roi_lbl))
-        cv.bind("<ButtonPress-1>",dn); cv.bind("<B1-Motion>",mv); cv.bind("<ButtonRelease-1>",up)
-        tk.Label(ov,text="📡 격수 쫄화면 송출 영역 드래그 (게임창)",fg="#a6e3a1",bg="black",font=("Malgun Gothic",13,"bold")).place(relx=0.5,rely=0.02,anchor="n")
-        tk.Label(ov,text="ESC=취소 · 격수 PC에서 📡전송 ON 후 쫄화면으로 확인",fg="#6c7086",bg="black",font=("",9)).place(relx=0.5,rely=0.06,anchor="n")
-        ov.bind("<Escape>",lambda e:ov.destroy())
-
-    def clear_stream_roi():
-        global _stream_roi
-        _stream_roi = (0, 0, 0, 0)
-        save_hidden_config(loaded_pwd if (loaded_pwd) else "")
-        try:
-            stream_roi_preview.config(image="")
-            stream_roi_preview.image = None
-        except Exception:
-            pass
-        stream_roi_lbl.configure(text="미설정 → 격수 쫄화면에 주 모니터 전체 송출", text_color="#6c7086")
-
-    # --- 쫄법 피통 섹션 ---
-    row_self_btns = ctk.CTkFrame(scrollable_frame, fg_color="transparent"); row_self_btns.pack(fill="x", pady=1)
-    ctk.CTkButton(row_self_btns, text="🖱️ 쫄법 피통 셋팅", height=22, fg_color="#1f538d", hover_color="#14375e", font=("Malgun Gothic", 9, "bold"), command=open_self_hp_overlay).pack(side="left", padx=1)
-    ctk.CTkButton(row_self_btns, text="💯 100% 기준", height=22, fg_color="#fbbf24", hover_color="#d97706", text_color="#000", font=("Malgun Gothic", 9, "bold"), command=set_self_100ref).pack(side="left", padx=1)
-    self_roi_preview = tk.Label(scrollable_frame, bg="black"); self_roi_preview.pack(pady=1)
-    self_roi_lbl = ctk.CTkLabel(scrollable_frame, text="", text_color="#f0f0f0", font=("Consolas", 9)); self_roi_lbl.pack(pady=(0, 2))
-    ctk.CTkLabel(scrollable_frame, text="-"*70, text_color="#45475a", height=10).pack(pady=1)
-    # --- 마나 엠통 섹션 ---
-    row_mna_btns = ctk.CTkFrame(scrollable_frame, fg_color="transparent"); row_mna_btns.pack(fill="x", pady=1)
-    ctk.CTkButton(row_mna_btns, text="💙 마나 엠통 셋팅", height=22, fg_color="#1e40af", hover_color="#2563eb", font=("Malgun Gothic", 9, "bold"), command=open_mna_roi_overlay).pack(side="left", padx=1)
-    ctk.CTkButton(row_mna_btns, text="💯 100% 기준", height=22, fg_color="#fbbf24", hover_color="#d97706", text_color="#000", font=("Malgun Gothic", 9, "bold"), command=set_mna_100ref).pack(side="left", padx=1)
-    mna_roi_preview = tk.Label(scrollable_frame, bg="black"); mna_roi_preview.pack(pady=1)
-    mna_roi_lbl = ctk.CTkLabel(scrollable_frame, text="", text_color="#f0f0f0", font=("Consolas", 9)); mna_roi_lbl.pack(pady=(0, 2))
-    ctk.CTkLabel(scrollable_frame, text="-"*70, text_color="#45475a", height=10).pack(pady=1)
-    # --- 쫄화면 송출 ROI ---
-    ctk.CTkLabel(scrollable_frame, text="📡 격수 쫄화면 송출 영역", text_color="#bac2de", font=("Malgun Gothic", 10, "bold"), height=15).pack(anchor="w", pady=(0, 2))
-    row_stream_btns = ctk.CTkFrame(scrollable_frame, fg_color="transparent"); row_stream_btns.pack(fill="x", pady=1)
-    ctk.CTkButton(row_stream_btns, text="📡 송출 영역 드래그", height=22, fg_color="#166534", hover_color="#15803d", font=("Malgun Gothic", 9, "bold"), command=open_stream_roi_overlay).pack(side="left", padx=1)
-    ctk.CTkButton(row_stream_btns, text="전체화면", height=22, fg_color="#374151", hover_color="#4b5563", font=("Malgun Gothic", 9, "bold"), command=clear_stream_roi).pack(side="left", padx=1)
-    stream_roi_preview = tk.Label(scrollable_frame, bg="black"); stream_roi_preview.pack(pady=1)
-    stream_roi_lbl = ctk.CTkLabel(scrollable_frame, text="미설정 → 격수 쫄화면에 주 모니터 전체 송출", text_color="#6c7086", font=("Consolas", 9)); stream_roi_lbl.pack(pady=(0, 2))
-    if _stream_roi[2] > _stream_roi[0] and _stream_roi[3] > _stream_roi[1]:
-        admin.after(150, lambda: refresh_stream_roi_preview(stream_roi_preview, stream_roi_lbl))
-    ctk.CTkLabel(scrollable_frame, text="-"*70, text_color="#45475a", height=10).pack(pady=1)
-    
-    ctk.CTkLabel(scrollable_frame, text="👥 파티원 좌표 / ROI / 힐% (ROI 드래그로 설정)", text_color="#bac2de", font=("Malgun Gothic", 10, "bold"), height=15).pack(anchor="w", pady=(0, 2))
-
-    party_frame = ctk.CTkFrame(scrollable_frame, fg_color="transparent")
-    party_frame.pack(fill="x", pady=1)
-
-    def add_party_cell(parent, index, prefix, vx, vy):
-        pi = index - 1
-        cell = ctk.CTkFrame(parent, fg_color="#313244", corner_radius=6)
-        # row 0 헤더: [체크박스] [P이름]  [ROI 좌표]
-        hdr = ctk.CTkFrame(cell, fg_color="transparent"); hdr.grid(row=0, column=0, columnspan=3, pady=(4,2), sticky="ew")
-        chk_var = ctk.BooleanVar(value=bool(party_mode_flags[pi]))
-        def _on_chk(i=pi, v=chk_var):
-            global party_mode_flags, saved_party_mode_flags
-            party_mode_flags[i] = 1 if v.get() else 0
-            saved_party_mode_flags = ",".join(str(f) for f in party_mode_flags)
-            try: save_hidden_config(loaded_pwd)
-            except: pass
-        ctk.CTkCheckBox(hdr, text="", variable=chk_var, width=16, height=16,
-                       checkbox_width=14, checkbox_height=14, border_width=1,
-                       checkmark_color="#ffffff", fg_color="#800020", hover_color="#9e1a3a", command=_on_chk).pack(side="left", padx=(4,4))
-        lbl_txt = f"P{index}(본인)" if index == 1 else (f"P{index}(격수)" if index == 2 else f"P{index}")
-        ctk.CTkLabel(hdr, text=lbl_txt, text_color="#cba6f7", font=("Malgun Gothic", 9, "bold")).pack(side="left", padx=(0,4))
-        r = PARTY_ROIS[pi]
-        roi_info = f"({r[0]},{r[1]}) {r[2]-r[0]}x{r[3]-r[1]}" if r[0] != 0 else "ROI 미설정"
-        roi_coord_lbl = ctk.CTkLabel(hdr, text=roi_info, text_color="#ffffff", font=("Consolas", 9))
-        roi_coord_lbl.pack(side="left"); entries[f"{prefix}_ROI_LBL"] = roi_coord_lbl
-        # row 1 roi_row
-        roi_row = ctk.CTkFrame(cell, fg_color="transparent"); roi_row.grid(row=1, column=0, columnspan=3, pady=(0,4), sticky="ew")
-        pv_frame = ctk.CTkFrame(cell, fg_color="transparent"); pv_frame.grid(row=2, column=0, columnspan=3, pady=(0,4), sticky="w")
-        pv = tk.Label(pv_frame, bg="black"); pv.pack(side="left", padx=(4,4)); entries[f"{prefix}_PREVIEW"] = pv
-        ctk.CTkButton(pv_frame, text="💯", width=22, height=22, fg_color="#fbbf24", hover_color="#d97706", text_color="#000", font=("Malgun Gothic", 8, "bold"),
-                     command=lambda i=pi: set_party_100ref(i)).pack(side="left")
-        roi_btn = ctk.CTkButton(roi_row, text="📍ROI", width=38, height=20, fg_color="#1f538d", hover_color="#14375e", font=("Malgun Gothic", 8, "bold"),
-                                command=lambda i=pi: open_party_roi_overlay(i)); roi_btn.pack(side="left", padx=(4,2))
-        hp_bar = ctk.CTkProgressBar(roi_row, width=50, height=10, fg_color="#45475a", progress_color="#10b981")
-        hp_bar.set(0); hp_bar.pack(side="left", padx=1); entries[f"{prefix}_BAR"] = hp_bar
-        hp_pct_lbl = ctk.CTkLabel(roi_row, text="--%", text_color="#6c7086", font=("Malgun Gothic", 8, "bold"), width=28)
-        hp_pct_lbl.pack(side="left"); entries[f"{prefix}_PCT"] = hp_pct_lbl
-        ctk.CTkLabel(roi_row, text="힐↓", text_color="#f38ba8", font=("Malgun Gothic", 8)).pack(side="left", padx=(3,1))
-        var = tk.IntVar(value=PARTY_HP_THRESHOLDS[pi])
-        sld = make_pct_slider(roi_row, 10, 90, var, width=48, steps=16)
-        sld.pack(side="left", padx=1)
-        thr_lbl = ctk.CTkLabel(roi_row, text=f"{var.get()}%", text_color="#f38ba8", font=("Malgun Gothic", 9, "bold"), width=24)
-        thr_lbl.pack(side="left")
-        var.trace_add("write", lambda *a, i=pi, v=var, l=thr_lbl: _set_thr(i, v, l))
-        # row 3: 아이콘(초상화) ROI (배경 오탐 이중체크용, 선택사항 — 미설정이면 기존처럼 HP바만으로 판정)
-        name_row = ctk.CTkFrame(cell, fg_color="transparent"); name_row.grid(row=3, column=0, columnspan=3, pady=(0,4), sticky="ew")
-        ctk.CTkButton(name_row, text="🖼️아이콘", width=38, height=20, fg_color="#8a6d1f", hover_color="#6b5417", font=("Malgun Gothic", 8, "bold"),
-                     command=lambda i=pi: open_party_name_roi_overlay(i)).pack(side="left", padx=(4,2))
-        nr = PARTY_NAME_ROIS[pi]
-        name_roi_info = f"아이콘:({nr[0]},{nr[1]}) {nr[2]-nr[0]}x{nr[3]-nr[1]}" if nr[0] != 0 else "아이콘 미설정(HP바만 판정)"
-        name_roi_lbl = ctk.CTkLabel(name_row, text=name_roi_info, text_color="#9399b2", font=("Consolas", 8))
-        name_roi_lbl.pack(side="left", padx=(2,4)); entries[f"{prefix}_NAME_ROI_LBL"] = name_roi_lbl
-        name_status_lbl = ctk.CTkLabel(name_row, text="", text_color="#6c7086", font=("Malgun Gothic", 8, "bold"))
-        name_status_lbl.pack(side="left"); entries[f"{prefix}_NAME_STATUS"] = name_status_lbl
-        # row 4: 아이콘 판정 진단 수치(검은픽셀비율·RGB) — 칸 폭에 맞춰 줄바꿈, 보정용
-        diag_lbl = ctk.CTkLabel(cell, text="", text_color="#6c7086", font=("Consolas", 7), justify="left", wraplength=220)
-        diag_lbl.grid(row=4, column=0, columnspan=3, padx=(6,4), pady=(0,4), sticky="w")
-        entries[f"{prefix}_NAME_DIAG"] = diag_lbl
-        if r[0] != 0:
-            admin.after(150, lambda p=pi, w=pv: refresh_preview(w, None, PARTY_ROIS[p], PARTY_HP_100_REF[p]))
-        return cell
-
-    for i in range(8): 
-        row = i // 2; col = i % 2
-        cell = add_party_cell(party_frame, i+1, f"P{i+1}", PARTY_COORDS[i][0], PARTY_COORDS[i][1])
-        cell.grid(row=row, column=col, padx=2, pady=2)
-
-    def auto_refresh():
-        if not admin.winfo_exists(): return
-        if not _admin_ui_pause:
-            if SELF_HP_ROI[0] != 0: refresh_preview(self_roi_preview, self_roi_lbl, SELF_HP_ROI, SELF_HP_100_REF, strict=False)
-            if MNA_ROI[0] != 0: refresh_preview(mna_roi_preview, mna_roi_lbl, MNA_ROI, MNA_100_REF, True)
-            if _stream_roi[2] > _stream_roi[0] and _stream_roi[3] > _stream_roi[1]:
-                refresh_stream_roi_preview(stream_roi_preview, stream_roi_lbl)
-            for pi in range(8):
-                pv = entries.get(f"P{pi+1}_PREVIEW")
-                if pv: refresh_preview(pv, None, PARTY_ROIS[pi], PARTY_HP_100_REF[pi])
-        admin.after(3000, auto_refresh)
-    auto_refresh()
-
-    def save_and_close():
-        key_to_save = loaded_pwd if (loaded_pwd and loaded_pwd != chr(34)+chr(34)) else ""
-        save_hidden_config(key_to_save)
-        messagebox.showinfo("저장 완료", "✨ 설정이 저장되었습니다!")
-        admin.destroy()
-
-    def on_closing():
-        try: keyboard.unhook_key('f2')
-        except: pass
-        key_to_save = loaded_pwd if (loaded_pwd and loaded_pwd != chr(34)+chr(34)) else ""
-        save_hidden_config(key_to_save)
-        admin.destroy()
-
-    admin.protocol("WM_DELETE_WINDOW", on_closing)
-    ctk.CTkButton(admin, text="💾 실시간 저장 및 닫기", height=35, font=("Malgun Gothic", 12, "bold"), fg_color="#800020", hover_color="#9e1a3a", border_width=2, border_color="#4a0010", text_color="#ffffff", command=save_and_close).pack(side="bottom", fill="x", pady=10, padx=15)
-    scrollable_frame.pack(fill="both", expand=True, padx=10, pady=(5,0))
-    update_admin_live()
+    except Exception:
+        pass
+    ctypes.windll.user32.MessageBoxW(0, "제어판을 열 수 없습니다.", "오류", 0x10)
 
 def open_guide_panel():
+    try:
+        import imgui_ui
+        if imgui_ui.open_guide():
+            return
+    except Exception:
+        pass
     guide = ctk.CTkToplevel(root)
     guide.title("📖 뚱힐러 사용 가이드")
     w, h = 460, 680
     sw = guide.winfo_screenwidth(); sh = guide.winfo_screenheight()
     guide.geometry(f"{w}x{h}+{int((sw-w)/2)}+{int((sh-h)/2)}")
-    guide.attributes("-topmost", True); guide.focus_force(); guide.grab_set()
+    guide.attributes("-topmost", True); guide.focus_force()
     guide.configure(fg_color="#181825")
 
     hdr = ctk.CTkFrame(guide, fg_color="#1e1e2e", corner_radius=0)
@@ -2164,63 +2006,67 @@ if loaded_pwd:
         authenticated = False
 
 else:
-    auth_root = ctk.CTk()
-    auth_root.title("뚱시스템 VIP 인증")
-    sw = auth_root.winfo_screenwidth(); sh = auth_root.winfo_screenheight()
-    aw, ah = 280, 280
-    auth_root.geometry(f"{aw}x{ah}+{int((sw-aw)/2)}+{int((sh-520)/2)}") 
-    auth_root.attributes("-topmost", True)
-    auth_root.configure(fg_color='#1e1e2e')
-    def check_login(event=None):
-        global authenticated, SERIAL_PORT, loaded_pwd
-        pwd = pw_entry.get().strip()
-        user_com = com_entry.get().strip().upper()
-        if not pwd: return
-        if user_com: SERIAL_PORT = user_com
-        server_result, server_info, server_start = check_google_sheet(pwd)
-        if server_result == "PASS":
-            if server_info == "0":
-                err_lbl.configure(text="만료된 코드입니다")
-                return
-            _sync_expire_cache(server_info, server_start)
-            save_hidden_config(pwd); loaded_pwd = pwd; authenticated = True
-            auth_root.destroy()
-        elif server_result == "REGISTER":
-            global GAS_API_URL
-            if GAS_API_URL:
-                try:
-                    reg_data = json.dumps({"code": pwd, "hwid": MY_HWID}).encode()
-                    reg_req = urllib.request.Request(GAS_API_URL, data=reg_data, headers={"Content-Type": "application/json"})
-                    reg_resp = json.loads(urllib.request.urlopen(reg_req, timeout=8).read())
-                    if reg_resp.get("result") == "OK":
-                        _r, _i, _s = check_google_sheet(pwd)
-                        if _r not in ("ERROR",):
-                            _sync_expire_cache(_i, _s)
-                        save_hidden_config(pwd); loaded_pwd = pwd; authenticated = True
-                        auth_root.destroy()
-                    else:
-                        err_lbl.configure(text="이미 다른 PC에서 등록된 코드입니다")
-                except:
-                    err_lbl.configure(text="인증 서버 연결 실패")
+    try:
+        import imgui_ui
+        imgui_ui.run_auth(globals())
+    except Exception:
+        auth_root = ctk.CTk()
+        auth_root.title("뚱시스템 VIP 인증")
+        sw = auth_root.winfo_screenwidth(); sh = auth_root.winfo_screenheight()
+        aw, ah = 280, 280
+        auth_root.geometry(f"{aw}x{ah}+{int((sw-aw)/2)}+{int((sh-520)/2)}")
+        auth_root.attributes("-topmost", True)
+        auth_root.configure(fg_color='#1e1e2e')
+        def check_login(event=None):
+            global authenticated, SERIAL_PORT, loaded_pwd
+            pwd = pw_entry.get().strip()
+            user_com = com_entry.get().strip().upper()
+            if not pwd: return
+            if user_com: SERIAL_PORT = user_com
+            server_result, server_info, server_start = check_google_sheet(pwd)
+            if server_result == "PASS":
+                if server_info == "0":
+                    err_lbl.configure(text="만료된 코드입니다")
+                    return
+                _sync_expire_cache(server_info, server_start)
+                save_hidden_config(pwd); loaded_pwd = pwd; authenticated = True
+                auth_root.destroy()
+            elif server_result == "REGISTER":
+                global GAS_API_URL
+                if GAS_API_URL:
+                    try:
+                        reg_data = json.dumps({"code": pwd, "hwid": MY_HWID}).encode()
+                        reg_req = urllib.request.Request(GAS_API_URL, data=reg_data, headers={"Content-Type": "application/json"})
+                        reg_resp = json.loads(urllib.request.urlopen(reg_req, timeout=8).read())
+                        if reg_resp.get("result") == "OK":
+                            _r, _i, _s = check_google_sheet(pwd)
+                            if _r not in ("ERROR",):
+                                _sync_expire_cache(_i, _s)
+                            save_hidden_config(pwd); loaded_pwd = pwd; authenticated = True
+                            auth_root.destroy()
+                        else:
+                            err_lbl.configure(text="이미 다른 PC에서 등록된 코드입니다")
+                    except:
+                        err_lbl.configure(text="인증 서버 연결 실패")
+                else:
+                    err_lbl.configure(text="API 설정이 필요합니다")
+            elif server_result == "ALREADY_IN_USE":
+                err_lbl.configure(text="다른 PC에서 사용 중인 코드입니다")
+            elif server_result == "NOT_FOUND":
+                err_lbl.configure(text="등록되지 않은 코드입니다")
             else:
-                err_lbl.configure(text="API 설정이 필요합니다")
-        elif server_result == "ALREADY_IN_USE":
-            err_lbl.configure(text="다른 PC에서 사용 중인 코드입니다")
-        elif server_result == "NOT_FOUND":
-            err_lbl.configure(text="등록되지 않은 코드입니다")
-        else:
-            err_lbl.configure(text="인증에 실패했습니다")
-    ctk.CTkLabel(auth_root, text="🔑 인증 코드를 입력하세요", text_color='#cba6f7', font=('Malgun Gothic', 13, 'bold')).pack(pady=(20, 5))
-    pw_entry = ctk.CTkEntry(auth_root, show="●", font=('Malgun Gothic', 12), justify='center', fg_color='#313244', text_color='#cdd6f4', width=180, height=28)
-    pw_entry.pack(pady=5); pw_entry.bind('<Return>', check_login)
-    ctk.CTkLabel(auth_root, text="🔌 포트 번호", text_color='#a6adc8', font=('Malgun Gothic', 10)).pack(pady=(10, 2))
-    com_entry = ctk.CTkEntry(auth_root, font=('Malgun Gothic', 11), justify='center', fg_color='#313244', text_color='#a6e3a1', width=120, height=28)
-    com_entry.pack(pady=5); com_entry.insert(0, SERIAL_PORT)
-    err_lbl = ctk.CTkLabel(auth_root, text="", text_color="#ef4444", font=("Malgun Gothic", 9))
-    err_lbl.pack(pady=(0, 5))
-    ctk.CTkLabel(auth_root, text=f"PC ID: {MY_HWID}", text_color="#6c7086", font=("Consolas", 9)).pack(pady=(0, 4))
-    ctk.CTkButton(auth_root, text="시스템 잠금 해제", command=check_login, fg_color='#89b4fa', hover_color="#74c7ec", text_color='#1e1e2e', font=('Malgun Gothic', 11, 'bold'), width=180, height=30).pack(pady=15)
-    auth_root.mainloop()
+                err_lbl.configure(text="인증에 실패했습니다")
+        ctk.CTkLabel(auth_root, text="🔑 인증 코드를 입력하세요", text_color='#cba6f7', font=('Malgun Gothic', 13, 'bold')).pack(pady=(20, 5))
+        pw_entry = ctk.CTkEntry(auth_root, show="●", font=('Malgun Gothic', 12), justify='center', fg_color='#313244', text_color='#cdd6f4', width=180, height=28)
+        pw_entry.pack(pady=5); pw_entry.bind('<Return>', check_login)
+        ctk.CTkLabel(auth_root, text="🔌 포트 번호", text_color='#a6adc8', font=('Malgun Gothic', 10)).pack(pady=(10, 2))
+        com_entry = ctk.CTkEntry(auth_root, font=('Malgun Gothic', 11), justify='center', fg_color='#313244', text_color='#a6e3a1', width=120, height=28)
+        com_entry.pack(pady=5); com_entry.insert(0, SERIAL_PORT)
+        err_lbl = ctk.CTkLabel(auth_root, text="", text_color="#ef4444", font=("Malgun Gothic", 9))
+        err_lbl.pack(pady=(0, 5))
+        ctk.CTkLabel(auth_root, text=f"PC ID: {MY_HWID}", text_color="#6c7086", font=("Consolas", 9)).pack(pady=(0, 4))
+        ctk.CTkButton(auth_root, text="시스템 잠금 해제", command=check_login, fg_color='#89b4fa', hover_color="#74c7ec", text_color='#1e1e2e', font=('Malgun Gothic', 11, 'bold'), width=180, height=30).pack(pady=15)
+        auth_root.mainloop()
 
 if not authenticated:
     sys.exit()
@@ -2984,7 +2830,14 @@ def focus_lineage_window():
     except Exception:
         return False
     finally:
-        # 폼은 뒤로 안 넘어가게(항상 위). focus_force는 안 써서 리니지 포커스는 유지.
+        # ImGui 쓸 때는 숨긴 CTk 루트를 올리면 아래 모니터 클릭이 먹힘
+        try:
+            import imgui_ui
+            if imgui_ui.is_active():
+                imgui_ui._cloak_tk_root(root)
+                return True
+        except Exception:
+            pass
         try:
             if root:
                 root.attributes("-topmost", True)
@@ -3210,9 +3063,17 @@ def execute_keys(keys, end_delay=0.5, skip_follow_toggle=False, key_gap=None):
         if not skip_follow_toggle:
             _resume_attack_click(was_fixed, was_follow)
         try:
-            if root: root.attributes("-topmost", True)
+            import imgui_ui
+            if imgui_ui.is_active():
+                imgui_ui._cloak_tk_root(root)
+            elif root:
+                root.attributes("-topmost", True)
         except Exception:
-            pass
+            try:
+                if root:
+                    root.attributes("-topmost", True)
+            except Exception:
+                pass
 
 def fix_mode_keys(keys, delay=0.5):
     """고정 중 해독 등 — 옛 fix_mode_keys 와 동일 (U→키→H)."""
@@ -3260,7 +3121,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 04:32"
+PATCH_UPDATED_AT = "2026-08-16 13:56"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3448,9 +3309,10 @@ def restart_with_update():
         time.sleep(0.4)
     except Exception as e:
         try:
-            messagebox.showerror(
+            _ui_alert(
                 "업데이트 실패",
                 f"다시 켜기에 실패했어요.\n뚱시작.bat 으로 실행해 주세요.\n\n{e}",
+                "error",
             )
         except Exception:
             pass
@@ -3488,6 +3350,12 @@ def check_for_update(force=False, manual=False):
             def _fail():
                 _set_lbl(f"업데이트 {_short}", "#e2e8f0")
                 try:
+                    import imgui_ui
+                    if imgui_ui.show_alert("업데이트 확인", "확인 실패.\n인터넷 연결을 확인해 주세요."):
+                        return
+                except Exception:
+                    pass
+                try:
                     messagebox.showwarning("업데이트 확인", "확인 실패.\n인터넷 연결을 확인해 주세요.")
                 except Exception:
                     pass
@@ -3508,11 +3376,15 @@ def check_for_update(force=False, manual=False):
         if manual:
             def _ok():
                 _set_lbl(f"업데이트 {_short}", "#a6e3a1")
+                msg = "최신이에요.\n다시 받을 필요 없어요.\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote)
                 try:
-                    messagebox.showinfo(
-                        "업데이트 확인",
-                        "최신이에요.\n다시 받을 필요 없어요.\n\n실행: %s\n서버: %s" % (PATCH_UPDATED_AT, remote),
-                    )
+                    import imgui_ui
+                    if imgui_ui.show_alert("업데이트 확인", msg):
+                        return
+                except Exception:
+                    pass
+                try:
+                    messagebox.showinfo("업데이트 확인", msg)
                 except Exception:
                     pass
             try:
@@ -3537,16 +3409,26 @@ def check_for_update(force=False, manual=False):
         global _update_notified
         _set_lbl("⚠️업데이트있음", "#f9e2af")
         if manual:
+            msg = (
+                "업데이트가 있습니다.\n\n서버: %s\n현재: %s\n\n업데이트하시겠습니까?"
+                % (remote, PATCH_UPDATED_AT)
+            )
+            def _yes():
+                _save_update_skip("")
+                restart_with_update()
+            def _no():
+                _save_update_skip(remote)
             try:
-                if messagebox.askyesno(
-                    "업데이트",
-                    "업데이트가 있습니다.\n\n서버: %s\n현재: %s\n\n업데이트하시겠습니까?"
-                    % (remote, PATCH_UPDATED_AT),
-                ):
-                    _save_update_skip("")
-                    restart_with_update()
+                import imgui_ui
+                if imgui_ui.show_yesno("업데이트", msg, _yes, _no):
+                    return
+            except Exception:
+                pass
+            try:
+                if messagebox.askyesno("업데이트", msg):
+                    _yes()
                 else:
-                    _save_update_skip(remote)
+                    _no()
             except Exception:
                 pass
         elif not _update_notified:
@@ -3650,11 +3532,17 @@ PAST_PATCHES = [
 ]
 
 def open_patch_notes_panel():
+    try:
+        import imgui_ui
+        if imgui_ui.open_patch():
+            return
+    except Exception:
+        pass
     patch = ctk.CTkToplevel(root)
     patch.title("패치노트")
     w, h = 460, 480; sw = patch.winfo_screenwidth(); sh = patch.winfo_screenheight()
     patch.geometry(f"{w}x{h}+{int((sw-w)/2)}+{int((sh-h)/2)}")
-    patch.attributes("-topmost", True); patch.focus_force(); patch.grab_set()
+    patch.attributes("-topmost", True); patch.focus_force()
     patch.configure(fg_color="#181825")
 
     ctk.CTkLabel(patch, text="최신 업데이트 (%s)" % PATCH_UPDATED_AT,
@@ -4160,10 +4048,7 @@ def _kmbox_setup_action(kind):
     """kind: driver | setup | manual — 백그라운드에서 zip확보 후 실행."""
     global _kmbox_setup_busy
     if _kmbox_setup_busy:
-        try:
-            messagebox.showinfo("뚱박스 셋팅", "이미 준비 중이에요. 잠시만 기다려 주세요.")
-        except Exception:
-            pass
+        _ui_alert("뚱박스 셋팅", "이미 준비 중이에요. 잠시만 기다려 주세요.")
         return
     _kmbox_setup_busy = True
     try:
@@ -4177,7 +4062,7 @@ def _kmbox_setup_action(kind):
             ok, info = ensure_kmbox_setup_pack()
             if not ok:
                 def _fail():
-                    messagebox.showerror("뚱박스 셋팅", str(info))
+                    _ui_alert("뚱박스 셋팅", str(info), "error")
                 if root:
                     root.after(0, _fail)
                 return
@@ -4201,12 +4086,12 @@ def _kmbox_setup_action(kind):
                     log_event(f"✅ 뚱박스 셋팅: {kind}")
                 except Exception:
                     pass
-                messagebox.showinfo("뚱박스 셋팅", msg)
+                _ui_alert("뚱박스 셋팅", msg)
             if root:
                 root.after(0, _ok)
         except Exception as e:
             def _err():
-                messagebox.showerror("뚱박스 셋팅", f"실패: {e}")
+                _ui_alert("뚱박스 셋팅", f"실패: {e}", "error")
             try:
                 if root:
                     root.after(0, _err)
@@ -4217,11 +4102,56 @@ def _kmbox_setup_action(kind):
 
     Thread(target=_work, daemon=True).start()
 
+def _kmbox_open_html_guide():
+    guide = _kmbox_find_file("설정도구_한글통역.html")
+    if guide:
+        try:
+            os.startfile(guide)
+            return
+        except Exception:
+            pass
+    try:
+        import webbrowser
+        webbrowser.open(_KMBOX_GUIDE_URL)
+    except Exception:
+        pass
+
+def _kmbox_open_adapters():
+    try:
+        subprocess.Popen(["ncpa.cpl"], shell=True)
+    except Exception as ex:
+        _ui_alert("뚱박스 셋팅", str(ex), "error")
+
+def _kmbox_open_manual():
+    path = _kmbox_find_file("랜설정_메뉴얼.html", "랜설정_메뉴얼.txt")
+    if path:
+        os.startfile(path)
+    else:
+        _ui_alert("뚱박스 셋팅", "메뉴얼 파일을 찾지 못했어요.")
+
+def _kmbox_open_chinese_tool():
+    def _work():
+        try:
+            ok, info = ensure_kmbox_setup_pack()
+            if not ok:
+                root.after(0, lambda: _ui_alert("뚱박스 셋팅", str(info), "error"))
+                return
+            launch_kmbox_official_setup_with_guide()
+        except Exception as ex:
+            root.after(0, lambda: _ui_alert("뚱박스 셋팅", str(ex), "error"))
+    Thread(target=_work, daemon=True).start()
+
 def open_kmbox_setup_translator_dlg():
     """설정도구 한글 통역 — 앱 안 창 (파일 없어도 항상 뜸)."""
     global root, _kmbox_translator_dlg
     if not root:
         return
+    try:
+        import imgui_ui
+        if imgui_ui.open_km_trans():
+            return
+    except Exception:
+        pass
     try:
         if _kmbox_translator_dlg and _kmbox_translator_dlg.winfo_exists():
             _kmbox_translator_dlg.lift()
@@ -4325,6 +4255,12 @@ def open_kmbox_korean_setup():
         pass
     box_ip = (ent_km_ip.get().strip() if 'ent_km_ip' in globals() and ent_km_ip else KM_IP) or "192.168.2.188"
     pc_ip = _kmbox_suggest_pc_ip(box_ip)
+    try:
+        import imgui_ui
+        if imgui_ui.open_km_ip(box_ip, pc_ip):
+            return
+    except Exception:
+        pass
     dlg = ctk.CTkToplevel(root)
     dlg.title("뚱박스 Net IP 설정 (한글)")
     dlg.attributes("-topmost", True)
@@ -4654,10 +4590,7 @@ def on_fw_check_click():
     """제어판 [확인] — 연결된 뚱USB 펌 버전 조회 (V 명령)."""
     if hw_var.get() in ("뚱박스", "KMBox"):
         log_event("⚠️ 펌 확인은 뚱USB 전용")
-        try:
-            messagebox.showinfo("펌 확인", "뚱USB(아두이노) 연결 상태에서만 확인할 수 있습니다.")
-        except Exception:
-            pass
+        _ui_alert("펌 확인", "뚱USB(아두이노) 연결 상태에서만 확인할 수 있습니다.")
         return
     if not ser or not getattr(ser, "is_open", False):
         # 연결 안 되어 있으면 한번 시도
@@ -4667,10 +4600,7 @@ def on_fw_check_click():
             pass
     if not ser or not getattr(ser, "is_open", False):
         log_event("❌ 펌 확인 실패 — 장치 미연결")
-        try:
-            messagebox.showerror("펌 확인", "뚱USB가 연결되지 않았습니다.")
-        except Exception:
-            pass
+        _ui_alert("펌 확인", "뚱USB가 연결되지 않았습니다.", "error")
         return
     ok, detail = check_fw_wdt()
     if ok:
@@ -4679,24 +4609,19 @@ def on_fw_check_click():
             lbl_ard.configure(text="● 펌 OK", text_color="#3fb950")
         except Exception:
             pass
-        try:
-            messagebox.showinfo("펌 확인", f"펌웨어 확인됨.\n응답: {detail}")
-        except Exception:
-            pass
+        _ui_alert("펌 확인", f"펌웨어 확인됨.\n응답: {detail}")
     else:
         msg = detail if detail else "(응답 없음)"
         log_event(f"⚠️ 펌 확인 실패 — {msg}")
-        try:
-            messagebox.showwarning(
-                "펌 확인",
-                "펌 버전 응답이 없습니다.\n\n"
-                "· Insert로 연결한 뒤 3~4초 기다렸다가 다시 [확인]\n"
-                "· IDE로 올린 코드에 V(버전조회) 명령이 있는지 확인\n"
-                "  (뚱힐러_github firmware/cs_firmware.ino 또는 최신 아두이노코드.txt)\n"
-                "· [펌업]으로 최신 hex 올리면 해결되는 경우가 많습니다.",
-            )
-        except Exception:
-            pass
+        _ui_alert(
+            "펌 확인",
+            "펌 버전 응답이 없습니다.\n\n"
+            "· Insert로 연결한 뒤 3~4초 기다렸다가 다시 [확인]\n"
+            "· IDE로 올린 코드에 V(버전조회) 명령이 있는지 확인\n"
+            "  (뚱힐러_github firmware/cs_firmware.ino 또는 최신 아두이노코드.txt)\n"
+            "· [펌업]으로 최신 hex 올리면 해결되는 경우가 많습니다.",
+            "warning",
+        )
 
 def on_fw_flash_click():
     """제어판 [펌업] — 시리얼 닫고 아두이노에 최신 hex 업로드."""
@@ -4706,25 +4631,25 @@ def on_fw_flash_click():
         return
     if hw_var.get() in ("뚱박스", "KMBox"):
         log_event("⚠️ 펌업은 뚱USB(아두이노) 전용입니다")
-        try:
-            messagebox.showinfo("펌업", "펌업은 뚱USB(아두이노) 전용입니다.\n장치를 뚱USB로 바꾼 뒤 다시 눌러주세요.")
-        except Exception:
-            pass
+        _ui_alert("펌업", "펌업은 뚱USB(아두이노) 전용입니다.\n장치를 뚱USB로 바꾼 뒤 다시 눌러주세요.")
         return
     if running:
-        try:
-            if messagebox.askyesno("펌업", "사냥 중입니다.\n정지한 뒤 펌웨어를 업로드할까요?"):
-                stop_everything("펌업 전 정지")
-            else:
-                return
-        except Exception:
+        def _go():
             stop_everything("펌업 전 정지")
-    else:
-        try:
-            if not messagebox.askyesno("펌업", "뚱USB(아두이노)에 최신 펌웨어를 구워 넣을까요?\n업로드 중엔 USB를 뽑지 마세요."):
-                return
-        except Exception:
-            pass
+            _begin_fw_flash()
+        _ui_yesno("펌업", "사냥 중입니다.\n정지한 뒤 펌웨어를 업로드할까요?", _go)
+        return
+    _ui_yesno(
+        "펌업",
+        "뚱USB(아두이노)에 최신 펌웨어를 구워 넣을까요?\n업로드 중엔 USB를 뽑지 마세요.",
+        _begin_fw_flash,
+    )
+
+def _begin_fw_flash():
+    global ser, running, SERIAL_PORT, _fw_flash_busy
+    if _fw_flash_busy:
+        log_event("⏳ 펌업 진행 중…")
+        return
 
     globals()['_fw_flash_busy'] = True
     try:
@@ -4782,18 +4707,26 @@ def on_fw_flash_click():
                     ev = _threading.Event()
 
                     def _ask():
+                        def _yes():
+                            box["ok"] = True
+                            ev.set()
+                        def _no():
+                            box["ok"] = False
+                            ev.set()
                         try:
-                            box["ok"] = bool(messagebox.askokcancel(
+                            _ui_yesno(
                                 "펌업 재시도",
                                 "자동 펌업이 실패했습니다.\n\n"
                                 "【옛 워치독 WDT1/2 펌】이면 1200 자동리셋이 안 됩니다.\n"
-                                "USB 케이블을 뽑았다 다시 꽂은 뒤 【확인】을 눌러주세요.\n"
+                                "USB 케이블을 뽑았다 다시 꽂은 뒤 【예】를 눌러주세요.\n"
                                 "(리셋 버튼 없어도 됩니다 · 20초 안에 재시도)\n\n"
                                 "WDT3/4 또는 새 펌이면 위만으로 됩니다.",
-                            ))
+                                _yes,
+                                _no,
+                            )
                         except Exception:
                             box["ok"] = True
-                        ev.set()
+                            ev.set()
 
                     try:
                         root.after(0, _ask)
@@ -4837,24 +4770,18 @@ def on_fw_flash_click():
                         lbl_ard.configure(text="● 펌 OK", text_color="#3fb950")
                     except Exception:
                         pass
-                    try:
-                        messagebox.showinfo(
-                            "펌업 완료",
-                            f"업로드 성공 + 펌 확인됨.\n응답: {wdt_detail}",
-                        )
-                    except Exception:
-                        pass
+                    _ui_alert(
+                        "펌업 완료",
+                        f"업로드 성공 + 펌 확인됨.\n응답: {wdt_detail}",
+                    )
                 else:
                     # avrdude 성공이면 펌은 들어간 것 — V응답은 없어도 실패로 치지 않음
                     log_event(f"✅ 펌업 완료 — {msg} (확인응답은 나중에 [확인]으로)")
-                    try:
-                        messagebox.showinfo(
-                            "펌업 완료",
-                            "업로드 성공했습니다.\n"
-                            "원하면 몇 초 뒤 [확인]을 눌러 펌 버전을 보세요.",
-                        )
-                    except Exception:
-                        pass
+                    _ui_alert(
+                        "펌업 완료",
+                        "업로드 성공했습니다.\n"
+                        "원하면 몇 초 뒤 [확인]을 눌러 펌 버전을 보세요.",
+                    )
             else:
                 log_event(f"❌ 펌업 실패 — {msg}")
                 try:
@@ -4862,7 +4789,7 @@ def on_fw_flash_click():
                 except Exception:
                     pass
                 try:
-                    messagebox.showerror("펌업 실패", msg)
+                    _ui_alert("펌업 실패", msg, "error")
                 except Exception:
                     pass
         try:
@@ -5293,6 +5220,12 @@ def _apply_window_height():
     try:
         if not root or not root.winfo_exists() or _ui_busy():
             return
+        try:
+            import imgui_ui
+            if imgui_ui.is_active():
+                return
+        except Exception:
+            pass
         root.update_idletasks()
         w = root.winfo_width()
         if w < 120:
@@ -5342,11 +5275,17 @@ def _set_taskmgr_title(win, title):
         pass
 
 root = ctk.CTk()
-root.geometry(f"{saved_win_w}x380+0+0")
-root.attributes("-topmost", True)
+root.withdraw()
+root.geometry("1x1+-32000+-32000")
+root.attributes("-topmost", False)
 root.after(400, sync_window_height)
-root.configure(fg_color="#141420") 
+root.configure(fg_color="#141420")
 root.overrideredirect(True)
+try:
+    import imgui_ui
+    imgui_ui._cloak_stray_windows()
+except Exception:
+    pass
 _set_taskmgr_title(root, "sooplive client")
 
 title_bar = ctk.CTkFrame(root, height=24, corner_radius=0, fg_color="#141420")
@@ -5386,6 +5325,18 @@ title_bar.bind("<ButtonPress-1>", start_move); title_bar.bind("<ButtonRelease-1>
 title_lbl.bind("<ButtonPress-1>", start_move); title_lbl.bind("<ButtonRelease-1>", stop_move); title_lbl.bind("<B1-Motion>", do_move)
 
 def keep_on_top():
+    try:
+        import imgui_ui
+        if imgui_ui.is_active():
+            try:
+                imgui_ui._cloak_tk_root(root)
+            except Exception:
+                pass
+            if root:
+                root.after(2000, keep_on_top)
+            return
+    except Exception:
+        pass
     try:
         if root and root.winfo_exists() and not _ui_busy():
             root.attributes("-topmost", True)  # lift() 제거: 드롭다운 포커스 뺏김 방지
@@ -5947,12 +5898,13 @@ lbl_status = ctk.CTkLabel(root, text="💤 대기 중", text_color="#f38ba8", fo
 lbl_status.pack(pady=0, ipady=0)
 frame_buff = ctk.CTkFrame(root, fg_color="#181825", corner_radius=5)
 frame_buff.pack(pady=0, padx=2, fill='x')
-lbl_buff = ctk.CTkLabel(frame_buff, text="✨ 버프 대기 ✨\n대기중", text_color="#6c7086", font=('Malgun Gothic', 11, 'bold'))
+lbl_buff = ctk.CTkLabel(frame_buff, text="", text_color="#6c7086", font=('Malgun Gothic', 11, 'bold'))
 lbl_buff.pack(pady=0)
 lbl_saved_coord = ctk.CTkLabel(root, text="", text_color="#a6e3a1", font=('Malgun Gothic', 10, 'bold'))
 
 # UDP 모듈
 UDP_CONFIG_FILE = "udp_config.json"
+UDP_DISCOVER_PORT = 9998
 udp_target_ip = "192.168.0.100"
 if os.path.exists(UDP_CONFIG_FILE):
     try:
@@ -5971,6 +5923,40 @@ def get_my_ip():
         return ip
     except: return "..."
 
+def broadcast_healer_ip():
+    """같은 공유기 안 격수에 힐러 IP 알려줌."""
+    ip = get_my_ip()
+    if not ip or ip in ("...", "???"):
+        log_event("📡 격수연결 실패 — 내IP 없음")
+        return
+    msg = json.dumps({"t": "ddong_healer", "ip": ip}, ensure_ascii=False).encode("utf-8")
+    targets = ["255.255.255.255", "127.0.0.1"]
+    parts = str(ip).split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        targets.append(".".join(parts[:3] + ["255"]))
+        targets.append(ip)
+    ok = 0
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        s.settimeout(0.5)
+        for _ in range(3):
+            for t in targets:
+                try:
+                    s.sendto(msg, (t, UDP_DISCOVER_PORT))
+                    ok += 1
+                except Exception:
+                    pass
+            time.sleep(0.05)
+        s.close()
+    except Exception as e:
+        log_event("📡 격수연결 실패 — %s" % e)
+        return
+    if ok:
+        log_event("📡 격수연결 신호 보냄 (%s)" % ip)
+    else:
+        log_event("📡 격수연결 전송 실패")
+
 frame_ontop_ctrl = ctk.CTkFrame(root, fg_color="#313244", corner_radius=6)
 frame_ontop_ctrl.pack(pady=1, padx=2, fill='x')
 
@@ -5978,8 +5964,9 @@ row1 = ctk.CTkFrame(frame_ontop_ctrl, fg_color="transparent"); row1.pack(fill='x
 ctk.CTkLabel(row1, text="📡", text_color="#f9e2af", font=('', 9)).pack(side='left')
 udp_ip_var = ctk.StringVar(value=udp_target_ip)
 udp_ip_entry = ctk.CTkEntry(row1, textvariable=udp_ip_var, width=78, height=22, fg_color="#1e1e2e", text_color="#cdd6f4", font=('Consolas', 9))
-udp_ip_entry.pack(side='left', padx=2)
-ctk.CTkButton(row1, text="저장", width=32, height=22, fg_color="#800020", hover_color="#9e1a3a", font=('Malgun Gothic', 8, 'bold'), command=save_udp_config).pack(side='left', padx=1)
+# ImGui 메인에선 안 씀 — 숨김 유지용 변수만 남김
+udp_ip_entry.pack_forget()
+ctk.CTkButton(row1, text="격수연결", width=64, height=22, fg_color="#238636", hover_color="#2ea043", font=('Malgun Gothic', 8, 'bold'), command=broadcast_healer_ip).pack(side='left', padx=1)
 
 row2 = ctk.CTkFrame(frame_ontop_ctrl, fg_color="transparent"); row2.pack(fill='x', padx=2, pady=(0,3))
 lbl_my_ip = ctk.CTkLabel(row2, text=f"내IP:{get_my_ip()}", text_color="#a6e3a1", font=('Consolas', 8, 'bold'))
@@ -6383,8 +6370,15 @@ def udp_listener():
 is_gui_hidden = False
 def toggle_gui(e=None):
     global is_gui_hidden
-    if is_gui_hidden: root.deiconify(); is_gui_hidden = False
-    else: root.withdraw(); is_gui_hidden = True
+    is_gui_hidden = not is_gui_hidden
+    try:
+        import imgui_ui
+        imgui_ui.set_hidden(is_gui_hidden)
+    except Exception:
+        if is_gui_hidden:
+            root.withdraw()
+        else:
+            root.deiconify()
 
 def _install_hotkeys():
     """창이 뜬 뒤에 훅 등록. 게임 켜진 채로 훅이 막히면 mainloop 전에 멈추던 문제 방지."""
@@ -6431,4 +6425,14 @@ resize_grip.bind("<B1-Motion>", _do_resize)
 resize_grip.bind("<ButtonRelease-1>", _end_resize)
 root.after(50, _install_hotkeys)
 root.after(300, sync_window_height)
-root.mainloop()
+try:
+    import imgui_ui
+    imgui_ui.run_main(globals())
+except Exception:
+    import traceback
+    traceback.print_exc()
+    try:
+        root.deiconify()
+    except Exception:
+        pass
+    root.mainloop()

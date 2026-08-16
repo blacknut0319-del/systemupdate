@@ -88,7 +88,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-15 16:06"
+PATCH_UPDATED_AT = "2026-08-16 13:56"
 SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "sooplive service"
@@ -151,12 +151,15 @@ def _sync_attacker_from_new():
 
 TARGET_IP = "192.168.0.100"
 TARGET_PORT = 9999
+DISCOVER_PORT = 9998
 HP_ROI = (558, 878, 304, 5)
 HP_100_REF = None
 WIN_W = 340
 WIN_H = 420
 _WIN_MIN_W, _WIN_MAX_W = 240, 520
 _WIN_MIN_H, _WIN_MAX_H = 120, 900
+STREAM_WIN_W = 800
+STREAM_WIN_H = 600
 END_BERT_ON = False
 
 if os.path.exists(CONFIG_FILE):
@@ -173,6 +176,12 @@ if os.path.exists(CONFIG_FILE):
         if "win_h" in cfg:
             try: WIN_H = max(_WIN_MIN_H, min(_WIN_MAX_H, int(cfg["win_h"])))
             except Exception: pass
+        if "stream_win_w" in cfg and "stream_win_h" in cfg:
+            try:
+                STREAM_WIN_W = max(320, min(1920, int(cfg["stream_win_w"])))
+                STREAM_WIN_H = max(240, min(1080, int(cfg["stream_win_h"])))
+            except Exception:
+                pass
         if "end_bert" in cfg:
             END_BERT_ON = bool(cfg.get("end_bert"))
     except: pass
@@ -196,7 +205,18 @@ _MB_YESNO = 0x00000004
 _MB_TOPMOST = 0x00040000
 _IDYES = 6
 
-def _show_msgbox(kind, title, message):
+def _show_msgbox(kind, title, message, on_yes=None, on_no=None):
+    try:
+        import imgui_attacker
+        import imgui_ui
+        if imgui_attacker.is_active():
+            if kind == "yesno":
+                if imgui_ui.show_yesno(title, message, on_yes, on_no):
+                    return None
+            elif imgui_ui.show_alert(title, message):
+                return None
+    except Exception:
+        pass
     try:
         style = _MB_TOPMOST
         if kind == "info":
@@ -209,7 +229,12 @@ def _show_msgbox(kind, title, message):
             style |= _MB_YESNO | _MB_ICONINFORMATION
         ret = ctypes.windll.user32.MessageBoxW(0, str(message), str(title), style)
         if kind == "yesno":
-            return ret == _IDYES
+            ok = ret == _IDYES
+            if ok and on_yes:
+                on_yes()
+            elif (not ok) and on_no:
+                on_no()
+            return ok
         return None
     except Exception:
         return None
@@ -603,16 +628,21 @@ def check_for_update(force=False, manual=False):
         _set_lbl("⚠️업데이트있음", "#f9e2af")
         if manual:
             try:
-                if _show_msgbox(
+                def _yes():
+                    _save_update_skip("")
+                    restart_with_update()
+
+                def _no():
+                    _save_update_skip(remote)
+
+                _show_msgbox(
                     "yesno",
                     "업데이트",
                     "업데이트가 있습니다.\n\n서버: %s\n현재: %s\n\n업데이트하시겠습니까?"
                     % (remote, PATCH_UPDATED_AT),
-                ):
-                    _save_update_skip("")
-                    restart_with_update()
-                else:
-                    _save_update_skip(remote)
+                    on_yes=_yes,
+                    on_no=_no,
+                )
             except Exception:
                 pass
         elif not _update_notified:
@@ -724,6 +754,13 @@ _set_taskmgr_title(root, SOOPLIVE_SERVICE_TITLE)
 def _force_show_root(_e=None):
     """일부 PC에서 overrideredirect 창이 안 그려지는 것 방지. 뚱힐러와 같이 맵된 뒤에 표시."""
     try:
+        import imgui_attacker
+        if imgui_attacker.is_active():
+            imgui_attacker._cloak_tk_root(root)
+            return
+    except Exception:
+        pass
+    try:
         root.geometry("%dx%d+80+80" % (WIN_W, WIN_H))
         root.deiconify()
         root.lift()
@@ -794,6 +831,12 @@ def _end_resize(event):
     save_cfg()
 
 def auto_resize_height():
+    try:
+        import imgui_attacker
+        if imgui_attacker.is_active():
+            return
+    except Exception:
+        pass
     if root and root.winfo_exists():
         req = root.winfo_reqheight()
         cur = root.winfo_height()
@@ -853,6 +896,8 @@ def save_cfg():
     cfg["hp_roi"] = tuple(int(v) for v in HP_ROI)
     cfg["win_w"] = WIN_W
     cfg["win_h"] = WIN_H
+    cfg["stream_win_w"] = STREAM_WIN_W
+    cfg["stream_win_h"] = STREAM_WIN_H
     cfg["end_bert"] = bool(end_bert_var.get())
     if HP_100_REF is not None:
         cfg["hp_100_ref"] = HP_100_REF
@@ -1088,10 +1133,21 @@ def toggle_stream_send():
     except Exception:
         lbl_status.config(text="전송 실패", fg="#ef4444")
 
+def _remember_stream_win_size():
+    global STREAM_WIN_W, STREAM_WIN_H
+    try:
+        if stream_view_win and stream_view_win.winfo_exists():
+            STREAM_WIN_W = max(320, min(1920, int(stream_view_win.winfo_width())))
+            STREAM_WIN_H = max(240, min(1080, int(stream_view_win.winfo_height())))
+            save_cfg()
+    except Exception:
+        pass
+
 def close_stream_view():
     global stream_view_active, stream_view_win, stream_view_sock, _stream_alt_held
     _stream_alt_held = False
     stream_view_active = False
+    _remember_stream_win_size()
     try:
         if stream_view_sock:
             stream_view_sock.close()
@@ -1110,13 +1166,18 @@ def toggle_stream_view():
         return
     stream_view_win = tk.Toplevel(root)
     stream_view_win.title(SOOPLIVE_STREAM_TITLE)
-    stream_view_win.geometry("800x600")
+    stream_view_win.geometry("%dx%d" % (STREAM_WIN_W, STREAM_WIN_H))
     stream_view_win.resizable(True, True)
     stream_view_win.attributes("-topmost", True)
     stream_view_win.configure(bg="#0f172a")
     _set_taskmgr_title(stream_view_win, SOOPLIVE_STREAM_TITLE)
     _apply_win_icon(stream_view_win)
     stream_view_win.protocol("WM_DELETE_WINDOW", lambda: (close_stream_view(), btn_stream_view.config(text="📺 쫄화면", bg="#6366f1")))
+    try:
+        import imgui_ui
+        imgui_ui._detach_tk_toplevel(stream_view_win)
+    except Exception:
+        pass
 
     stream_view_label = tk.Label(
         stream_view_win, bg="#0f172a", fg="#475569",
@@ -1230,7 +1291,11 @@ def open_overlay():
              font=("Malgun Gothic",13,"bold")).place(x=sw//2, y=20, anchor="n")
     ov.bind("<Escape>", lambda e: ov.destroy())
 
+LAST_PREVIEW_ARR = None
+
 def update_preview(arr):
+    global LAST_PREVIEW_ARR
+    LAST_PREVIEW_ARR = arr
     try:
         h, w = arr.shape[:2]
         pw = min(w*2, 200)
@@ -1348,6 +1413,66 @@ def sender():
 
 threading.Thread(target=sender, daemon=True).start()
 
+def _apply_healer_ip(ip):
+    ip = (ip or "").strip()
+    if not ip:
+        return
+    try:
+        if ip_var.get().strip() == ip:
+            try:
+                lbl_status.config(text="힐러연결됨", fg="#10b981")
+            except Exception:
+                pass
+            return
+        ip_var.set(ip)
+        save_cfg()
+        try:
+            lbl_status.config(text="힐러자동연결", fg="#10b981")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+def discover_listener():
+    """힐러 [격수연결] 신호 수신 → IP 자동 입력."""
+    while running:
+        sock_d = None
+        try:
+            sock_d = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock_d.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock_d.bind(("0.0.0.0", DISCOVER_PORT))
+            sock_d.settimeout(1.0)
+            while running:
+                try:
+                    data, _addr = sock_d.recvfrom(1024)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                try:
+                    msg = json.loads(data.decode("utf-8", errors="ignore"))
+                except Exception:
+                    continue
+                if not isinstance(msg, dict) or msg.get("t") != "ddong_healer":
+                    continue
+                hip = str(msg.get("ip") or "").strip()
+                if hip:
+                    try:
+                        root.after(0, lambda p=hip: _apply_healer_ip(p))
+                    except Exception:
+                        _apply_healer_ip(hip)
+        except Exception:
+            time.sleep(1.0)
+        finally:
+            try:
+                if sock_d:
+                    sock_d.close()
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+threading.Thread(target=discover_listener, daemon=True).start()
+
 import traceback
 def on_close():
     global running
@@ -1378,14 +1503,23 @@ def _install_pageup_hotkey():
         except Exception:
             continue
 
-_force_show_root()
-root.after(200, _force_show_root)
 root.after(50, _install_pageup_hotkey)
-
 try:
-    root.mainloop()
+    root.withdraw()
+except Exception:
+    pass
+try:
+    import imgui_attacker
+    imgui_attacker.run_main(globals())
 except Exception as e:
     print("GUI error: %s" % e)
     traceback.print_exc()
+    _force_show_root()
+    root.after(200, _force_show_root)
+    try:
+        root.mainloop()
+    except Exception as e2:
+        print("GUI error: %s" % e2)
+        traceback.print_exc()
 running = False; sock.close()
 keyboard.unhook_all()
