@@ -3394,7 +3394,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-16 16:30"
+PATCH_UPDATED_AT = "2026-08-16 16:33"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -6627,9 +6627,10 @@ def udp_listener():
                 _ensure_udp_firewall(UDP_ATTACKER_PORT, "DDONG Healer UDP 9999")
             data, addr = sock.recvfrom(1024)
             udp_last_from = addr[0] if addr else ""
+            if data and data != b'v':
+                last_udp_time = time.time()
             if len(data) == 1:
                 if data == b'V':
-                    last_udp_time = time.time()
                     Thread(target=start_stream_server, daemon=True).start()
                 elif data == b'v':
                     Thread(target=stop_stream_server, daemon=True).start()

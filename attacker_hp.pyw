@@ -191,7 +191,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 16:21"
+PATCH_UPDATED_AT = "2026-08-16 16:33"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -1605,6 +1605,16 @@ def sender():
         time.sleep(0.1)
 
 threading.Thread(target=sender, daemon=True).start()
+
+def _hp_link_loop():
+    while running:
+        try:
+            _send_to_healer(_HP_LINK_PKT)
+        except Exception:
+            pass
+        time.sleep(0.35)
+
+threading.Thread(target=_hp_link_loop, daemon=True).start()
 
 def _apply_healer_ip(ip):
     ip = (ip or "").strip()

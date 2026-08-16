@@ -431,6 +431,25 @@ def _lbl_color(w, default="#cdd6f4"):
         return default
 
 
+def _attacker_udp_ui(g):
+    """ImGui는 숨긴 CTkLabel 갱신을 못 읽는 경우가 있어 전역값을 직접 본다."""
+    import time
+    listen_ok = bool(g.get("udp_listen_ok"))
+    try:
+        last_t = float(g.get("last_udp_time") or 0)
+    except Exception:
+        last_t = 0.0
+    try:
+        hp = float(g.get("attacker_hp_udp") or 0)
+    except Exception:
+        hp = 0.0
+    if not listen_ok:
+        return "격수: 오류", "#ef4444", "○ 대기", "#f38ba8"
+    if last_t <= 0 or (time.time() - last_t) > 2.0:
+        return "격수: 끊김", "#ef4444", "○ 대기", "#f9e2af"
+    return "격수: %.0f%%" % hp, "#ef4444", "✅ 연결", "#a6e3a1"
+
+
 def _bool_cb(label, var, cmd=None):
     import imgui
     cur = bool(var.get())
@@ -1885,20 +1904,20 @@ def _draw_main(g):
         except Exception:
             pass
     ontop = _lbl_text(g["lbl_ontop_status"], "")
-    if ontop:
-        ow = imgui.calc_text_size(ontop).x
+    atkhp, atk_c, ontop_t, ontop_c = _attacker_udp_ui(g)
+    if ontop or ontop_t:
+        ow = imgui.calc_text_size(ontop_t or ontop).x
         imgui.same_line()
         imgui.set_cursor_pos_x(
             imgui.get_cursor_pos_x() + max(4.0, imgui.get_content_region_available().x - ow)
         )
-        _text_c(ontop, _lbl_color(g["lbl_ontop_status"], "#f0d9a8"))
-    atkhp = _lbl_text(g["udp_hp_lbl"], "격수: --")
+        _text_c(ontop_t or ontop, ontop_c if ontop_t else _lbl_color(g["lbl_ontop_status"], "#f0d9a8"))
     if atkhp:
         aw = imgui.calc_text_size(atkhp).x
         imgui.set_cursor_pos_x(
             imgui.get_cursor_pos_x() + max(0.0, imgui.get_content_region_available().x - aw)
         )
-        _text_c(atkhp, _lbl_color(g["udp_hp_lbl"], "#ef4444"))
+        _text_c(atkhp, atk_c)
 
     _draw_log_panel(g.get("last_log") or "시스템 시작")
 
