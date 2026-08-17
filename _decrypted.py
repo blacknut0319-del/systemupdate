@@ -2544,6 +2544,12 @@ def _hp_fill_masks(R, G, B):
     grn = (G > 70) & (G > R + 30) & (G > B + 30)   # 독(초록)바
     return red, grn
 
+
+def _hp_yellow_mask(R, G, B):
+    """노란 HP바/선택테두리 검출 — R·G 높고 B 낮음(따뜻한 노랑).
+    밝은 선택노랑~어두운 노랑 전부 잡고, 검정(빈칸, R<40)만 자동 제외."""
+    return (R > 120) & (G > 80) & (B < R * 0.8) & (B < G * 0.8)
+
 def _hp_bar_pixels(R, G, B):
     """호환용 — 빨강|초록(독) 채움 마스크."""
     red, grn = _hp_fill_masks(R, G, B)
@@ -2961,18 +2967,20 @@ def _party_name_tag_stats(frame, roi):
         return None
 
 def party_name_tag_present(frame, roi):
-    """아이콘(초상화) 자리에 실제 캐릭터 아이콘이 있는지 확인.
-    아이콘 슬롯 뒤판은 검정으로 고정된 UI 요소라서, 게임 야외배경(항상 따뜻한 톤)이
-    비쳐 보이는 빈 슬롯과 검은 픽셀 비율로 뚜렷이 구분됨.
-    ROI 미설정(0,0,0,0)이면 검사 생략(하위호환 — True).
-    ⚠ 임계값(ICON_BLACK_PCT_THRESHOLD)은 실측 진단수치로 보정 예정(진단표시 우선)."""
+    """아이콘(초상화) 자리에 실제 파티원(노랑 HP바/선택)이 있는지 확인.
+    노랑(밝은 선택~어두운 노랑) 있으면 파티원 있음, 검정(빈칸)만 있으면 없음.
+    ROI 미설정(0,0,0,0)이면 검사 생략(하위호환 — True)."""
     if roi[0] == 0 and roi[2] == 0:
         return True
-    stats = _party_name_tag_stats(frame, roi)
-    if stats is None:
+    try:
+        arr = frame[roi[1]:roi[3], roi[0]:roi[2]]
+        if arr.size == 0:
+            return False
+        R = arr[:, :, 0].astype(int); G = arr[:, :, 1].astype(int); B = arr[:, :, 2].astype(int)
+        ylw = _hp_yellow_mask(R, G, B)
+        return int(ylw.sum()) >= max(4, int(R.size * 0.003))
+    except Exception:
         return False
-    black, total, _r, _g, _b = stats
-    return total > 0 and (black / total) >= ICON_BLACK_PCT_THRESHOLD
 
 def party_slot_active(frame, roi, pi=None):
     """파티 슬롯에 HP바 존재 여부 — 빈칸·사망(바 없음/회색) 힐 차단.
@@ -3443,7 +3451,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-17 14:07"
+PATCH_UPDATED_AT = "2026-08-17 16:01"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"

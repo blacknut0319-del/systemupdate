@@ -1349,7 +1349,14 @@ def _admin_refresh_live(g):
             if stats is not None:
                 black, t, ar, ag, ab = stats
                 black_pct = (black / t * 100) if t else 0
-                present = t > 0 and (black / t) >= thr
+                present_fn = g.get("party_name_tag_present")
+                if present_fn:
+                    try:
+                        present = present_fn(frame, nrois[pi])
+                    except Exception:
+                        present = t > 0 and (black / t) >= thr
+                else:
+                    present = t > 0 and (black / t) >= thr
                 st["status"] = "🖼️있음" if present else "🖼️없음"
                 st["status_col"] = "#a6e3a1" if present else "#6c7086"
                 st["diag"] = "검정%.0f%% B%s/T%s RGB%s,%s,%s" % (black_pct, black, t, ar, ag, ab)
