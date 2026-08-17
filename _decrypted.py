@@ -2610,6 +2610,14 @@ def _hp_bar_band_cols(arr):
         return grn_cols, w, True
     return 0, w, False        # 빈칸·사망·게임배경(바 없음)
 
+def _tighten_fill_masks(R, G, B):
+    """ROI 타이트닝 전용 — 비율 기반(휴 근사)이라 렌더링 밝기 차이에 강건.
+    HP 읽기용 _hp_fill_masks보다 관대(하한 40·비율 1.3)해서 어두운 빨강바도 놓치지 않음."""
+    red = (R > 40) & (R * 100 > G * 130) & (R * 100 > B * 130)
+    grn = (G > 40) & (G * 100 > R * 130) & (G * 100 > B * 130)
+    return red, grn
+
+
 def _tighten_party_roi_from_drag(x1, y1, x2, y2):
     """드래그 박스 안에서 빨간(또는 독 초록) HP 막대만 추출해 타이트한 ROI 반환."""
     w, h = max(x2 - x1, 1), max(y2 - y1, 1)
@@ -2624,7 +2632,7 @@ def _tighten_party_roi_from_drag(x1, y1, x2, y2):
     R = arr[:, :, 0].astype(int)
     G = arr[:, :, 1].astype(int)
     B = arr[:, :, 2].astype(int)
-    red, grn = _hp_fill_masks(R, G, B)
+    red, grn = _tighten_fill_masks(R, G, B)
     mask = red if int(red.sum()) >= int(grn.sum()) else grn
     rows = mask.sum(axis=1)
     if int(rows.max()) < 2:
@@ -3435,7 +3443,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-17 03:20"
+PATCH_UPDATED_AT = "2026-08-17 09:36"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
