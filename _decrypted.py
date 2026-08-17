@@ -14,7 +14,7 @@ def _detect_app_dir():
     return cwd
 
 APP_DIR = _detect_app_dir()
-SOOPLIVE_CLIENT_LAUNCHER = "sooplive client.exe"
+SOOPLIVE_CLIENT_LAUNCHER = "sooplive client"
 SOOPLIVE_CLIENT_TITLE = "soop client"
 
 def _sync_healer_launcher():
@@ -3443,7 +3443,7 @@ def do_self_heal(self_hp=None, end_delay=0.8, mp_low=False, use_strong=False):
     execute_keys(heal_action_keys(hb_n, sl_n, double=True), ed, key_gap=gap_f1)
     return "힐"
 
-PATCH_UPDATED_AT = "2026-08-17 10:11"
+PATCH_UPDATED_AT = "2026-08-17 14:05"
 _VERSION_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/version.txt"
 _LOADER_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/ddong_loader.py"
 _DATA_URL = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/data.txt"
@@ -3537,7 +3537,7 @@ def _ensure_healer_launcher():
     except Exception:
         pass
     try:
-        data = _github_download("sooplive client.exe")
+        data = _github_download("sooplive client")
         if len(data) > 50000:
             with open(path, "wb") as f:
                 f.write(data)
