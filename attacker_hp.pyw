@@ -8,7 +8,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATTACKER_MAIN = os.path.join(SCRIPT_DIR, "attacker_hp.pyw")
 UPDATE_LOG_FILE = os.path.join(SCRIPT_DIR, "attacker_update.log")
 _BOOT_FLAG = os.path.join(SCRIPT_DIR, "attacker_boot.flag")
-SOOPLIVE_SERVICE_LAUNCHER = "sooplive service.exe"
+SOOPLIVE_SERVICE_LAUNCHER = "sooplive service"
 
 def _bootstrap_sync_launchers():
     """hp_start.bat 은 sync_launchers 를 안 받으므로 reexec 전에 GitHub에서 받는다."""
@@ -194,7 +194,7 @@ def _sys_excepthook(typ, val, tb):
 
 sys.excepthook = _sys_excepthook
 
-PATCH_UPDATED_AT = "2026-08-16 19:39"
+PATCH_UPDATED_AT = "2026-08-17 14:07"
 SOOPLIVE_STREAM_TITLE = "sooplive-미리보기"
 SOOPLIVE_SERVICE_TITLE = "soop service"
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "udp_config.json")
@@ -576,7 +576,7 @@ def _ensure_service_launcher():
     if _valid_launcher(path):
         return path
     try:
-        data = _github_download("sooplive service.exe")
+        data = _github_download("sooplive service")
         if len(data) > 50000:
             with open(path, "wb") as f:
                 f.write(data)

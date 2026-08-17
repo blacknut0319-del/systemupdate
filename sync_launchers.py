@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""pythonw.exe 복사본 → sooplive client.exe / sooplive service.exe (작업관리자 프로세스명용)."""
+"""pythonw.exe 복사본 → sooplive client / sooplive service (작업관리자 프로세스명용, .exe 없음)."""
 import os
 import shutil
 import struct
@@ -9,8 +9,8 @@ import urllib.parse
 import urllib.request
 import ssl
 
-CLIENT = "sooplive client.exe"
-SERVICE = "sooplive service.exe"
+CLIENT = "sooplive client"
+SERVICE = "sooplive service"
 LOCAL_DIR_NAME = "ddong_launchers"
 LANG_TABLE = "040904b0"
 GH_RAW = "https://raw.githubusercontent.com/blacknut0319-del/systemupdate/main/"
