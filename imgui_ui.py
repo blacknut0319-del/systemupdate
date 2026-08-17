@@ -17,8 +17,19 @@ _ov_win = None
 _ov_impl = None
 _ov_ctx = None
 _ui_dpi = 1.0
-# 예전 CTk Collapsible 과 동일: 옵션/힐 접힘, 버프만 펼침
-_sections = {"opt": False, "buff": True, "heal": False}
+# Collapsible 섹션 상태 — 마지막 펼침/접힘 기억 (ui_state.json). 기본은 전부 접힘.
+def _load_sections():
+    try:
+        with open(os.path.join(os.getcwd(), "ui_state.json"), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            return {"opt": bool(d.get("opt", False)), "buff": bool(d.get("buff", False)), "heal": bool(d.get("heal", False))}
+    except Exception:
+        pass
+    return {"opt": False, "buff": False, "heal": False}
+
+
+_sections = _load_sections()
 _log_follow = True
 
 _overlay = {
@@ -798,6 +809,11 @@ def _collapsible(title, key):
     if _btn("%s  %s" % (arrow, title), "#313244", "#45475a", width=-1, height=22):
         open_ = not open_
         _sections[key] = open_
+        try:
+            with open(os.path.join(os.getcwd(), "ui_state.json"), "w", encoding="utf-8") as f:
+                json.dump(_sections, f)
+        except Exception:
+            pass
         _win_h = 0
     return open_
 
